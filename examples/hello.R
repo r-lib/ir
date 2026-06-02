@@ -1,8 +1,8 @@
 #!/usr/bin/env -S ir run
 # dependencies:
-#   dplyr>=1.0
-#   tidyr
-#   secretbase==1.2
+#   - dplyr>=1.0
+#   - tidyr
+#   - secretbase==1.2
 # R: ">= 4.0"
 
 library(dplyr)
