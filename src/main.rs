@@ -144,9 +144,13 @@ fn resolve_library(
 
 /// Phase 2 — run `script` in a vanilla R session pointed at `library`.
 ///
-/// Setting both `R_LIBS_USER` and `R_LIBS_SITE` to our library overrides R's
-/// default user and site libraries, yielding `.libPaths() == [library, base]`.
-/// Returns the script's exit code.
+/// The script runs as an ordinary `Rscript script.R` — its `.Renviron`,
+/// `.Rprofile` and site files are read, so it sees the user's normal R
+/// environment. The resolved library is injected via `R_LIBS`, which is
+/// *prepended* to `.libPaths()`: resolved dependencies take precedence, while
+/// the user's other libraries remain available. (`R_LIBS` is used rather than
+/// `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would override
+/// the latter.) Returns the script's exit code.
 fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
@@ -154,10 +158,10 @@ fn run_script(
     script_args: &[String],
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(rscript);
-    cmd.arg("--vanilla").arg(script).args(script_args);
+    cmd.arg(script).args(script_args);
 
     if let Some(lib) = library {
-        cmd.env("R_LIBS_USER", lib).env("R_LIBS_SITE", lib);
+        cmd.env("R_LIBS", lib);
     }
 
     let status = cmd.status().map_err(|e| spawn_error(rscript, e))?;

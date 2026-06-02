@@ -2,7 +2,7 @@
 
 A [uv](https://docs.astral.sh/uv/)-style front-end to R. Write a self-contained
 R script that declares its own dependencies in a comment header, and `ir` will
-resolve them, build an isolated package library, and run the script against it.
+resolve them, build a dedicated package library, and run the script against it.
 
 ```r
 #!/usr/bin/env -S ir run
@@ -36,11 +36,12 @@ $ ./script.R
    - **renv** (`renv::use`) installs the packages into renv's package cache and
      materialises that path as a light-weight library of **symlinks** into the
      cache. The library lives in our cache, not R's temp dir, so it persists.
-2. **Run** (a fresh, isolated R session).
-   - The script runs under `Rscript --vanilla` with `R_LIBS_USER` and
-     `R_LIBS_SITE` pointed at the materialised library, so `.libPaths()` is
-     exactly `[that library, base R]` — nothing leaks in from the user's
-     personal or site libraries.
+2. **Run** (an ordinary R session).
+   - The script runs as `Rscript script.R`, so it sees the user's normal R
+     environment — `.Renviron`, `.Rprofile` and site files are all read.
+   - The materialised library is injected via `R_LIBS`, which **prepends** it to
+     `.libPaths()`: the resolved dependencies take precedence, while the user's
+     other libraries remain available as a fallback.
 
 Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
