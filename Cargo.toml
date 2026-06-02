@@ -2,5 +2,12 @@
 name = "ir"
 version = "0.1.0"
 edition = "2021"
+description = "A uv-style front-end to R: run self-contained R scripts with inline dependencies."
+license = "MIT"
 
-[dependencies]
+[[bin]]
+name = "ir"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
