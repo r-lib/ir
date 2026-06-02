@@ -79,16 +79,19 @@ ir_check_r_version <- function(spec, current = getRversion()) {
 # Translate one dependency spec into a pak package reference:
 #   `pkg`         -> `pkg`         (latest)
 #   `pkg>=1.0`    -> `pkg@>=1.0`   (lower bound; solver picks)
-# Native pak refs such as `pkg@1.0`, `pkg@>=1.0`, and GitHub/URL refs are
-# passed through untouched. Non-pak syntax such as `pkg<=1.2` is also passed to
-# pak unchanged, so pak remains the source of truth for supported refs.
+#   `pkg==1.0`    -> `pkg@1.0`     (exact version)
+# Native pak refs, GitHub refs, and URL refs are passed through untouched.
+# Unsupported version operators such as `pkg<=1.2` are also passed to pak
+# unchanged, so pak remains the source of truth for supported refs.
 ir_to_ref <- function(d) {
   d <- trimws(d)
   m <- regmatches(d, regexec(
-    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])[[:space:]]*>=[[:space:]]*([0-9][0-9.-]*)$",
+    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])[[:space:]]*(>=|==)[[:space:]]*([0-9][0-9.-]*)$",
     d
   ))[[1L]]
-  if (length(m) == 3L) sprintf("%s@>=%s", m[[2L]], m[[3L]]) else d
+  if (length(m) != 4L) return(d)
+  if (m[[3L]] == ">=") sprintf("%s@>=%s", m[[2L]], m[[4L]])
+  else sprintf("%s@%s", m[[2L]], m[[4L]])
 }
 
 ## --- cache location ---------------------------------------------------------

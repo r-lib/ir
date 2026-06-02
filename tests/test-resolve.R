@@ -39,6 +39,11 @@ test_that(">= lower bounds are native pak refs (no history lookup)", {
   expect_equal(ref("dplyr>=1.1.0"), "dplyr@>=1.1.0")
 })
 
+test_that("== exact pins are native pak refs", {
+  expect_equal(ref("pkg==1.2"), "pkg@1.2")
+  expect_equal(ref("pkg==1.2.0"), "pkg@1.2.0")
+})
+
 # --- native pak refs and unsupported version syntax -------------------------
 
 test_that("native pak refs pass through untouched", {
@@ -50,7 +55,7 @@ test_that("non-pak version operators are not rewritten by ir", {
   expect_equal(ref("pkg<=1.2"), "pkg<=1.2")
   expect_equal(ref("pkg<1.2"), "pkg<1.2")
   expect_equal(ref("pkg>1.2"), "pkg>1.2")
-  expect_equal(ref("pkg==1.2"), "pkg==1.2")
+  expect_equal(ref("pkg!=1.2"), "pkg!=1.2")
   expect_equal(ref("pkg=1.2"), "pkg=1.2")
 })
 
@@ -106,8 +111,8 @@ test_that("ir_read_spec errors on malformed YAML", {
 test_that("ir_deps handles list and folded-scalar forms", {
   expect_equal(ir_deps(list(dependencies = c("dplyr>=1.0", "tidyr"))),
                c("dplyr>=1.0", "tidyr"))
-  expect_equal(ir_deps(list(dependencies = "dplyr>=1.0 tidyr secretbase@1.2")),
-               c("dplyr>=1.0", "tidyr", "secretbase@1.2"))
+  expect_equal(ir_deps(list(dependencies = "dplyr>=1.0 tidyr secretbase==1.2")),
+               c("dplyr>=1.0", "tidyr", "secretbase==1.2"))
 })
 
 test_that("ir_deps returns character(0) when there are no dependencies", {
@@ -166,15 +171,15 @@ test_that("the parse -> deps -> refs pipeline composes", {
     "#!/usr/bin/env -S ir run",
     "# dependencies:",
     "#   dplyr>=1.0",
-    "#   secretbase<=1.2",
+    "#   secretbase==1.2",
     "# R: \">= 4.0\"",
     "",
     "library(dplyr)"
   )
   spec <- ir_read_spec(ir_frontmatter(lines))
   deps <- ir_deps(spec)
-  expect_equal(deps, c("dplyr>=1.0", "secretbase<=1.2"))
+  expect_equal(deps, c("dplyr>=1.0", "secretbase==1.2"))
 
   refs <- vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
-  expect_equal(refs, c("dplyr@>=1.0", "secretbase<=1.2"))
+  expect_equal(refs, c("dplyr@>=1.0", "secretbase@1.2"))
 })

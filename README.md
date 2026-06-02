@@ -70,7 +70,7 @@ package, two YAML rules apply:
 # dependencies:
 #   dplyr>=1.0        # lower bound
 #   tidyr             # latest
-#   cli@3.6.6         # exact version
+#   cli==3.6.6        # exact version
 # R: ">= 4.0"         # optional; soft-checked against the running R
 ```
 
@@ -80,13 +80,12 @@ Supported dependency specs in this prototype:
 | ------------ | ------------------------------------------------ |
 | `pkg`        | latest available                                 |
 | `pkg>=1.0`   | at least version 1.0                             |
-| `pkg@1.2`    | exactly version 1.2                              |
-| `pkg@>=1.0`  | pak's native lower-bound ref                     |
+| `pkg==1.2`   | exactly version 1.2                              |
 
-`pkg>=1.0` is only a shorthand for pak's native `pkg@>=1.0` ref. Other pak ref
-forms, such as GitHub refs and URL refs, are passed through unchanged. Version
-operators that are not pak package refs, including `pkg<=1.2`, are not resolved
-by `ir`.
+`pkg>=1.0` and `pkg==1.2` are translated to pak refs before resolution. Other
+pak ref forms, such as GitHub refs and URL refs, are passed through unchanged.
+Version operators that are not representable as pak refs, including `pkg<=1.2`
+and `pkg!=1.2`, are not resolved by `ir`.
 
 ## Requirements
 
@@ -132,7 +131,6 @@ The default cache directory follows R's per-package convention (e.g.
 
 - Uses the `R`/`Rscript` already on `PATH`; the `R:` constraint is only a soft
   warning, not a version selector.
-- Dependency specs support pak package refs. `pkg>=1.0` is accepted as a
-  shorthand for pak's `pkg@>=1.0`; upper-bound syntax such as `pkg<=1.2` is not
-  resolved by `ir`.
+- Dependency specs support bare names, `>=`, `==`, and pak package refs.
+  Upper-bound syntax such as `pkg<=1.2` is not resolved by `ir`.
 - Repositories default to CRAN (`https://cran.r-project.org`).
