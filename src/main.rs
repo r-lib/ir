@@ -197,20 +197,201 @@ normalize_frontmatter <- function(lines) {
 
 normalize_package_specs <- function(specs) {
   specs <- trimws(specs)
-  constrained <- grepl("^[A-Za-z][A-Za-z0-9.]*[A-Za-z0-9]\\s*(>=|==|=)\\s*[0-9][0-9.-]*$", specs)
-  specs[constrained] <- sub(
-    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])\\s*>=\\s*([0-9][0-9.-]*)$",
-    "\\1@>=\\2",
-    specs[constrained],
+  vapply(specs, normalize_package_spec, character(1L), USE.NAMES = FALSE)
+}
+
+normalize_package_spec <- function(spec) {
+  match <- regexec(
+    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])\\s*(>=|<=|==|>|<|=)\\s*([0-9][0-9.-]*)$",
+    spec,
     perl = TRUE
   )
-  specs[constrained] <- sub(
-    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])\\s*(==|=)\\s*([0-9][0-9.-]*)$",
-    "\\1@\\3",
-    specs[constrained],
-    perl = TRUE
+  parts <- regmatches(spec, match)[[1L]]
+  if (!length(parts)) {
+    return(spec)
+  }
+
+  package <- parts[[2L]]
+  operator <- parts[[3L]]
+  version <- parts[[4L]]
+
+  switch(
+    operator,
+    ">=" = paste0(package, "@>=", version),
+    "==" = paste0(package, "@", version),
+    "=" = paste0(package, "@", version),
+    paste0(package, "@", select_cran_version(package, operator, version))
   )
-  specs
+}
+
+select_cran_version <- function(package, operator, required) {
+  versions <- cran_package_versions(package)
+  versions <- versions[vapply(versions, version_satisfies, logical(1L), operator, required)]
+
+  if (!length(versions)) {
+    stop(
+      "no CRAN version of ",
+      package,
+      " satisfies ",
+      operator,
+      required,
+      call. = FALSE
+    )
+  }
+
+  versions[order(package_version(versions), decreasing = TRUE)][[1L]]
+}
+
+version_satisfies <- function(version, operator, required) {
+  comparison <- utils::compareVersion(version, required)
+  switch(
+    operator,
+    ">" = comparison > 0L,
+    "<" = comparison < 0L,
+    "<=" = comparison <= 0L,
+    stop("unsupported package version operator: ", operator, call. = FALSE)
+  )
+}
+
+cran_package_versions <- function(package) {
+  versions <- character()
+
+  available <- cran_available_packages()
+  current <- available[available[, "Package"] == package, "Version", drop = TRUE]
+  if (length(current)) {
+    versions <- c(versions, current)
+  }
+
+  archive <- cran_archive_packages()
+  archived <- archive[[package]]
+  if (!is.null(archived)) {
+    pattern <- paste0("^", package, "/", package, "_(.+)\\.tar\\.gz$")
+    files <- rownames(archived)
+    matches <- regexec(pattern, files, perl = TRUE)
+    extracted <- regmatches(files, matches)
+    archived_versions <- vapply(
+      extracted,
+      function(match) if (length(match)) match[[2L]] else NA_character_,
+      character(1L)
+    )
+    versions <- c(versions, archived_versions[!is.na(archived_versions)])
+  }
+
+  versions <- unique(versions)
+  valid <- !is.na(package_version(versions, strict = FALSE))
+  versions[valid]
+}
+
+cran_available_packages <- function() {
+  path <- file.path(cache_dir, "cran", "PACKAGES.rds")
+  if (!file.exists(path)) {
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    url <- paste0(utils::contrib.url(cran_mirror(), type = "source"), "/PACKAGES.rds")
+    utils::download.file(url, path, quiet = TRUE, mode = "wb")
+  }
+
+  readRDS(path)
+}
+
+cran_archive_packages <- function() {
+  path <- file.path(cache_dir, "cran", "archive.rds")
+  if (!file.exists(path)) {
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    url <- paste0(cran_mirror(), "/src/contrib/Meta/archive.rds")
+    utils::download.file(url, path, quiet = TRUE, mode = "wb")
+  }
+
+  readRDS(path)
+}
+
+cran_mirror <- function() {
+  repos <- getOption("repos")
+  cran <- repos[["CRAN"]]
+  if (is.null(cran) || !nzchar(cran) || identical(cran, "@CRAN@")) {
+    cran <- "https://cran.rstudio.com"
+  }
+
+  sub("/+$", "", cran)
+}
+
+verify_installed_specs <- function(specs, library) {
+  for (spec in specs) {
+    match <- regexec(
+      "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])@([0-9][0-9.-]*)$",
+      spec,
+      perl = TRUE
+    )
+    parts <- regmatches(spec, match)[[1L]]
+    if (!length(parts)) {
+      next
+    }
+
+    package <- parts[[2L]]
+    version <- parts[[3L]]
+    installed <- installed_package_version(package, library)
+    if (!identical(installed, version)) {
+      found <- if (is.na(installed)) "<missing>" else installed
+      stop(
+        "expected ",
+        package,
+        " ",
+        version,
+        " in ",
+        library,
+        ", found ",
+        found,
+        call. = FALSE
+      )
+    }
+  }
+}
+
+library_satisfies_specs <- function(specs, library) {
+  all(vapply(specs, spec_satisfied, logical(1L), library))
+}
+
+spec_satisfied <- function(spec, library) {
+  exact <- regmatches(
+    spec,
+    regexec("^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])@([0-9][0-9.-]*)$", spec, perl = TRUE)
+  )[[1L]]
+  if (length(exact)) {
+    installed <- installed_package_version(exact[[2L]], library)
+    return(identical(installed, exact[[3L]]))
+  }
+
+  lower <- regmatches(
+    spec,
+    regexec("^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])@>=(.+)$", spec, perl = TRUE)
+  )[[1L]]
+  if (length(lower)) {
+    installed <- installed_package_version(lower[[2L]], library)
+    return(!is.na(installed) && utils::compareVersion(installed, lower[[3L]]) >= 0L)
+  }
+
+  plain <- regmatches(
+    spec,
+    regexec("^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])$", spec, perl = TRUE)
+  )[[1L]]
+  if (length(plain)) {
+    return(!is.na(installed_package_version(plain[[2L]], library)))
+  }
+
+  FALSE
+}
+
+installed_package_version <- function(package, library) {
+  description <- packageDescription(package, lib.loc = library)
+  if (!is.list(description)) {
+    return(NA_character_)
+  }
+
+  version <- description$Version
+  if (is.null(version) || is.na(version)) {
+    return(NA_character_)
+  }
+
+  version
 }
 
 check_r_constraint <- function(constraint) {
@@ -272,19 +453,14 @@ if (is.null(dependencies)) {
 dependencies <- normalize_package_specs(dependencies)
 
 if (length(dependencies)) {
-  resolved <- pak::pkg_deps(dependencies, dependencies = NA)
-  stopifnot(all(resolved$status == "OK"))
-  exact_dependencies <- paste0(resolved$package, "@", resolved$version)
   canonical <- paste(
     "R",
     as.character(getRversion()),
     R.version$platform,
-    paste(sort(exact_dependencies), collapse = "\n"),
+    paste(sort(dependencies), collapse = "\n"),
     sep = "\n"
   )
 } else {
-  resolved <- NULL
-  exact_dependencies <- character()
   canonical <- paste("R", as.character(getRversion()), R.version$platform, sep = "\n")
 }
 
@@ -294,8 +470,11 @@ r_version <- gsub("[^A-Za-z0-9._-]+", "-", as.character(getRversion()))
 library <- file.path(cache_dir, "libraries", paste0("R-", r_version, "-", platform), hash)
 dir.create(library, recursive = TRUE, showWarnings = FALSE)
 
-if (length(exact_dependencies)) {
-  pak::pkg_install(exact_dependencies, lib = library, upgrade = FALSE, ask = FALSE, dependencies = NA)
+if (length(dependencies)) {
+  if (!library_satisfies_specs(dependencies, library)) {
+    pak::pkg_install(dependencies, lib = library, upgrade = FALSE, ask = FALSE, dependencies = NA)
+  }
+  verify_installed_specs(dependencies, library)
 }
 
 cat("IR_LIBRARY_PATH=", library, "\n", sep = "")
