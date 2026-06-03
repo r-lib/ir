@@ -155,8 +155,8 @@ fn help_is_shown_for_help_flag_and_no_args() {
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(
             stdout.contains(concat!(
-                "\n    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
-                "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
+                "\n    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
+                "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
                 "    ir cache <command>\n"
             )),
             "args {args:?}: {stdout}"
@@ -187,7 +187,7 @@ fn run_help_flag_shows_help() {
     assert!(stdout.contains("USAGE"), "{stdout}");
     assert!(
         stdout.contains(
-            "ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]"
+            "ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]"
         ),
         "{stdout}"
     );
@@ -1097,6 +1097,54 @@ echo "ran script with --with"
     assert!(out.status.success(), "{out:?}");
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("ran script with --with"),
+        "{out:?}"
+    );
+}
+
+/// `--isolated` is an `ir`-level flag: it reaches neither the resolver nor the
+/// user-code phase as an argument. For the user-code phase it sets
+/// `R_LIBS_USER=NULL` — R's value for disabling the user library — while the
+/// resolved library still arrives via `R_LIBS`.
+#[cfg(unix)]
+#[test]
+fn run_isolated_disables_the_user_library() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  # Resolver phase: --isolated must not leak here, and only the driver runs.
+  test "$#" = "1"
+  cat > /dev/null
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+# Phase 2 (user code): --isolated must not be forwarded to Rscript.
+for arg in "$@"; do
+  case "$arg" in
+    --isolated) echo "--isolated leaked to user code" >&2; exit 9 ;;
+  esac
+done
+# The resolved library arrives via R_LIBS; the user library is disabled.
+test "${R_LIBS:-}" = "/tmp/ir-test-library"
+test "${R_LIBS_USER:-}" = "NULL"
+echo "ran isolated"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "--isolated", "-e", "1 + 1"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran isolated"),
         "{out:?}"
     );
 }
