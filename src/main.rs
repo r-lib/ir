@@ -250,7 +250,12 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
 /// *prepended* to `.libPaths()`: resolved dependencies take precedence, while
 /// the user's other libraries remain available. (`R_LIBS` is used rather than
 /// `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would override
-/// the latter.) Returns the script's exit code.
+/// the latter.)
+///
+/// As `ir`'s final step, on Unix we `exec` into Rscript so R takes over this
+/// process — inheriting our PID, stdio and signals, and propagating its exit
+/// status (signal deaths included) verbatim. `exec` returns only on launch
+/// failure. Without `exec` (Windows), R runs as a child and we return its code.
 fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
@@ -264,8 +269,18 @@ fn run_script(
         cmd.env("R_LIBS", lib);
     }
 
-    let status = cmd.status().map_err(|e| spawn_error(rscript, e))?;
-    Ok(status.code().unwrap_or(1))
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Replace ir with R; returns only if the exec fails.
+        Err(spawn_error(rscript, cmd.exec()).into())
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = cmd.status().map_err(|e| spawn_error(rscript, e))?;
+        Ok(status.code().unwrap_or(1))
+    }
 }
 
 /// The Rscript executable to use: `$IR_RSCRIPT` if set, otherwise `Rscript`

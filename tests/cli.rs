@@ -6,7 +6,6 @@
 //! runs via `cargo test` when an R toolchain is available.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,11 +29,17 @@ fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     ))
 }
 
+/// Write `contents` to `path` as a fake `Rscript`. On Unix the file is marked
+/// executable; on Windows a `.cmd` is runnable by extension alone.
 fn write_executable(path: &Path, contents: &str) {
     fs::write(path, contents).unwrap();
-    let mut permissions = fs::metadata(path).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
 }
 
 #[test]
@@ -142,6 +147,7 @@ fn cache_clean_reports_missing_cache_dir() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn cache_dir_resolves_default_with_r_user_dir() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
@@ -185,6 +191,7 @@ printf '%s\n' "{}"
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn run_enables_and_forwards_pak_progress_in_resolver() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
@@ -238,6 +245,118 @@ echo "user script stdout"
     assert!(stdout.contains("pak progress stdout"), "{stdout}");
     assert!(stdout.contains("user script stdout"), "{stdout}");
     assert!(stderr.contains("pak progress stderr"), "{stderr}");
+}
+
+/// The user script's exit code surfaces unchanged as `ir`'s exit code. On Unix
+/// this rides on the `exec` into R; the Windows spawn+wait fallback is covered
+/// by the variant below.
+#[cfg(unix)]
+#[test]
+fn run_propagates_user_script_exit_code() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-script", "R");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+# Phase 1 (resolve) gets 3 args: report an empty library and succeed.
+if [ "$#" = "3" ]; then
+  : > "$3"
+  exit 0
+fi
+# Phase 2 (user script): exit with a distinctive code.
+exit 42
+"#,
+    );
+    fs::write(&script, "stop('unused by fake Rscript')\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert_eq!(out.status.code(), Some(42));
+}
+
+/// Windows has no `exec`, so `ir` runs R as a child and forwards its exit code
+/// via `status.code()`. The fake distinguishes phases by the presence of the
+/// resolver's 3rd (output-file) argument.
+#[cfg(windows)]
+#[test]
+fn run_propagates_user_script_exit_code() {
+    let fake_rscript = unique_path("ir-fake-rscript", "cmd");
+    let script = unique_path("ir-script", "R");
+
+    write_executable(
+        &fake_rscript,
+        concat!(
+            "@echo off\r\n",
+            // Phase 1 (resolve): a 3rd arg is present — report an empty
+            // library to its path and succeed.
+            "if not \"%~3\"==\"\" (\r\n",
+            "  type nul > \"%~3\"\r\n",
+            "  exit /b 0\r\n",
+            ")\r\n",
+            // Phase 2 (user script): exit with a distinctive code.
+            "exit /b 42\r\n",
+        ),
+    );
+    fs::write(&script, "stop('unused by fake Rscript')\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert_eq!(out.status.code(), Some(42));
+}
+
+/// A user script killed by a signal is reported as signal death, not flattened
+/// to a plain exit code — the fidelity `exec` preserves but a spawned child
+/// (whose `status.code()` would be `None` → `1`) would lose. Unix-only: Windows
+/// has no equivalent signal model and always takes the spawn+wait path.
+#[cfg(unix)]
+#[test]
+fn run_propagates_user_script_signal_death() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-script", "R");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "$#" = "3" ]; then
+  : > "$3"
+  exit 0
+fi
+# Phase 2: after exec this shell *is* ir's process, so SIGKILL kills ir itself.
+kill -KILL $$
+"#,
+    );
+    fs::write(&script, "stop('unused by fake Rscript')\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert_eq!(out.status.code(), None, "signal death has no exit code");
+    assert_eq!(out.status.signal(), Some(9), "killed by SIGKILL");
 }
 
 /// Run the comprehensive R resolution suite under `cargo test`. Skips (passes
