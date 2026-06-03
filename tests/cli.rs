@@ -989,6 +989,61 @@ echo "resolver saw deps"
     );
 }
 
+/// `--with` dependencies must reach the embedded R resolver through Rscript's
+/// stdin connection, not only through shell fakes used by argument tests.
+#[cfg(unix)]
+#[test]
+fn run_with_reaches_real_r_resolver_stdin() {
+    let Some(rscript) = executable_on_path("Rscript") else {
+        return eprintln!("skipping real Rscript stdin test: Rscript unavailable");
+    };
+
+    let probe = Command::new(&rscript)
+        .args([
+            "-e",
+            "stopifnot(requireNamespace('pak', quietly = TRUE), \
+                       requireNamespace('renv', quietly = TRUE), \
+                       requireNamespace('secretbase', quietly = TRUE))",
+        ])
+        .output()
+        .expect("failed to launch Rscript");
+    if !probe.status.success() {
+        return eprintln!("skipping real Rscript stdin test: resolver packages unavailable");
+    }
+
+    let cache_dir = unique_path("ir-real-r-resolver-cache", "dir");
+    let out = ir()
+        .env("IR_RSCRIPT", &rscript)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--with",
+            "abd",
+            "-e",
+            r#"
+lib <- .libPaths()[1]
+stopifnot("abd" %in% rownames(installed.packages(lib.loc = lib)))
+library(abd, lib.loc = lib)
+cat("abd resolved from ", lib, "\n", sep = "")
+"#,
+        ])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert!(
+        out.status.success(),
+        "real resolver did not materialise --with package:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("abd resolved from "),
+        "{out:?}"
+    );
+}
+
 /// `--with` works alongside a script file: its specs are appended to the
 /// frontmatter dependencies on the resolver's stdin (frontmatter first), while
 /// the user-code phase still runs the script (not `-e`).
