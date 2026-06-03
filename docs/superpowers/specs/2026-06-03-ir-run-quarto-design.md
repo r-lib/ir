@@ -99,17 +99,29 @@ materialise) is unchanged. Phase 2 dispatches by file extension.
    key yields `ScriptSpec::default()` (no dependencies). All other quarto keys
    (`title`, `format`, …) are ignored for free.
 
-4. **Phase-2 dispatch in `cmd_run`.** By extension: `.R` → existing
-   `run_script`; `.qmd` / `.Rmd` → new `run_quarto`; any other extension → a
-   clear error. Phase 1 (`resolve_library`) runs identically for both.
+4. **Phase-2 dispatch in `cmd_run`.** By extension (case-insensitive): a `.qmd`
+   or `.Rmd` target routes to the new `run_quarto`; **every other name —
+   including `.R`, `.r`, and extensionless scripts — keeps the existing
+   `run_script` flow.** Routing only the two Quarto extensions away, rather than
+   erroring on anything non-`.R`, preserves the common shebang case
+   (`#!/usr/bin/env -S ir run` executed as a bare, often extensionless, file
+   name). Phase 1 (`resolve_library`) runs identically for both.
 
 5. **`run_quarto`.** Locate `quarto` on PATH. Build
-   `quarto render <doc> <script_args>`. Set `QUARTO_R=<selected Rscript>` and,
-   when dependencies resolved, `R_LIBS=<materialised library>`. When
-   `rscript_args` are present, set `QUARTO_KNITR_RSCRIPT_ARGS` to those args,
-   comma-joined, so quarto's knitr Rscript receives them. Use the same platform
-   split as `run_script` (exec on Unix, spawn + status on Windows). Propagate
-   the exit code.
+   `quarto render <doc> <script_args>`. Environment:
+   - **`QUARTO_R`** — set to the selected Rscript **only when it is path-like**
+     (an existing path, or a value containing a path separator). For the bare
+     `Rscript` default, `QUARTO_R` is left unset so quarto resolves `Rscript` on
+     PATH — the same binary `ir` used — which avoids quarto's "Specified
+     `QUARTO_R` … does not exist" warning while preserving the same-R invariant.
+   - **`R_LIBS`** — set to the materialised library only when dependencies were
+     resolved (the sole conditional env var).
+   - **`QUARTO_KNITR_RSCRIPT_ARGS`** — set to the comma-joined `rscript_args`
+     when any are present, so quarto's knitr Rscript receives them.
+
+   Use the same platform split as `run_script` (exec on Unix, spawn + status on
+   Windows). Propagate the exit code. A missing `quarto` surfaces as a clear
+   error from this function (see edge cases).
 
 ### Selected-Rscript seam
 
@@ -127,7 +139,8 @@ doc.qmd
   → parse_frontmatter, descend into `ir:` → ScriptSpec
   → deps on stdin + IR_EXCLUDE_AFTER + IR_R_REQUIREMENT → resolve.R
   → resolve + materialise content-addressed library → library path
-  → run_quarto: QUARTO_R=<rscript>, R_LIBS=<library>,
+  → run_quarto: QUARTO_R=<rscript> (only if path-like),
+                R_LIBS=<library> (only if deps resolved),
                 QUARTO_KNITR_RSCRIPT_ARGS=<rscript_args> (if any)
   → quarto render doc.qmd <script_args>
   → quarto knitr spawns QUARTO_R Rscript, inherits R_LIBS
@@ -136,9 +149,25 @@ doc.qmd
 
 ## Error handling and edge cases
 
-- **No `ir:` key / no dependencies** → `R_LIBS` is not set; quarto renders with
-  the ambient R. Parallels a no-dependency script.
-- **`quarto` not on PATH** → clear error, surfaced before phase 1 work.
+- **No `ir:` key / no dependencies** → `R_LIBS` is not set; quarto renders
+  against the **ambient library paths**. `QUARTO_R` is still pinned per the rule
+  above, so the R *binary* selection is unchanged — only the library set differs.
+  Parallels a no-dependency script.
+- **`quarto` not on PATH** → clear error from `run_quarto` ("could not find
+  `quarto` on PATH …"). No preflight check: a missing `quarto` is reported at
+  the render step, after phase 1. The tradeoff is that on a resolution
+  cache-miss the resolver runs before the failure; cache hits resolve instantly,
+  so the wasted work is normally negligible, and the happy path is not burdened
+  with an extra `quarto --version` spawn (~1s of Deno startup) on every run.
+- **qmd frontmatter shape** → the `---` block reader recognises the leading YAML
+  metadata block: an opening `---` on the first line (after an optional UTF-8
+  BOM), terminated by a line that is exactly `---` or `...`. It is CRLF-tolerant
+  (Windows line endings). A file with no opening fence, an empty block, or no
+  `ir:` key yields `ScriptSpec::default()` (no dependencies) — never an error.
+  Malformed YAML *inside* a present block errors the same way a script does.
+- **`QUARTO_R` paths with spaces** → `QUARTO_R` is passed as an environment
+  variable, not a command-line argument, so there is no shell parsing and paths
+  containing spaces need no quoting.
 - **Document inside an renv-activated project** → the document's `.Rprofile`
   can re-set `.libPaths()` and shadow `R_LIBS`. Known limitation; `ir` targets
   *standalone* documents, the same standalone assumption made for scripts.
@@ -156,17 +185,29 @@ preserving the #13 intent that leading options target the R running the code:
 - **`rscript_args` → `QUARTO_KNITR_RSCRIPT_ARGS`** (comma-joined). E.g.
   `ir run --vanilla doc.qmd` sets `QUARTO_KNITR_RSCRIPT_ARGS=--vanilla`, which
   quarto splits on commas and passes to its knitr Rscript (`rmd.ts:434`).
-  Caveat: an `rscript_args` token containing a comma would break quarto's
-  comma-split; acceptable for now (R options rarely contain commas), noted as a
-  known limitation.
+  Quarto's split (`rmd.ts:435`) is a bare `","` split with **no escape
+  mechanism**, so a token containing a comma cannot be transported faithfully.
+  Rather than mis-split silently, `run_quarto` **rejects any `rscript_arg`
+  containing a comma** with a clear error before launching quarto.
 
 ## Testing
 
-- **Unit:** `---`-block frontmatter extraction; `parse_frontmatter` descent into
-  `ir:` (present, absent, null); extension dispatch.
-- **Integration:** a `.qmd` declaring `ir: { dependencies }` renders, and a
-  package present only in the resolved library is usable from an R chunk during
-  the render. Reuse the existing test harness in `tests/cli.rs`.
+- **Unit:** `---`-block frontmatter extraction (opening/closing fences, `...`
+  terminator, CRLF, optional BOM, no-fence → empty); `parse_frontmatter` descent
+  into `ir:` (present, absent, null, non-mapping); comma-rejection of
+  `rscript_args`.
+- **Integration** (fake executables, as in `tests/cli.rs`): a `.qmd` resolves
+  via the fake Rscript then invokes a fake `quarto` on `PATH`, asserting the
+  `quarto render <doc>` argv, `QUARTO_R` set/unset per the path-like rule,
+  `R_LIBS`, and `QUARTO_KNITR_RSCRIPT_ARGS`. A non-`.R`/non-qmd or extensionless
+  script still takes the R-script path. A missing `quarto` yields the clear
+  error. Reuse the existing harness; faking `quarto` requires putting it on a
+  test-scoped `PATH` (the `.R` tests fake Rscript via `IR_RSCRIPT`, but there is
+  no `IR_QUARTO`, so the test prepends a temp dir to `PATH`).
+- **Docs/snapshots:** updating `ir run` help text to mention Quarto documents
+  requires updating the `tests/snapshots/*.stdout` files added by #17 and the
+  `contains(...)` assertions in `tests/cli.rs`, since help is snapshot-tested by
+  exact match.
 
 ## Out of scope
 
@@ -179,13 +220,13 @@ preserving the #13 intent that leading options target the R running the code:
 
 ## Dev workflow / sequencing
 
-- PR #14 is **merged** (`14e688f`); base the implementation branch on `main`.
-- PR #13 ("Pass Rscript options through `ir run`", `3e0e6ec`) already shaped the
-  `ir run` argument handling. The qmd passthrough must align with how #13 splits
-  Rscript options from the script path and trailing arguments — confirm during
-  planning before adding `quarto render` passthrough.
-- Push to the appropriate remote, open a PR against `main`, and link the work to
-  the relevant tracking issue.
+- Base the implementation branch on `origin/main` at `4f23532` (latest as of
+  writing): #14 (Rust YAML parsing), #13 (`rscript_args`/`script_args` split),
+  and #17 (help snapshot tests) are all merged and assumed present.
+- #17 makes `ir run` help snapshot-tested by exact match; any help-text change
+  must update `tests/snapshots/*.stdout` in the same commit.
+- Single remote `origin` is `t-kalinowski/ir` (no fork). Push the branch to
+  `origin`, open a PR against `main`, and link the work to the tracking issue.
 
 ## Rejected alternative
 
