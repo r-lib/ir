@@ -1,8 +1,8 @@
 ir 0.1.0 — self-describing R scripts
 
 USAGE:
-    ir run [Rscript-options...] <script.R> [args...]
-    ir run [Rscript-options...] -e <expr> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [args...]
     ir cache <command>
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its

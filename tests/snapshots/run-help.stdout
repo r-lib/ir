@@ -1,8 +1,8 @@
 Run an R script
 
 USAGE:
-    ir run [Rscript-options...] <script.R> [args...]
-    ir run [Rscript-options...] -e <expr> [-e <expr>]... [args...]
+    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [-e <expr>]... [args...]
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its
 dependencies, builds a dedicated package library, and runs the script

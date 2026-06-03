@@ -98,8 +98,8 @@ fn help_is_shown_for_help_flag_and_no_args() {
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(
             stdout.contains(concat!(
-                "\n    ir run [Rscript-options...] <script.R> [args...]\n",
-                "    ir run [Rscript-options...] -e <expr> [args...]\n",
+                "\n    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]\n",
+                "    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [args...]\n",
                 "    ir cache <command>\n"
             )),
             "args {args:?}: {stdout}"
@@ -129,7 +129,7 @@ fn run_help_flag_shows_help() {
     assert!(stdout.contains("Run an R script"), "{stdout}");
     assert!(stdout.contains("USAGE"), "{stdout}");
     assert!(
-        stdout.contains("ir run [Rscript-options...] <script.R> [args...]"),
+        stdout.contains("ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]"),
         "{stdout}"
     );
     assert!(out.stderr.is_empty());
