@@ -1,14 +1,15 @@
 Run an R script
 
 USAGE:
-    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]
-    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [-e <expr>]... [args...]
+    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its
 dependencies, builds a dedicated package library, and runs the script
 against it. With -e it instead evaluates inline R expressions (mirroring
-Rscript) against the same isolated library. Leading Rscript options are
-passed to Rscript for the user-code phase; trailing args are passed
+Rscript) against the same isolated library. --r-version selects the R
+version with rig and overrides script frontmatter. Leading Rscript options
+are passed to Rscript for the user-code phase; trailing args are passed
 through to the program.
 
 OPTIONS:
@@ -18,6 +19,9 @@ OPTIONS:
                   in the script frontmatter. May be repeated and accepts a
                   comma-separated list (e.g. --with dplyr,tidyr). Uses the
                   same spec format as `dependencies:` (e.g. cli==3.6.6).
+    --r-version <spec>
+                  Select the R version for this run with rig. Overrides
+                  `r-version:` in script frontmatter.
 
 ENVIRONMENT:
     IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))

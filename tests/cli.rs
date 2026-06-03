@@ -107,8 +107,8 @@ fn help_is_shown_for_help_flag_and_no_args() {
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(
             stdout.contains(concat!(
-                "\n    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]\n",
-                "    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [args...]\n",
+                "\n    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
+                "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
                 "    ir cache <command>\n"
             )),
             "args {args:?}: {stdout}"
@@ -138,7 +138,9 @@ fn run_help_flag_shows_help() {
     assert!(stdout.contains("Run an R script"), "{stdout}");
     assert!(stdout.contains("USAGE"), "{stdout}");
     assert!(
-        stdout.contains("ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]"),
+        stdout.contains(
+            "ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]"
+        ),
         "{stdout}"
     );
     assert!(out.stderr.is_empty());
@@ -529,6 +531,108 @@ cat('unused by fake Rscript\n')
         .env("PATH", prepend_path(&bin_dir))
         .env_remove("IR_RSCRIPT")
         .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r_home);
+    let _ = fs::remove_file(&script);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("selected R 4.5"),
+        "{out:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_r_version_arg_overrides_frontmatter_r_version() {
+    let bin_dir = unique_path("ir-bin", "dir");
+    let r_home = unique_path("ir-r-45", "dir");
+    let script = unique_path("ir-script", "R");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&r_home).unwrap();
+
+    let rig = bin_dir.join("rig");
+    let default_rscript = bin_dir.join("Rscript");
+    let r_binary = r_home.join("R");
+    let selected_rscript = r_home.join("Rscript");
+
+    write_executable(
+        &rig,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+case "$1 $2" in
+  "list --json")
+    cat <<'JSON'
+[
+  {{
+    "name": "4.5-arm64",
+    "default": false,
+    "version": "4.5.3",
+    "aliases": [],
+    "path": "{}",
+    "binary": "{}"
+  }}
+]
+JSON
+    ;;
+  "available --json")
+    cat <<'JSON'
+[
+  {{
+    "name": "4.5",
+    "date": "2025-04-11",
+    "version": "4.5.3",
+    "type": "release",
+    "url": "https://example.invalid/R-4.5.3.pkg"
+  }}
+]
+JSON
+    ;;
+  *)
+    echo "unexpected rig args: $*" >&2
+    exit 64
+    ;;
+esac
+"#,
+            r_home.display(),
+            r_binary.display()
+        ),
+    );
+    write_executable(
+        &default_rscript,
+        "#!/bin/sh\necho default Rscript should not run >&2\nexit 88\n",
+    );
+    write_executable(&r_binary, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &selected_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  cat > /dev/null
+  : > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+echo "selected R 4.5"
+"#,
+    );
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| r-version: "4.6"
+
+cat('unused by fake Rscript\n')
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("PATH", prepend_path(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "4.5", script.to_str().unwrap()])
         .output()
         .unwrap();
 

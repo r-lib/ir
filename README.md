@@ -32,6 +32,7 @@ command line:
 $ ir run -e '1 + 1'                          # inline expression, isolated library
 $ ir run --with cli -e 'cli::cli_alert_success("hi")'
 $ ir run --with dplyr,tidyr script.R         # add to the script's own deps
+$ ir run --r-version 4.5 script.R            # select R with rig
 ```
 
 ## How it works
@@ -53,10 +54,11 @@ $ ir run --with dplyr,tidyr script.R         # add to the script's own deps
    - If the YAML frontmatter has `exclude-newer: "YYYY-MM-DD"`, CRAN is
      resolved from the Posit Package Manager snapshot for that date:
      `https://packagemanager.posit.co/cran/YYYY-MM-DD`.
-   - If the YAML frontmatter has `r-version: "VERSION-SPEC"`, the requested R
-     version is resolved with `rig available --json` and matched against
-     installed versions from `rig list --json`. If `exclude-newer` is present,
-     R versions released after that date are ignored.
+   - If the YAML frontmatter has `r-version: "VERSION-SPEC"` or `ir run` is
+     called with `--r-version VERSION-SPEC`, the requested R version is resolved
+     with `rig available --json` and matched against installed versions from
+     `rig list --json`. If `exclude-newer` is present, R versions released after
+     that date are ignored.
    - The resolved set is hashed (together with the R version and platform) into
      a content-addressed library path under the cache directory.
    - **renv** (`renv::use`) installs the packages into renv's package cache and
@@ -120,9 +122,9 @@ pak ref forms, such as GitHub refs and URL refs, are passed through unchanged.
 Version operators that are not representable as pak refs, including `pkg<=1.2`
 and `pkg!=1.2`, are not resolved by `ir`.
 
-## Inline expressions and command-line dependencies
+## Inline expressions and command-line requirements
 
-`ir run` has two flags that mirror and extend Rscript:
+`ir run` has flags that mirror and extend Rscript:
 
 - **`-e <expr>`** evaluates an inline R expression *instead of* running a script
   file, just like `Rscript -e`. It can be repeated (`-e ... -e ...`), and any
@@ -136,15 +138,20 @@ and `pkg!=1.2`, are not resolved by `ir`.
   `cli==3.6.6`). With a script file, `--with` packages are *merged* with the
   script's declared dependencies; with `-e`, they are the only dependencies.
 
+- **`--r-version <spec>`** selects the R version for this run with rig. With a
+  script file, it overrides `r-version:` in the frontmatter; with `-e`, it is the
+  only R version requirement.
+
 ```console
 $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
+$ ir run --r-version 4.5 -e 'getRversion()'
 $ ir run --vanilla --with cli script.R       # Rscript options still apply
 ```
 
-`--with` packages join the resolved set that is hashed into the content-addressed
-library, so a given combination of frontmatter and `--with` dependencies resolves
-once and is reused on later runs.
+`--with` packages and `--r-version` join the resolved set that is hashed into the
+content-addressed library, so a given combination of frontmatter and command-line
+requirements resolves once and is reused on later runs.
 
 ## Requirements
 
