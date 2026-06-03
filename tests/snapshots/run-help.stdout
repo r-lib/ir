@@ -1,12 +1,23 @@
 Run an R script
 
 USAGE:
-    ir run [Rscript-options...] <script.R> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]
+    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [-e <expr>]... [args...]
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its
 dependencies, builds a dedicated package library, and runs the script
-against it. Leading Rscript options are passed to Rscript for the
-user-code phase; trailing args are passed through to the script.
+against it. With -e it instead evaluates inline R expressions (mirroring
+Rscript) against the same isolated library. Leading Rscript options are
+passed to Rscript for the user-code phase; trailing args are passed
+through to the program.
+
+OPTIONS:
+    -e <expr>     Evaluate an inline R expression instead of a script file.
+                  May be repeated; runs in place of <script.R>.
+    --with <pkg>  Add a dependency for this run, merged with any declared
+                  in the script frontmatter. May be repeated and accepts a
+                  comma-separated list (e.g. --with dplyr,tidyr). Uses the
+                  same spec format as `dependencies:` (e.g. cli==3.6.6).
 
 ENVIRONMENT:
     IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))

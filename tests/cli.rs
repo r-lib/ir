@@ -106,9 +106,11 @@ fn help_is_shown_for_help_flag_and_no_args() {
         assert!(stdout.contains("USAGE"), "args {args:?}: {stdout}");
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(
-            stdout.contains(
-                "\n    ir run [Rscript-options...] <script.R> [args...]\n    ir cache <command>\n"
-            ),
+            stdout.contains(concat!(
+                "\n    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]\n",
+                "    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [args...]\n",
+                "    ir cache <command>\n"
+            )),
             "args {args:?}: {stdout}"
         );
     }
@@ -136,7 +138,7 @@ fn run_help_flag_shows_help() {
     assert!(stdout.contains("Run an R script"), "{stdout}");
     assert!(stdout.contains("USAGE"), "{stdout}");
     assert!(
-        stdout.contains("ir run [Rscript-options...] <script.R> [args...]"),
+        stdout.contains("ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]"),
         "{stdout}"
     );
     assert!(out.stderr.is_empty());
@@ -541,6 +543,52 @@ cat('unused by fake Rscript\n')
     );
 }
 
+/// `-e <expr>` runs an inline expression instead of a script file: the
+/// user-code phase is invoked as `Rscript -e <expr>` with the resolved library
+/// injected via `R_LIBS`. As elsewhere, the resolver phase is the one with
+/// `IR_RESOLVE_RESULT_FILE` set; an inline expression declares no deps, so the
+/// resolver receives empty stdin.
+#[cfg(unix)]
+#[test]
+fn run_e_evaluates_inline_expression() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  actual="$(cat)"
+  if [ -n "$actual" ]; then
+    echo "unexpected resolver stdin: $actual" >&2
+    exit 10
+  fi
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+# Phase 2 (user code): an inline expression, not a script file.
+test "$1" = "-e"
+test "$2" = "1 + 1"
+test "${R_LIBS:-}" = "/tmp/ir-test-library"
+echo "ran inline expr"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "-e", "1 + 1"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran inline expr"),
+        "{out:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn run_filters_r_versions_by_exclude_newer_release_date() {
@@ -748,6 +796,165 @@ cat('unused by fake Rscript\n')
         "{stderr}"
     );
     assert!(stderr.contains("rig install 4.5"), "{stderr}");
+}
+
+/// Multiple `-e` flags are forwarded in order as repeated `-e <expr>` pairs,
+/// mirroring Rscript.
+#[cfg(unix)]
+#[test]
+fn run_e_accepts_multiple_expressions() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  cat > /dev/null
+  : > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+test "$#" = "4"
+test "$1" = "-e"
+test "$2" = "a <- 1"
+test "$3" = "-e"
+test "$4" = "print(a)"
+echo "ran two exprs"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "-e", "a <- 1", "-e", "print(a)"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran two exprs"),
+        "{out:?}"
+    );
+}
+
+/// `-e` with no following expression is a usage error, reported before any R
+/// session is launched.
+#[test]
+fn run_e_requires_an_expression() {
+    let out = ir().args(["run", "-e"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("requires an expression"),
+        "{out:?}"
+    );
+}
+
+/// `--with` specs reach the resolver on stdin (comma-separated lists split into
+/// individual specs, one per line) and are not forwarded to the user-code phase.
+#[cfg(unix)]
+#[test]
+fn run_with_passes_dependencies_to_resolver() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  actual="$(mktemp)"
+  cat > "$actual"
+  expected="$(mktemp)"
+  printf 'dplyr\ntidyr\n' > "$expected"
+  if ! cmp -s "$actual" "$expected"; then
+    echo "unexpected resolver stdin:" >&2
+    cat "$actual" >&2
+    exit 10
+  fi
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+# Phase 2 (user code): --with must not leak here.
+for arg in "$@"; do
+  case "$arg" in
+    --with*) echo "--with leaked to user code" >&2; exit 9 ;;
+  esac
+done
+test "$1" = "-e"
+echo "resolver saw deps"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "--with", "dplyr,tidyr", "-e", "library(dplyr)"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("resolver saw deps"),
+        "{out:?}"
+    );
+}
+
+/// `--with` works alongside a script file: its specs are appended to the
+/// frontmatter dependencies on the resolver's stdin (frontmatter first), while
+/// the user-code phase still runs the script (not `-e`).
+#[cfg(unix)]
+#[test]
+fn run_with_applies_to_script_files() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-script", "R");
+    fs::write(
+        &script,
+        "#!/usr/bin/env -S ir run\n#| dependencies:\n#|   - dplyr\n\ncat('unused by fake Rscript\\n')\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  actual="$(mktemp)"
+  cat > "$actual"
+  expected="$(mktemp)"
+  printf 'dplyr\ncli\n' > "$expected"
+  if ! cmp -s "$actual" "$expected"; then
+    echo "unexpected resolver stdin:" >&2
+    cat "$actual" >&2
+    exit 10
+  fi
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+# Phase 2 (user code): runs the script file, not -e.
+test "$1" != "-e"
+case "$1" in
+  *.R) ;;
+  *) echo "expected a script path, got $1" >&2; exit 9 ;;
+esac
+echo "ran script with --with"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "--with", "cli", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran script with --with"),
+        "{out:?}"
+    );
 }
 
 /// The user script's exit code surfaces unchanged as `ir`'s exit code. On Unix

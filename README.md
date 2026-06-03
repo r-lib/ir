@@ -25,6 +25,15 @@ $ ir run --vanilla script.R
 $ ./script.R
 ```
 
+It can also evaluate inline expressions and pull in extra dependencies from the
+command line:
+
+```console
+$ ir run -e '1 + 1'                          # inline expression, isolated library
+$ ir run --with cli -e 'cli::cli_alert_success("hi")'
+$ ir run --with dplyr,tidyr script.R         # add to the script's own deps
+```
+
 ## How it works
 
 `ir run script.R` runs in two phases:
@@ -110,6 +119,32 @@ Supported dependency specs in this prototype:
 pak ref forms, such as GitHub refs and URL refs, are passed through unchanged.
 Version operators that are not representable as pak refs, including `pkg<=1.2`
 and `pkg!=1.2`, are not resolved by `ir`.
+
+## Inline expressions and command-line dependencies
+
+`ir run` has two flags that mirror and extend Rscript:
+
+- **`-e <expr>`** evaluates an inline R expression *instead of* running a script
+  file, just like `Rscript -e`. It can be repeated (`-e ... -e ...`), and any
+  trailing arguments are passed to the program as `commandArgs(TRUE)`. An inline
+  expression has no frontmatter, so it runs against an empty isolated library
+  unless dependencies are supplied with `--with`.
+
+- **`--with <pkg>`** adds a dependency for this run. It can be repeated and
+  accepts a comma-separated list (`--with dplyr,tidyr`), and uses the same spec
+  format as the `dependencies:` frontmatter (e.g. `cli`, `dplyr>=1.0`,
+  `cli==3.6.6`). With a script file, `--with` packages are *merged* with the
+  script's declared dependencies; with `-e`, they are the only dependencies.
+
+```console
+$ ir run --with cli -e 'cli::cli_alert_success("works")'
+$ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
+$ ir run --vanilla --with cli script.R       # Rscript options still apply
+```
+
+`--with` packages join the resolved set that is hashed into the content-addressed
+library, so a given combination of frontmatter and `--with` dependencies resolves
+once and is reused on later runs.
 
 ## Requirements
 

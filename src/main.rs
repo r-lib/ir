@@ -69,7 +69,12 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             }
 
             let run = parse_run_args(args)?;
-            cmd_run(&run.script, &run.rscript_args, &run.script_args)
+            cmd_run(
+                &run.source,
+                &run.rscript_args,
+                &run.with_deps,
+                &run.script_args,
+            )
         }
         Some("cache") => cmd_cache(args.collect()),
         Some("--version" | "-V") => {
@@ -84,26 +89,90 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Where the user's program comes from: a script file, or one or more inline
+/// `-e` expressions evaluated in its place (mirroring `Rscript -e`).
+enum RunSource {
+    Script(String),
+    Expressions(Vec<String>),
+}
+
 struct RunArgs {
     rscript_args: Vec<String>,
-    script: String,
+    with_deps: Vec<String>,
+    source: RunSource,
     script_args: Vec<String>,
 }
 
+/// Split the leading region of `ir run`'s arguments into Rscript options,
+/// `--with` dependency specs, and the program source (a script path or `-e`
+/// expressions), with everything after the source treated as program args.
+///
+/// `-e <expr>` and `--with <spec>` are `ir`-level flags handled here: `-e`
+/// supplies inline R to run instead of a file, and `--with` declares extra
+/// dependencies (not forwarded to Rscript). Any other `-…` argument is an
+/// Rscript option, forwarded verbatim to the user-code phase. Scanning stops at
+/// the first non-option, which is the script path unless `-e` was given (in
+/// which case it, and everything after, are program args — as with Rscript).
 fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
-    let script_index = args
-        .iter()
-        .position(|arg| !arg.starts_with('-'))
-        .ok_or("`ir run` requires a script path (try `ir run script.R`)")?;
-    let mut args = args;
-    let script_args = args.split_off(script_index + 1);
-    let script = args.pop().expect("script index already checked");
+    let mut rscript_args = Vec::new();
+    let mut with_deps = Vec::new();
+    let mut expressions = Vec::new();
+    let mut iter = args.into_iter();
+    let mut positional = None;
+
+    while let Some(arg) = iter.next() {
+        if arg == "-e" {
+            let expr = iter
+                .next()
+                .ok_or("`-e` requires an expression (try `ir run -e '1 + 1'`)")?;
+            expressions.push(expr);
+        } else if arg == "--with" {
+            let value = iter
+                .next()
+                .ok_or("`--with` requires a package (try `ir run --with dplyr script.R`)")?;
+            push_with_deps(&mut with_deps, &value);
+        } else if let Some(value) = arg.strip_prefix("--with=") {
+            push_with_deps(&mut with_deps, value);
+        } else if arg.starts_with('-') {
+            rscript_args.push(arg);
+        } else {
+            positional = Some(arg);
+            break;
+        }
+    }
+
+    let script_args: Vec<String> = iter.collect();
+
+    let (source, script_args) = if expressions.is_empty() {
+        let script = positional
+            .ok_or("`ir run` requires a script path or -e expression (try `ir run script.R`)")?;
+        (RunSource::Script(script), script_args)
+    } else {
+        // With `-e`, there is no script file; the first non-option and anything
+        // after it are program args (commandArgs), matching Rscript.
+        let mut program_args = Vec::new();
+        program_args.extend(positional);
+        program_args.extend(script_args);
+        (RunSource::Expressions(expressions), program_args)
+    };
 
     Ok(RunArgs {
-        rscript_args: args,
-        script,
+        rscript_args,
+        with_deps,
+        source,
         script_args,
     })
+}
+
+/// Append the dependency specs in a `--with` value, which may be a single spec
+/// or a comma-separated list, to `with_deps`. Blank entries are ignored.
+fn push_with_deps(with_deps: &mut Vec<String>, value: &str) {
+    for dep in value.split(',') {
+        let dep = dep.trim();
+        if !dep.is_empty() {
+            with_deps.push(dep.to_string());
+        }
+    }
 }
 
 fn cmd_cache(args: Vec<String>) -> Result<(), Box<dyn Error>> {
@@ -171,15 +240,17 @@ fn print_help() {
             "ir {} — self-describing R scripts\n",
             "\n",
             "USAGE:\n",
-            "    ir run [Rscript-options...] <script.R> [args...]\n",
+            "    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]\n",
+            "    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [args...]\n",
             "    ir cache <command>\n",
             "\n",
             "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
             "dependencies, builds a dedicated package library, and runs the script\n",
-            "against it. Leading Rscript options are passed to Rscript for the\n",
-            "user-code phase; trailing args are passed through to the script.\n",
-            "`ir cache` manages the dependency resolution and materialised library\n",
-            "cache.\n",
+            "against it. With -e it evaluates inline R expressions instead of a file,\n",
+            "and --with adds dependencies on the command line. Leading Rscript options\n",
+            "are passed to Rscript for the user-code phase; trailing args are passed\n",
+            "through to the program. `ir cache` manages the dependency resolution and\n",
+            "materialised library cache.\n",
             "\n",
             "ENVIRONMENT:\n",
             "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
@@ -194,12 +265,23 @@ fn print_run_help() {
         "Run an R script\n",
         "\n",
         "USAGE:\n",
-        "    ir run [Rscript-options...] <script.R> [args...]\n",
+        "    ir run [Rscript-options...] [--with <pkg>]... <script.R> [args...]\n",
+        "    ir run [Rscript-options...] [--with <pkg>]... -e <expr> [-e <expr>]... [args...]\n",
         "\n",
         "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
         "dependencies, builds a dedicated package library, and runs the script\n",
-        "against it. Leading Rscript options are passed to Rscript for the\n",
-        "user-code phase; trailing args are passed through to the script.\n",
+        "against it. With -e it instead evaluates inline R expressions (mirroring\n",
+        "Rscript) against the same isolated library. Leading Rscript options are\n",
+        "passed to Rscript for the user-code phase; trailing args are passed\n",
+        "through to the program.\n",
+        "\n",
+        "OPTIONS:\n",
+        "    -e <expr>     Evaluate an inline R expression instead of a script file.\n",
+        "                  May be repeated; runs in place of <script.R>.\n",
+        "    --with <pkg>  Add a dependency for this run, merged with any declared\n",
+        "                  in the script frontmatter. May be repeated and accepts a\n",
+        "                  comma-separated list (e.g. --with dplyr,tidyr). Uses the\n",
+        "                  same spec format as `dependencies:` (e.g. cli==3.6.6).\n",
         "\n",
         "ENVIRONMENT:\n",
         "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
@@ -244,28 +326,44 @@ fn print_cache_dir_help() {
     ));
 }
 
-/// Resolve dependencies for `script`, then run it against the resulting library.
-/// Exits the process with the script's own exit code.
+/// Resolve dependencies for `source`, then run it against the resulting
+/// library. Exits the process with the program's own exit code.
 fn cmd_run(
-    script: &str,
+    source: &RunSource,
     rscript_args: &[String],
+    with_deps: &[String],
     script_args: &[String],
 ) -> Result<(), Box<dyn Error>> {
-    let script_path =
-        fs::canonicalize(script).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
-    let spec = read_script_spec(&script_path)?;
-
+    // A script file declares its dependencies, `exclude-newer`, and `r-version` in
+    // YAML frontmatter and is canonicalised so the run is independent of the
+    // working directory. An inline `-e` expression has no frontmatter; its deps
+    // come solely from `--with`.
+    let (script_path, mut spec) = match source {
+        RunSource::Script(script) => {
+            let path = fs::canonicalize(script)
+                .map_err(|e| format!("cannot read script `{script}`: {e}"))?;
+            let spec = read_script_spec(&path)?;
+            (Some(path), spec)
+        }
+        RunSource::Expressions(_) => (None, ScriptSpec::default()),
+    };
+    spec.dependencies.extend(with_deps.iter().cloned());
     let rscript = rscript_for_spec(&spec)?;
 
     // Phase 1: private R session resolves deps and materialises the library.
-    // Rust parses the YAML frontmatter and sends dependency specs on stdin.
+    // Rust parses the frontmatter and sends the dependency specs on stdin.
     let library = resolve_library(&rscript, &spec)?;
 
-    // Phase 2: run the user's script in an isolated R session.
+    // Phase 2: run the user's program in an isolated R session.
+    let expressions: &[String] = match source {
+        RunSource::Expressions(exprs) => exprs,
+        RunSource::Script(_) => &[],
+    };
     let code = run_script(
         &rscript,
         library.as_deref(),
-        &script_path,
+        script_path.as_deref(),
+        expressions,
         rscript_args,
         script_args,
     )?;
@@ -273,7 +371,8 @@ fn cmd_run(
 }
 
 /// Phase 1 — run the embedded driver in a private R session and return the
-/// path to the materialised library.
+/// path to the materialised library. The dependency specs in `spec` (the
+/// script's frontmatter plus any `--with` packages) are streamed on stdin.
 fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let tmp = env::temp_dir();
     let driver = unique_path(&tmp, "ir-resolve", "R");
@@ -410,10 +509,12 @@ fn frontmatter_optional_string(
     })
 }
 
-/// Phase 2 — run `script` in an ordinary R session pointed at `library`.
+/// Phase 2 — run the user's program in an ordinary R session pointed at
+/// `library`. The program is either a script file (`script`) or, when that is
+/// `None`, the inline `expressions` evaluated via `Rscript -e` in its place.
 ///
-/// The script runs as an ordinary `Rscript [Rscript-options...] script.R` — its
-/// `.Renviron`, `.Rprofile` and site files are read unless the forwarded
+/// It runs as an ordinary `Rscript [Rscript-options...] (script.R | -e expr…)` —
+/// its `.Renviron`, `.Rprofile` and site files are read unless the forwarded
 /// Rscript options disable them. The resolved library is injected via `R_LIBS`,
 /// which is *prepended* to `.libPaths()`: resolved dependencies take precedence,
 /// while the user's other libraries remain available. (`R_LIBS` is used rather
@@ -427,12 +528,24 @@ fn frontmatter_optional_string(
 fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
-    script: &Path,
+    script: Option<&Path>,
+    expressions: &[String],
     rscript_args: &[String],
     script_args: &[String],
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(rscript);
-    cmd.args(rscript_args).arg(script).args(script_args);
+    cmd.args(rscript_args);
+    match script {
+        Some(script) => {
+            cmd.arg(script);
+        }
+        None => {
+            for expr in expressions {
+                cmd.arg("-e").arg(expr);
+            }
+        }
+    }
+    cmd.args(script_args);
 
     if let Some(lib) = library {
         cmd.env("R_LIBS", lib);
