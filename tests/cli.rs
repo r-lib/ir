@@ -5,10 +5,29 @@
 //! resolution logic is covered by `tests/test-resolve.R`, which this file also
 //! runs via `cargo test` when an R toolchain is available.
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn ir() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ir"))
+}
+
+fn unique_path(prefix: &str, ext: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{ext}", std::process::id()))
+}
+
+fn write_executable(path: &Path, contents: &str) {
+    fs::write(path, contents).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 #[test]
@@ -48,6 +67,54 @@ fn run_with_missing_script_errors() {
     let out = ir().args(["run", "/no/such/ir-script.R"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("cannot read script"));
+}
+
+#[test]
+fn run_enables_and_forwards_pak_progress_in_resolver() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-script", "R");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${1:-}" = "--vanilla" ]; then
+  if [ "${R_PKG_SHOW_PROGRESS:-}" != "true" ]; then
+    echo "pak progress disabled" >&2
+    exit 7
+  fi
+  echo "pak progress stdout"
+  echo "pak progress stderr" >&2
+  echo "/tmp/ir-test-library" > "$4"
+  exit 0
+fi
+
+if [ "${R_PKG_SHOW_PROGRESS:-}" = "true" ]; then
+  echo "pak progress leaked to user script" >&2
+  exit 8
+fi
+
+echo "user script stdout"
+"#,
+    );
+    fs::write(&script, "cat('unused by fake Rscript\\n')\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .env_remove("R_PKG_SHOW_PROGRESS")
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("pak progress stdout"), "{stdout}");
+    assert!(stdout.contains("user script stdout"), "{stdout}");
+    assert!(stderr.contains("pak progress stderr"), "{stderr}");
 }
 
 /// Run the comprehensive R resolution suite under `cargo test`. Skips (passes

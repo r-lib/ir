@@ -117,6 +117,11 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
         .arg(script)
         .arg(&out)
         .stdin(Stdio::null()) // resolution never reads stdin
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        // pak suppresses progress in noninteractive Rscript unless this is set.
+        // Resolution cache hits return before pak, so this adds no cache-hit pak output.
+        .env("R_PKG_SHOW_PROGRESS", "true")
         .status()
         .map_err(|e| spawn_error(rscript, e))?;
 
