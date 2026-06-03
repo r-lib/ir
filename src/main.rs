@@ -300,19 +300,21 @@ fn read_op_frontmatter_to_string(op: &Path) -> Result<String, Box<dyn Error>> {
     let mut frontmatter = String::new();
     let mut line = String::new();
 
-    reader.read_line(&mut line)?;
+    let mut read_next_line = |line: &mut String| {
+        line.clear();
+        reader.read_line(line)
+    };
+
+    read_next_line(&mut line)?;
 
     if line.starts_with("#!") {
-        line.clear();
-        reader.read_line(&mut line)?;
+        read_next_line(&mut line)?;
     }
 
     while let Some(rest) = line.strip_prefix("#| ") {
-        frontmatter.push_str(rest.trim_end_matches(&['\r', '\n'][..]));
-        frontmatter.push('\n');
+        frontmatter.push_str(rest);
 
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        if read_next_line(&mut line)? == 0 {
             break;
         }
     }
