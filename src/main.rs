@@ -8,8 +8,8 @@
 //! #| dependencies:
 //! #|   - dplyr>=1.0
 //! #|   - tidyr
-//! #| R: ">= 4.0"
-//! #| exclude after: "2024-01-15"
+//! #| r-version: ">= 4.0"
+//! #| exclude-newer: "2024-01-15"
 //!
 //! library(dplyr)
 //! 1 + 1
@@ -38,6 +38,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use saphyr::{LoadableYamlNode, Yaml};
 
+mod rig;
+
 /// The R resolution driver, embedded at compile time so `ir` ships as one
 /// self-contained binary while the source stays editable as real R.
 const RESOLVE_DRIVER: &str = include_str!("../driver/resolve.R");
@@ -45,7 +47,7 @@ const RESOLVE_DRIVER: &str = include_str!("../driver/resolve.R");
 #[derive(Debug, Default)]
 struct ScriptSpec {
     dependencies: Vec<String>,
-    exclude_after: Option<String>,
+    exclude_newer: Option<String>,
     r_requirement: Option<String>,
 }
 
@@ -251,12 +253,13 @@ fn cmd_run(
 ) -> Result<(), Box<dyn Error>> {
     let script_path =
         fs::canonicalize(script).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
+    let spec = read_script_spec(&script_path)?;
 
-    let rscript = rscript_command();
+    let rscript = rscript_for_spec(&spec)?;
 
     // Phase 1: private R session resolves deps and materialises the library.
     // Rust parses the YAML frontmatter and sends dependency specs on stdin.
-    let library = resolve_library(&rscript, &script_path)?;
+    let library = resolve_library(&rscript, &spec)?;
 
     // Phase 2: run the user's script in an isolated R session.
     let code = run_script(
@@ -271,11 +274,10 @@ fn cmd_run(
 
 /// Phase 1 — run the embedded driver in a private R session and return the
 /// path to the materialised library.
-fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Box<dyn Error>> {
+fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let tmp = env::temp_dir();
     let driver = unique_path(&tmp, "ir-resolve", "R");
     let result_file = unique_path(&tmp, "ir-libpath", "txt");
-    let spec = read_script_spec(script)?;
     fs::write(&driver, RESOLVE_DRIVER)?;
 
     let mut cmd = Command::new(rscript);
@@ -287,11 +289,8 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
         // pak suppresses progress in noninteractive Rscript unless this is set.
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
         .env("R_PKG_SHOW_PROGRESS", "true");
-    if let Some(exclude_after) = &spec.exclude_after {
-        cmd.env("IR_EXCLUDE_AFTER", exclude_after);
-    }
-    if let Some(r_requirement) = &spec.r_requirement {
-        cmd.env("IR_R_REQUIREMENT", r_requirement);
+    if let Some(exclude_newer) = &spec.exclude_newer {
+        cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
     }
 
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
@@ -346,9 +345,17 @@ fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
 
     Ok(ScriptSpec {
         dependencies: frontmatter_dependencies(doc)?,
-        exclude_after: frontmatter_optional_string(doc, "exclude after")?,
-        r_requirement: frontmatter_optional_string(doc, "R")?,
+        exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
+        r_requirement: frontmatter_optional_string(doc, "r-version")?,
     })
+}
+
+fn rscript_for_spec(spec: &ScriptSpec) -> Result<std::ffi::OsString, Box<dyn Error>> {
+    let Some(req) = &spec.r_requirement else {
+        return Ok(rscript_command());
+    };
+
+    rig::resolve_rscript(req, spec.exclude_newer.as_deref())
 }
 
 fn frontmatter_dependencies(doc: &Yaml<'_>) -> Result<Vec<String>, Box<dyn Error>> {

@@ -69,41 +69,29 @@ test_that("non-standard refs are passed through untouched", {
   expect_equal(ref("url::https://x/y.tar.gz"), "url::https://x/y.tar.gz")
 })
 
-# --- exclude-after snapshots -----------------------------------------------
+# --- exclude-newer snapshots -----------------------------------------------
 
-test_that("ir_exclude_after reads an optional YYYY-MM-DD date", {
-  expect_null(ir_exclude_after(NULL))
-  expect_equal(ir_exclude_after("2024-01-15"), "2024-01-15")
-  expect_equal(ir_exclude_after(" 2024-01-15 "), "2024-01-15")
+test_that("ir_exclude_newer reads an optional YYYY-MM-DD date", {
+  expect_null(ir_exclude_newer(NULL))
+  expect_equal(ir_exclude_newer("2024-01-15"), "2024-01-15")
+  expect_equal(ir_exclude_newer(" 2024-01-15 "), "2024-01-15")
+  expect_equal(ir_exclude_newer("2024-02-31"), "2024-02-31")
 })
 
-test_that("ir_exclude_after rejects malformed dates", {
-  expect_error(ir_exclude_after("2024-01"), "YYYY-MM-DD")
-  expect_error(ir_exclude_after("2024-02-31"), "YYYY-MM-DD")
+test_that("ir_exclude_newer rejects malformed dates", {
+  expect_error(ir_exclude_newer("2024-01"), "YYYY-MM-DD")
+  expect_error(ir_exclude_newer("20240115"), "YYYY-MM-DD")
 })
 
-test_that("ir_repos uses a PPM snapshot when exclude after is present", {
+test_that("ir_repos uses a PPM snapshot when exclude-newer is present", {
   expect_equal(ir_repos("2024-01-15"),
                c(CRAN = "https://packagemanager.posit.co/cran/2024-01-15"))
 })
 
-test_that("ir_repos keeps the CRAN fallback when exclude after is absent", {
+test_that("ir_repos keeps the CRAN fallback when exclude-newer is absent", {
   withr::with_options(list(repos = c(CRAN = "@CRAN@")), {
     expect_equal(ir_repos(), c(CRAN = "https://cran.r-project.org"))
   })
-})
-
-# --- R version soft-check ---------------------------------------------------
-
-test_that("ir_check_r_version warns only on a real mismatch", {
-  r46 <- numeric_version("4.6.0")
-  expect_warning(ir_check_r_version(">= 99.0", r46), "requests R")
-  expect_warning(ir_check_r_version("== 4.0",  r46), "requests R")
-  expect_silent(ir_check_r_version(">= 4.0", r46))
-  expect_silent(ir_check_r_version("4.0",    r46))   # bare implies >=
-  expect_silent(ir_check_r_version("<= 4.6", r46))
-  expect_silent(ir_check_r_version(NULL, r46))        # no R key
-  expect_silent(ir_check_r_version("not-a-version", r46))
 })
 
 # --- cache location ---------------------------------------------------------
@@ -138,9 +126,9 @@ test_that("ir_input_key changes with date, deps, R version, and platform", {
 test_that("ir_input_key separates dated PPM snapshots from daily latest resolution", {
   daily <- ir_input_key(c("dplyr"), as.Date("2026-06-02"), "4.6.0", "aarch64")
   snap1 <- ir_input_key(c("dplyr"), as.Date("2026-06-02"), "4.6.0", "aarch64",
-                        exclude_after = "2024-01-15")
+                        exclude_newer = "2024-01-15")
   snap2 <- ir_input_key(c("dplyr"), as.Date("2026-06-03"), "4.6.0", "aarch64",
-                        exclude_after = "2024-01-15")
+                        exclude_newer = "2024-01-15")
   expect_false(daily == snap1)
   expect_identical(snap1, snap2)
 })

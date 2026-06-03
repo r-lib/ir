@@ -3,7 +3,7 @@
 #|   - dplyr>=1.0
 #|   - tidyr
 #|   - secretbase==1.2
-#| R: ">= 4.0"
+#| r-version: ">= 4.0"
 
 library(dplyr)
 library(tidyr)

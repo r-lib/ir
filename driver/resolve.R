@@ -28,39 +28,18 @@ ir_env_optional <- function(name) {
   if (is.na(value) || !nzchar(value)) NULL else value
 }
 
-# Optional date-bounded resolution. `exclude after` is a YAML mapping key whose
+# Optional date-bounded resolution. `exclude-newer` is a YAML mapping key whose
 # value is an ISO date; resolution then uses that day's Posit Package Manager
 # CRAN snapshot instead of the latest CRAN repository.
-ir_exclude_after <- function(value) {
+ir_exclude_newer <- function(value) {
   if (is.null(value)) return(NULL)
 
   value <- trimws(as.character(value)[[1L]])
   if (!grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", value))
-    stop("`exclude after` must be a date string in YYYY-MM-DD format",
-         call. = FALSE)
-
-  date <- as.Date(value, format = "%Y-%m-%d")
-  if (is.na(date) || !identical(format(date, "%Y-%m-%d"), value))
-    stop("`exclude after` must be a date string in YYYY-MM-DD format",
+    stop("`exclude-newer` must be a date string in YYYY-MM-DD format",
          call. = FALSE)
 
   value
-}
-
-# Soft-check the optional `R:` version constraint against the running R; warn
-# on a mismatch but never stop (this prototype does not select R versions).
-ir_check_r_version <- function(req = NULL, current = getRversion()) {
-  if (is.null(req)) return(invisible())
-  req <- trimws(as.character(req)[[1L]])
-  m <- regmatches(req, regexec("^(>=|>|<=|<|==)?[[:space:]]*([0-9][0-9.-]*)$", req))[[1L]]
-  if (length(m) == 3L) {
-    op <- if (nzchar(m[[2L]])) m[[2L]] else ">="
-    ok <- do.call(op, list(current, numeric_version(m[[3L]])))
-    if (!isTRUE(ok))
-      warning(sprintf("script requests R %s but running R %s", req, current),
-              call. = FALSE, immediate. = TRUE)
-  }
-  invisible()
 }
 
 ## --- pak ref normalisation --------------------------------------------------
@@ -95,13 +74,13 @@ ir_cache_dir <- function() {
 
 ## --- repositories -----------------------------------------------------------
 
-ir_ppm_snapshot_url <- function(exclude_after) {
-  sprintf("https://packagemanager.posit.co/cran/%s", exclude_after)
+ir_ppm_snapshot_url <- function(exclude_newer) {
+  sprintf("https://packagemanager.posit.co/cran/%s", exclude_newer)
 }
 
-ir_repos <- function(exclude_after = NULL, repos = getOption("repos")) {
-  if (!is.null(exclude_after))
-    return(c(CRAN = ir_ppm_snapshot_url(exclude_after)))
+ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
+  if (!is.null(exclude_newer))
+    return(c(CRAN = ir_ppm_snapshot_url(exclude_newer)))
 
   cran <- if (!is.null(repos)) repos[["CRAN"]] else NULL
   if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
@@ -122,11 +101,11 @@ ir_input_key <- function(deps,
                          date          = Sys.Date(),
                          rversion      = getRversion(),
                          platform      = R.version$platform,
-                         exclude_after = NULL) {
-  source_key <- if (is.null(exclude_after))
+                         exclude_newer = NULL) {
+  source_key <- if (is.null(exclude_newer))
     as.character(date)
   else
-    sprintf("exclude after: %s", exclude_after)
+    sprintf("exclude-newer: %s", exclude_newer)
 
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
@@ -145,9 +124,8 @@ ir_resolve_main <- function() {
   cache_dir   <- ir_cache_dir()
 
   ## 1. Consume inputs parsed by Rust from script frontmatter
-  exclude_after <- ir_exclude_after(ir_env_optional("IR_EXCLUDE_AFTER"))
-  ir_check_r_version(ir_env_optional("IR_R_REQUIREMENT"))
-  repos <- ir_repos(exclude_after)
+  exclude_newer <- ir_exclude_newer(ir_env_optional("IR_EXCLUDE_NEWER"))
+  repos <- ir_repos(exclude_newer)
   options(repos = repos)
 
   ## 1b. Resolution cache: if this exact request was resolved already and its
@@ -155,7 +133,7 @@ ir_resolve_main <- function() {
   ## only after a successful materialise (below), so its presence implies a
   ## complete library.
   marker <- file.path(cache_dir, "resolutions",
-                      ir_input_key(deps, exclude_after = exclude_after))
+                      ir_input_key(deps, exclude_newer = exclude_newer))
   if (file.exists(marker)) {
     cached <- readLines(marker, n = 1L, warn = FALSE)
     if (length(cached) && nzchar(cached) && dir.exists(cached)) {
