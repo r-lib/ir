@@ -4,17 +4,18 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[derive(Debug)]
+#[derive(Debug, serde::Deserialize)]
 struct AvailableR {
     name: String,
     version: String,
     date: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Deserialize)]
 struct InstalledR {
     name: String,
     version: String,
+    #[serde(default)]
     aliases: Vec<String>,
     binary: PathBuf,
 }
@@ -107,16 +108,14 @@ fn is_iso_date(value: &str) -> bool {
 }
 
 fn rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    let stdout = rig_json(&["available", "--json"])?;
-    parse_available_versions(&stdout)
+    rig_json(&["available", "--json"])
 }
 
 fn rig_list() -> Result<Vec<InstalledR>, Box<dyn Error>> {
-    let stdout = rig_json(&["list", "--json"])?;
-    parse_installed_versions(&stdout)
+    rig_json(&["list", "--json"])
 }
 
-fn rig_json(args: &[&str]) -> Result<String, Box<dyn Error>> {
+fn rig_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, Box<dyn Error>> {
     let output = Command::new("rig")
         .args(args)
         .stdin(Stdio::null())
@@ -134,86 +133,8 @@ fn rig_json(args: &[&str]) -> Result<String, Box<dyn Error>> {
         return Err(format!("`rig {}` failed: {stderr}", args.join(" ")).into());
     }
 
-    Ok(String::from_utf8(output.stdout)?)
-}
-
-fn parse_available_versions(json: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    let value: serde_json::Value = serde_json::from_str(json)?;
-    let array = value
-        .as_array()
-        .ok_or("`rig available --json` did not return a JSON array")?;
-
-    array
-        .iter()
-        .map(|item| {
-            Ok(AvailableR {
-                name: required_json_string(item, "name")?,
-                version: required_json_string(item, "version")?,
-                date: optional_json_string(item, "date")?,
-            })
-        })
-        .collect()
-}
-
-fn parse_installed_versions(json: &str) -> Result<Vec<InstalledR>, Box<dyn Error>> {
-    let value: serde_json::Value = serde_json::from_str(json)?;
-    let array = value
-        .as_array()
-        .ok_or("`rig list --json` did not return a JSON array")?;
-
-    array
-        .iter()
-        .map(|item| {
-            Ok(InstalledR {
-                name: required_json_string(item, "name")?,
-                version: required_json_string(item, "version")?,
-                aliases: optional_json_string_array(item, "aliases")?,
-                binary: PathBuf::from(required_json_string(item, "binary")?),
-            })
-        })
-        .collect()
-}
-
-fn required_json_string(value: &serde_json::Value, key: &str) -> Result<String, Box<dyn Error>> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| format!("expected `{key}` string in rig JSON").into())
-}
-
-fn optional_json_string(
-    value: &serde_json::Value,
-    key: &str,
-) -> Result<Option<String>, Box<dyn Error>> {
-    match value.get(key) {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(value) => value
-            .as_str()
-            .map(|value| Some(value.to_string()))
-            .ok_or_else(|| format!("expected `{key}` string or null in rig JSON").into()),
-    }
-}
-
-fn optional_json_string_array(
-    value: &serde_json::Value,
-    key: &str,
-) -> Result<Vec<String>, Box<dyn Error>> {
-    let Some(value) = value.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(array) = value.as_array() else {
-        return Err(format!("expected `{key}` array in rig JSON").into());
-    };
-    array
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| format!("expected `{key}` string array in rig JSON").into())
-        })
-        .collect()
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("failed to parse `rig {}` JSON: {e}", args.join(" ")).into())
 }
 
 fn released_before_or_on(version: &AvailableR, exclude_newer: Option<&str>) -> bool {
