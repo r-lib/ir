@@ -63,7 +63,9 @@ fn help_is_shown_for_help_flag_and_no_args() {
         assert!(stdout.contains("USAGE"), "args {args:?}: {stdout}");
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(
-            stdout.contains("\n    ir run <script.R> [args...]\n    ir cache <command>\n"),
+            stdout.contains(
+                "\n    ir run [Rscript-options...] <script.R> [args...]\n    ir cache <command>\n"
+            ),
             "args {args:?}: {stdout}"
         );
     }
@@ -245,6 +247,68 @@ echo "user script stdout"
     assert!(stdout.contains("pak progress stdout"), "{stdout}");
     assert!(stdout.contains("user script stdout"), "{stdout}");
     assert!(stderr.contains("pak progress stderr"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_forwards_leading_rscript_args_to_user_script() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-script", "R");
+    fs::write(&script, "cat('unused by fake Rscript\\n')\n").unwrap();
+    let canonical_script = fs::canonicalize(&script).unwrap();
+
+    write_executable(
+        &fake_rscript,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+
+if [ "$1" != "--vanilla" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--vanilla" ]; then
+      echo "Rscript args leaked to resolver" >&2
+      exit 9
+    fi
+  done
+  test "$#" = "3"
+  : > "$3"
+  exit 0
+fi
+
+test "$#" = "5"
+test "$1" = "--vanilla"
+test "$2" = "--default-packages=utils"
+test "$3" = "{}"
+test "$4" = "--script-arg"
+test "$5" = "value"
+echo "user Rscript args received"
+"#,
+            canonical_script.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args([
+            "run",
+            "--vanilla",
+            "--default-packages=utils",
+            script.to_str().unwrap(),
+            "--script-arg",
+            "value",
+        ])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("user Rscript args received"),
+        "{:?}",
+        out
+    );
 }
 
 /// The user script's exit code surfaces unchanged as `ir`'s exit code. On Unix

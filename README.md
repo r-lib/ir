@@ -20,6 +20,7 @@ library(tidyr)
 
 ```console
 $ ir run script.R
+$ ir run --vanilla script.R
 # or, if the script is executable:
 $ ./script.R
 ```
@@ -49,8 +50,9 @@ $ ./script.R
      materialises that path as a light-weight library of **symlinks** into the
      cache. The library lives in our cache, not R's temp dir, so it persists.
 2. **Run** (an ordinary R session).
-   - The script runs as `Rscript script.R`, so it sees the user's normal R
-     environment — `.Renviron`, `.Rprofile` and site files are all read.
+   - The script runs as `Rscript [Rscript-options...] script.R`, so it sees the
+     user's normal R environment unless forwarded Rscript options such as
+     `--vanilla` disable startup files.
    - The materialised library is injected via `R_LIBS`, which **prepends** it to
      `.libPaths()`: the resolved dependencies take precedence, while the user's
      other libraries remain available as a fallback.
