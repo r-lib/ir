@@ -1,0 +1,11 @@
+Manage ir's cache
+
+USAGE:
+    ir cache <COMMAND>
+
+COMMANDS:
+    clean  Clear the cache, removing all entries
+    dir    Show the cache directory
+
+ENVIRONMENT:
+    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))

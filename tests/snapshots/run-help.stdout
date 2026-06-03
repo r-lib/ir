@@ -1,0 +1,13 @@
+Run an R script
+
+USAGE:
+    ir run [Rscript-options...] <script.R> [args...]
+
+`ir run` reads the YAML frontmatter from <script.R>, resolves its
+dependencies, builds a dedicated package library, and runs the script
+against it. Leading Rscript options are passed to Rscript for the
+user-code phase; trailing args are passed through to the script.
+
+ENVIRONMENT:
+    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))
+    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)
