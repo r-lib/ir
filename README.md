@@ -71,7 +71,9 @@ $ ir run --r-version 4.5 script.R            # select R with rig
      `--vanilla` disable startup files.
    - The materialised library is injected via `R_LIBS`, which **prepends** it to
      `.libPaths()`: the resolved dependencies take precedence, while the user's
-     other libraries remain available as a fallback.
+     other libraries remain available as a fallback. With `--isolated`, the user
+     library is dropped (`R_LIBS_USER=NULL`); the system library stays on the
+     path. See [Isolated runs](#isolated-runs).
 
 Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
@@ -153,6 +155,24 @@ $ ir run --vanilla --with cli script.R       # Rscript options still apply
 `--with` packages and `--r-version` join the resolved set that is hashed into the
 content-addressed library, so a given combination of frontmatter and command-line
 requirements resolves once and is reused on later runs.
+
+## Isolated runs
+
+By default the resolved library is *prepended* to `.libPaths()`, so the user's
+own libraries stay on the search path as a fallback. Pass `--isolated` to drop
+the user library for the run:
+
+```console
+$ ir run --isolated script.R
+$ ir run --isolated --with cli -e 'cli::cli_alert_success("hi")'
+```
+
+`--isolated` sets `R_LIBS_USER=NULL` — R's documented way to disable the user
+library — so `.libPaths()` is the resolved library plus the site and base/system
+libraries. This stops a run from silently borrowing an undeclared package from
+your personal library. The system library stays on the path, so base and
+recommended packages keep working (and anything else installed there is still
+visible).
 
 ## Requirements
 

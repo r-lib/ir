@@ -75,6 +75,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 &run.with_deps,
                 run.r_requirement.as_deref(),
                 &run.script_args,
+                run.isolated,
             )
         }
         Some("cache") => cmd_cache(args.collect()),
@@ -103,6 +104,7 @@ struct RunArgs {
     r_requirement: Option<String>,
     source: RunSource,
     script_args: Vec<String>,
+    isolated: bool,
 }
 
 /// Split the leading region of `ir run`'s arguments into Rscript options,
@@ -110,18 +112,21 @@ struct RunArgs {
 /// source (a script path or `-e` expressions), with everything after the source
 /// treated as program args.
 ///
-/// `-e <expr>`, `--with <spec>`, and `--r-version <spec>` are `ir`-level flags
-/// handled here: `-e` supplies inline R to run instead of a file, `--with`
-/// declares extra dependencies, and `--r-version` chooses the R version via
-/// rig. Any other `-…` argument is an Rscript option, forwarded verbatim to the
-/// user-code phase. Scanning stops at the first non-option, which is the script
-/// path unless `-e` was given (in which case it, and everything after, are
-/// program args — as with Rscript).
+/// `-e <expr>`, `--with <spec>`, `--r-version <spec>` and `--isolated` are
+/// `ir`-level flags handled here: `-e` supplies inline R to run instead of a
+/// file, `--with` declares extra dependencies, `--r-version` chooses the R
+/// version via rig, and `--isolated` restricts the user-code library path to the
+/// resolved library alone. None are forwarded to Rscript. Any other `-…`
+/// argument is an Rscript option, forwarded verbatim to the user-code phase.
+/// Scanning stops at the first non-option, which is the script path unless `-e`
+/// was given (in which case it, and everything after, are program args — as with
+/// Rscript).
 fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
     let mut expressions = Vec::new();
+    let mut isolated = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -145,6 +150,8 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--isolated" {
+            isolated = true;
         } else if arg.starts_with('-') {
             rscript_args.push(arg);
         } else {
@@ -174,6 +181,7 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
         r_requirement,
         source,
         script_args,
+        isolated,
     })
 }
 
@@ -253,8 +261,8 @@ fn print_help() {
             "ir {} — self-describing R scripts\n",
             "\n",
             "USAGE:\n",
-            "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
-            "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
+            "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
+            "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
             "    ir cache <command>\n",
             "\n",
             "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
@@ -278,8 +286,8 @@ fn print_run_help() {
         "Run an R script\n",
         "\n",
         "USAGE:\n",
-        "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
-        "    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]\n",
+        "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
+        "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]\n",
         "\n",
         "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
         "dependencies, builds a dedicated package library, and runs the script\n",
@@ -299,6 +307,8 @@ fn print_run_help() {
         "    --r-version <spec>\n",
         "                  Select the R version for this run with rig. Overrides\n",
         "                  `r-version:` in script frontmatter.\n",
+        "    --isolated    Disable the user library (R_LIBS_USER) so the run cannot\n",
+        "                  borrow undeclared packages from it.\n",
         "\n",
         "ENVIRONMENT:\n",
         "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
@@ -351,6 +361,7 @@ fn cmd_run(
     with_deps: &[String],
     r_requirement: Option<&str>,
     script_args: &[String],
+    isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     // A script file declares its dependencies, `exclude-newer`, and `r-version` in
     // YAML frontmatter and is canonicalised so the run is independent of the
@@ -387,6 +398,7 @@ fn cmd_run(
         expressions,
         rscript_args,
         script_args,
+        isolated,
     )?;
     std::process::exit(code);
 }
@@ -542,6 +554,11 @@ fn frontmatter_optional_string(
 /// than `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would
 /// override the latter.)
 ///
+/// When `isolated` is set, the user library is dropped too: `R_LIBS_USER=NULL`
+/// is R's documented way to disable it, so `.libPaths()` is the resolved library
+/// (via `R_LIBS`) plus the site and base/system libraries. The system library
+/// stays available, so base and recommended packages keep working.
+///
 /// As `ir`'s final step, on Unix we `exec` into Rscript so R takes over this
 /// process — inheriting our PID, stdio and signals, and propagating its exit
 /// status (signal deaths included) verbatim. `exec` returns only on launch
@@ -553,6 +570,7 @@ fn run_script(
     expressions: &[String],
     rscript_args: &[String],
     script_args: &[String],
+    isolated: bool,
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(rscript);
     cmd.args(rscript_args);
@@ -570,6 +588,14 @@ fn run_script(
 
     if let Some(lib) = library {
         cmd.env("R_LIBS", lib);
+    }
+
+    if isolated {
+        // Drop the user library so the run can't borrow undeclared packages from
+        // it. "NULL" is R's special value that disables the user library; an
+        // empty value or unset would instead fall back to the default location.
+        // The site and base/system libraries stay on the path.
+        cmd.env("R_LIBS_USER", "NULL");
     }
 
     #[cfg(unix)]
