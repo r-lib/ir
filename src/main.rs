@@ -60,15 +60,14 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("run") => {
-            let script = args
-                .next()
-                .ok_or("`ir run` requires a script path (try `ir run script.R`)")?;
-            if script == "--help" || script == "-h" {
+            let args: Vec<String> = args.collect();
+            if matches!(args.as_slice(), [arg] if arg == "--help" || arg == "-h") {
                 print_run_help();
                 return Ok(());
             }
-            let script_args: Vec<String> = args.collect();
-            cmd_run(&script, &script_args)
+
+            let run = parse_run_args(args)?;
+            cmd_run(&run.script, &run.rscript_args, &run.script_args)
         }
         Some("cache") => cmd_cache(args.collect()),
         Some("--version" | "-V") => {
@@ -81,6 +80,28 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         }
         Some(other) => Err(format!("unknown command `{other}` (try `ir run script.R`)").into()),
     }
+}
+
+struct RunArgs {
+    rscript_args: Vec<String>,
+    script: String,
+    script_args: Vec<String>,
+}
+
+fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
+    let script_index = args
+        .iter()
+        .position(|arg| !arg.starts_with('-'))
+        .ok_or("`ir run` requires a script path (try `ir run script.R`)")?;
+    let mut args = args;
+    let script_args = args.split_off(script_index + 1);
+    let script = args.pop().expect("script index already checked");
+
+    Ok(RunArgs {
+        rscript_args: args,
+        script,
+        script_args,
+    })
 }
 
 fn cmd_cache(args: Vec<String>) -> Result<(), Box<dyn Error>> {
@@ -148,12 +169,13 @@ fn print_help() {
             "ir {} — self-describing R scripts\n",
             "\n",
             "USAGE:\n",
-            "    ir run <script.R> [args...]\n",
+            "    ir run [Rscript-options...] <script.R> [args...]\n",
             "    ir cache <command>\n",
             "\n",
             "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
             "dependencies, builds a dedicated package library, and runs the script\n",
-            "against it. Any trailing args are passed through to the script.\n",
+            "against it. Leading Rscript options are passed to Rscript for the\n",
+            "user-code phase; trailing args are passed through to the script.\n",
             "`ir cache` manages the dependency resolution and materialised library\n",
             "cache.\n",
             "\n",
@@ -170,11 +192,12 @@ fn print_run_help() {
         "Run an R script\n",
         "\n",
         "USAGE:\n",
-        "    ir run <script.R> [args...]\n",
+        "    ir run [Rscript-options...] <script.R> [args...]\n",
         "\n",
         "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
         "dependencies, builds a dedicated package library, and runs the script\n",
-        "against it. Any trailing args are passed through to the script.\n",
+        "against it. Leading Rscript options are passed to Rscript for the\n",
+        "user-code phase; trailing args are passed through to the script.\n",
         "\n",
         "ENVIRONMENT:\n",
         "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
@@ -221,7 +244,11 @@ fn print_cache_dir_help() {
 
 /// Resolve dependencies for `script`, then run it against the resulting library.
 /// Exits the process with the script's own exit code.
-fn cmd_run(script: &str, script_args: &[String]) -> Result<(), Box<dyn Error>> {
+fn cmd_run(
+    script: &str,
+    rscript_args: &[String],
+    script_args: &[String],
+) -> Result<(), Box<dyn Error>> {
     let script_path =
         fs::canonicalize(script).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
 
@@ -232,7 +259,13 @@ fn cmd_run(script: &str, script_args: &[String]) -> Result<(), Box<dyn Error>> {
     let library = resolve_library(&rscript, &script_path)?;
 
     // Phase 2: run the user's script in an isolated R session.
-    let code = run_script(&rscript, library.as_deref(), &script_path, script_args)?;
+    let code = run_script(
+        &rscript,
+        library.as_deref(),
+        &script_path,
+        rscript_args,
+        script_args,
+    )?;
     std::process::exit(code);
 }
 
@@ -372,13 +405,13 @@ fn frontmatter_optional_string(
 
 /// Phase 2 — run `script` in an ordinary R session pointed at `library`.
 ///
-/// The script runs as an ordinary `Rscript script.R` — its `.Renviron`,
-/// `.Rprofile` and site files are read, so it sees the user's normal R
-/// environment. The resolved library is injected via `R_LIBS`, which is
-/// *prepended* to `.libPaths()`: resolved dependencies take precedence, while
-/// the user's other libraries remain available. (`R_LIBS` is used rather than
-/// `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would override
-/// the latter.)
+/// The script runs as an ordinary `Rscript [Rscript-options...] script.R` — its
+/// `.Renviron`, `.Rprofile` and site files are read unless the forwarded
+/// Rscript options disable them. The resolved library is injected via `R_LIBS`,
+/// which is *prepended* to `.libPaths()`: resolved dependencies take precedence,
+/// while the user's other libraries remain available. (`R_LIBS` is used rather
+/// than `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would
+/// override the latter.)
 ///
 /// As `ir`'s final step, on Unix we `exec` into Rscript so R takes over this
 /// process — inheriting our PID, stdio and signals, and propagating its exit
@@ -388,10 +421,11 @@ fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
     script: &Path,
+    rscript_args: &[String],
     script_args: &[String],
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(rscript);
-    cmd.arg(script).args(script_args);
+    cmd.args(rscript_args).arg(script).args(script_args);
 
     if let Some(lib) = library {
         cmd.env("R_LIBS", lib);
