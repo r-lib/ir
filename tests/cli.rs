@@ -204,7 +204,7 @@ printf '%s\n' "{}"
 
 #[cfg(unix)]
 #[test]
-fn run_passes_dependencies_as_resolver_args_and_forwards_pak_progress() {
+fn run_passes_dependencies_on_resolver_stdin_and_forwards_pak_progress() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let script = unique_path("ir-script", "R");
 
@@ -224,12 +224,16 @@ if [ "${IR_RESOLVE_OUT_FILE:-}" != "" ]; then
     echo "pak progress disabled" >&2
     exit 7
   fi
-  if [ -n "$(cat)" ]; then
-    echo "unexpected resolver stdin" >&2
+  if [ "$#" != "1" ]; then
+    echo "unexpected resolver args: $*" >&2
     exit 10
   fi
-  if [ "$#" != "3" ] || [ "$2" != "dplyr>=1.0" ] || [ "$3" != "tidyr" ]; then
-    echo "unexpected resolver dependency args: $*" >&2
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  cat > "$actual"
+  printf 'dplyr>=1.0\ntidyr\n' > "$expected"
+  if ! cmp -s "$actual" "$expected"; then
+    echo "unexpected resolver stdin" >&2
     exit 11
   fi
   if [ "${IR_EXCLUDE_AFTER:-}" != "2024-01-15" ]; then

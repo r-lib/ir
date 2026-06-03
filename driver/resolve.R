@@ -2,10 +2,10 @@
 #
 # Run by the `ir` Rust binary in a private, throw-away R session.
 #
-#   IR_RESOLVE_OUT_FILE=<out_file> Rscript resolve.R <dependencies...>
+#   IR_RESOLVE_OUT_FILE=<out_file> Rscript resolve.R
 #
 # Responsibilities (steps 1-4 of the `ir` pipeline):
-#   1. Consume package dependency specs from command-line args.
+#   1. Consume package dependency specs from stdin, one dependency per line.
 #   2. Resolve the declared dependencies into concrete versions with pak.
 #   3. Hash the resolved set to derive a content-addressed library path
 #      under <cache_dir>.
@@ -138,7 +138,7 @@ ir_input_key <- function(deps,
 
 ir_resolve_main <- function() {
 
-  deps        <- commandArgs(trailingOnly = TRUE)
+  deps        <- readLines(stdin(), warn = FALSE)
   out_file    <- ir_env_optional("IR_RESOLVE_OUT_FILE")
   stopifnot(!is.null(out_file))
   cache_dir   <- ir_cache_dir()

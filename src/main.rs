@@ -18,9 +18,9 @@
 //! The pipeline has two phases:
 //!
 //!   1. Rust extracts and parses the leading `#| ` YAML frontmatter block. A
-//!      private R session (`driver/resolve.R`) receives the dependency specs as
-//!      ordinary command-line args, resolves them with pak, hashes the resolved
-//!      set into a content-addressed library path under the cache directory, and
+//!      private R session (`driver/resolve.R`) receives the dependency specs on
+//!      stdin, resolves them with pak, hashes the resolved set into a
+//!      content-addressed library path under the cache directory, and
 //!      materialises that path as a light-weight library of symlinks into renv's
 //!      package cache. The path is reported back to us.
 //!
@@ -31,7 +31,7 @@ use std::env;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -228,7 +228,7 @@ fn cmd_run(script: &str, script_args: &[String]) -> Result<(), Box<dyn Error>> {
     let rscript = rscript_command();
 
     // Phase 1: private R session resolves deps and materialises the library.
-    // Rust parses the YAML frontmatter and sends dependency specs as script args.
+    // Rust parses the YAML frontmatter and sends dependency specs on stdin.
     let library = resolve_library(&rscript, &script_path)?;
 
     // Phase 2: run the user's script in an isolated R session.
@@ -247,8 +247,7 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
 
     let mut cmd = Command::new(rscript);
     cmd.arg(&driver)
-        .args(&spec.dependencies)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .env("IR_RESOLVE_OUT_FILE", &out)
@@ -263,6 +262,12 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
     }
 
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
+    {
+        let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
+        for dependency in &spec.dependencies {
+            writeln!(stdin, "{dependency}")?;
+        }
+    }
     let status = child
         .wait()
         .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
@@ -308,9 +313,7 @@ fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
 
     Ok(ScriptSpec {
         dependencies: frontmatter_dependencies(doc)?,
-        exclude_after: frontmatter_optional_string(doc, "exclude after")?
-            .map(validate_exclude_after)
-            .transpose()?,
+        exclude_after: frontmatter_optional_string(doc, "exclude after")?,
         r_requirement: frontmatter_optional_string(doc, "R")?,
     })
 }
@@ -365,47 +368,6 @@ fn frontmatter_optional_string(
     } else {
         Some(value.to_owned())
     })
-}
-
-fn validate_exclude_after(value: String) -> Result<String, Box<dyn Error>> {
-    if is_valid_iso_date(&value) {
-        Ok(value)
-    } else {
-        Err("`exclude after` must be a date string in YYYY-MM-DD format".into())
-    }
-}
-
-fn is_valid_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 10
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || !bytes[..4].iter().all(u8::is_ascii_digit)
-        || !bytes[5..7].iter().all(u8::is_ascii_digit)
-        || !bytes[8..].iter().all(u8::is_ascii_digit)
-    {
-        return false;
-    }
-
-    let year = value[..4].parse::<u16>().unwrap();
-    let month = value[5..7].parse::<u8>().unwrap();
-    let day = value[8..].parse::<u8>().unwrap();
-    if month == 0 || month > 12 || day == 0 {
-        return false;
-    }
-
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => return false,
-    };
-    day <= days_in_month
-}
-
-fn is_leap_year(year: u16) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 /// Phase 2 — run `script` in an ordinary R session pointed at `library`.

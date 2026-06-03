@@ -147,7 +147,7 @@ test_that("ir_input_key separates dated PPM snapshots from daily latest resoluti
 
 # --- dependency refs ---------------------------------------------------------
 
-test_that("dependency args are normalized to refs", {
+test_that("dependency specs are normalized to refs", {
   deps <- c("dplyr>=1.0", "secretbase==1.2")
   refs <- vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
   expect_equal(refs, c("dplyr@>=1.0", "secretbase@1.2"))

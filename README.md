@@ -75,8 +75,8 @@ cache, including materialised libraries and resolution markers.
 
 The YAML frontmatter is the leading block of lines that start exactly with
 `#| ` (after a single optional `#!` shebang line). Rust strips the `#| ` prefix,
-parses the YAML, and passes the declared dependency specs to the R resolver as
-ordinary command-line arguments. Because the block is parsed as real YAML, two
+parses the YAML, and passes the declared dependency specs to the R resolver on
+stdin, one dependency per line. Because the block is parsed as real YAML, two
 YAML rules apply:
 
 - The `R:` constraint must be **quoted** — `R: ">= 4.0"` — because a bare value
