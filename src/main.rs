@@ -630,6 +630,41 @@ fn read_op_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>
     Ok(frontmatter)
 }
 
+/// Read the leading YAML metadata block from a Quarto document.
+// Wired into read_script_spec in the quarto dispatch task (Task 4).
+#[allow(dead_code)]
+fn read_yaml_block_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+    let content = fs::read_to_string(script)?;
+    Ok(extract_yaml_block(&content))
+}
+
+/// Extract the leading YAML metadata block delimited by `---` fences, returning
+/// the inner text. `str::lines` strips a trailing `\r`, so CRLF input is handled.
+/// Returns an empty string when there is no opening fence on the first line or
+/// no closing `---`/`...` line — both mean "no frontmatter", never an error.
+fn extract_yaml_block(content: &str) -> String {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    let mut lines = content.lines();
+
+    match lines.next() {
+        Some(first) if first.trim_end() == "---" => {}
+        _ => return String::new(),
+    }
+
+    let mut block = String::new();
+    for line in lines {
+        let trimmed = line.trim_end();
+        if trimmed == "---" || trimmed == "..." {
+            return block;
+        }
+        block.push_str(line);
+        block.push('\n');
+    }
+
+    // No closing fence: treat as no frontmatter.
+    String::new()
+}
+
 /// The Rscript executable to use: `$IR_RSCRIPT` if set, otherwise `Rscript`
 /// resolved via `PATH`.
 fn rscript_command() -> std::ffi::OsString {
@@ -744,5 +779,37 @@ mod tests {
     fn parse_frontmatter_quarto_non_mapping_ir_errors() {
         let err = parse_frontmatter("ir: nope\n", true).unwrap_err().to_string();
         assert!(err.contains("`ir`"), "{err}");
+    }
+
+    #[test]
+    fn extract_yaml_block_reads_fenced_block() {
+        let doc = "---\ntitle: Demo\nir:\n  dependencies:\n    - gt\n---\n\nbody\n";
+        assert_eq!(
+            extract_yaml_block(doc),
+            "title: Demo\nir:\n  dependencies:\n    - gt\n"
+        );
+    }
+
+    #[test]
+    fn extract_yaml_block_handles_crlf_and_dot_terminator() {
+        let doc = "---\r\ntitle: Demo\r\n...\r\nbody\r\n";
+        assert_eq!(extract_yaml_block(doc), "title: Demo\n");
+    }
+
+    #[test]
+    fn extract_yaml_block_strips_optional_bom() {
+        let doc = "\u{feff}---\ntitle: Demo\n---\n";
+        assert_eq!(extract_yaml_block(doc), "title: Demo\n");
+    }
+
+    #[test]
+    fn extract_yaml_block_without_opening_fence_is_empty() {
+        assert_eq!(extract_yaml_block("title: Demo\nbody\n"), "");
+        assert_eq!(extract_yaml_block(""), "");
+    }
+
+    #[test]
+    fn extract_yaml_block_without_closing_fence_is_empty() {
+        assert_eq!(extract_yaml_block("---\ntitle: Demo\nbody\n"), "");
     }
 }
