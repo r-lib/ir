@@ -7,8 +7,8 @@ libraries and runs the script against them.
 ```r
 #!/usr/bin/env -S ir run
 #| dependencies:
-#|   dplyr>=1.0
-#|   tidyr
+#|   - dplyr>=1.0
+#|   - tidyr
 #| R: ">= 4.0"
 #| exclude after: "2024-01-15"
 
@@ -80,15 +80,13 @@ parsed as real YAML by the `yaml12` package, two YAML rules apply:
 
 - The `R:` constraint must be **quoted** — `R: ">= 4.0"` — because a bare value
   starting with `>` is not valid YAML.
-- Either list style works for `dependencies`: one entry per indented line, or
-  explicit YAML list items with `-`. (Entries are split on whitespace, and
-  package refs never contain spaces.)
+- The `dependencies:` field is a YAML sequence, one package ref per item.
 
 ```r
 #| dependencies:
-#|   dplyr>=1.0        # lower bound
-#|   tidyr             # latest
-#|   cli==3.6.6        # exact version
+#|   - dplyr>=1.0      # lower bound
+#|   - tidyr           # latest
+#|   - cli==3.6.6      # exact version
 #| R: ">= 4.0"         # optional; soft-checked against the running R
 #| exclude after: "2024-01-15"  # optional; resolve from that PPM snapshot date
 ```

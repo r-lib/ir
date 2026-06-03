@@ -34,9 +34,8 @@ ir_read_spec <- function(yaml_text) {
   )
 }
 
-# The declared dependency specs. Accepts both a YAML list (`- dplyr`) and a
-# whitespace-separated scalar (`dplyr>=1.0 tidyr`); package refs are expected
-# to be whitespace-free.
+# The declared dependency specs from the YAML `dependencies:` sequence.
+# Package refs are expected to be whitespace-free.
 ir_deps <- function(spec) {
   deps <- as.character(spec$dependencies %||% character())
   deps <- as.character(unlist(strsplit(trimws(deps), "[[:space:]]+")))

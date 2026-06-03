@@ -216,7 +216,7 @@ if [ "$#" = "2" ]; then
   actual="$(mktemp)"
   expected="$(mktemp)"
   cat > "$actual"
-  printf 'dependencies:\n  dplyr>=1.0\nexclude after: "2024-01-15"\n' > "$expected"
+  printf 'dependencies:\n  - dplyr>=1.0\nexclude after: "2024-01-15"\n' > "$expected"
   if ! cmp -s "$actual" "$expected"; then
     echo "unexpected resolver stdin" >&2
     echo "--- actual ---" >&2
@@ -241,7 +241,7 @@ echo "user script stdout"
         &script,
         r#"#!/usr/bin/env -S ir run
 #| dependencies:
-#|   dplyr>=1.0
+#|   - dplyr>=1.0
 #| exclude after: "2024-01-15"
 
 cat('unused by fake Rscript\n')

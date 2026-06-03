@@ -90,11 +90,9 @@ test_that("ir_read_spec errors on malformed YAML", {
 
 # --- dependency extraction --------------------------------------------------
 
-test_that("ir_deps handles list and folded-scalar forms", {
+test_that("ir_deps handles YAML sequence dependencies", {
   expect_equal(ir_deps(list(dependencies = c("dplyr>=1.0", "tidyr"))),
                c("dplyr>=1.0", "tidyr"))
-  expect_equal(ir_deps(list(dependencies = "dplyr>=1.0 tidyr secretbase==1.2")),
-               c("dplyr>=1.0", "tidyr", "secretbase==1.2"))
 })
 
 test_that("ir_deps returns character(0) when there are no dependencies", {
@@ -189,8 +187,8 @@ test_that("ir_input_key separates dated PPM snapshots from daily latest resoluti
 test_that("the parse -> deps -> refs pipeline composes", {
   yaml <- paste(
     "dependencies:",
-    "  dplyr>=1.0",
-    "  secretbase==1.2",
+    "  - dplyr>=1.0",
+    "  - secretbase==1.2",
     "R: \">= 4.0\"",
     sep = "\n"
   )
