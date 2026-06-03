@@ -1,0 +1,4 @@
+# Snapshot fixtures are compared byte-for-byte against program output, which is
+# always LF. Force LF on checkout so Windows' autocrlf can't rewrite them to
+# CRLF and break the comparison.
+tests/snapshots/*.stdout text eol=lf
