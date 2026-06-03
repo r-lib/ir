@@ -294,8 +294,8 @@ fn run_script(
     }
 }
 
-fn read_op_frontmatter_to_string(op: &Path) -> Result<String, Box<dyn Error>> {
-    let file = File::open(op)?;
+fn read_op_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+    let file = File::open(script)?;
     let mut reader = BufReader::new(file);
     let mut frontmatter = String::new();
     let mut line = String::new();
