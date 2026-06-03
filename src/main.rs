@@ -354,16 +354,19 @@ fn cmd_run(
 ) -> Result<(), Box<dyn Error>> {
     // A script file declares its dependencies, `exclude-newer`, and `r-version` in
     // YAML frontmatter and is canonicalised so the run is independent of the
-    // working directory. An inline `-e` expression has no frontmatter; its deps
-    // come solely from `--with`.
-    let (script_path, mut spec) = match source {
+    // working directory. Quarto documents (.qmd/.Rmd) declare them under an
+    // `ir:` key in that frontmatter. An inline `-e` expression has no
+    // frontmatter and is never a Quarto document; its deps come solely from
+    // `--with`.
+    let (script_path, mut spec, quarto) = match source {
         RunSource::Script(script) => {
             let path = fs::canonicalize(script)
                 .map_err(|e| format!("cannot read script `{script}`: {e}"))?;
-            let spec = read_script_spec(&path)?;
-            (Some(path), spec)
+            let quarto = is_quarto(&path);
+            let spec = read_script_spec(&path, quarto)?;
+            (Some(path), spec, quarto)
         }
-        RunSource::Expressions(_) => (None, ScriptSpec::default()),
+        RunSource::Expressions(_) => (None, ScriptSpec::default(), false),
     };
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
@@ -371,23 +374,39 @@ fn cmd_run(
     }
     let rscript = rscript_for_spec(&spec)?;
 
+    // Reject comma-bearing Rscript options before resolving, so a run that could
+    // never be launched fails fast instead of after phase-1 resolution. quarto
+    // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
+    // escaping.
+    if quarto {
+        reject_comma_rscript_args(rscript_args)?;
+    }
+
     // Phase 1: private R session resolves deps and materialises the library.
     // Rust parses the frontmatter and sends the dependency specs on stdin.
     let library = resolve_library(&rscript, &spec)?;
 
-    // Phase 2: run the user's program in an isolated R session.
-    let expressions: &[String] = match source {
-        RunSource::Expressions(exprs) => exprs,
-        RunSource::Script(_) => &[],
+    // Phase 2: render the document, or run the user's program, in an isolated
+    // R session.
+    let code = if quarto {
+        let doc = script_path
+            .as_deref()
+            .expect("is_quarto is only true for a RunSource::Script path");
+        run_quarto(&rscript, library.as_deref(), doc, rscript_args, script_args)?
+    } else {
+        let expressions: &[String] = match source {
+            RunSource::Expressions(exprs) => exprs,
+            RunSource::Script(_) => &[],
+        };
+        run_script(
+            &rscript,
+            library.as_deref(),
+            script_path.as_deref(),
+            expressions,
+            rscript_args,
+            script_args,
+        )?
     };
-    let code = run_script(
-        &rscript,
-        library.as_deref(),
-        script_path.as_deref(),
-        expressions,
-        rscript_args,
-        script_args,
-    )?;
     std::process::exit(code);
 }
 
@@ -440,8 +459,13 @@ fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>
     })
 }
 
-fn read_script_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
-    parse_frontmatter(&read_op_frontmatter_to_string(script)?, false)
+fn read_script_spec(script: &Path, quarto: bool) -> Result<ScriptSpec, Box<dyn Error>> {
+    let frontmatter = if quarto {
+        read_yaml_block_to_string(script)?
+    } else {
+        read_op_frontmatter_to_string(script)?
+    };
+    parse_frontmatter(&frontmatter, quarto)
 }
 
 fn parse_frontmatter(frontmatter: &str, nested: bool) -> Result<ScriptSpec, Box<dyn Error>> {
@@ -616,8 +640,6 @@ fn run_script(
 /// The quarto executable is `quarto_command()` (`IR_QUARTO` or bare `quarto`).
 /// As with `run_script`, on Unix we `exec` into quarto; on Windows it runs as a
 /// child and we return its exit code.
-// Wired into cmd_run dispatch in the quarto dispatch task (Task 4).
-#[allow(dead_code)]
 fn run_quarto(
     rscript: &OsStr,
     library: Option<&Path>,
@@ -681,8 +703,6 @@ fn read_op_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>
 }
 
 /// Read the leading YAML metadata block from a Quarto document.
-// Wired into read_script_spec in the quarto dispatch task (Task 4).
-#[allow(dead_code)]
 fn read_yaml_block_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     let content = fs::read_to_string(script)?;
     Ok(extract_yaml_block(&content))
@@ -713,6 +733,35 @@ fn extract_yaml_block(content: &str) -> String {
 
     // No closing fence: treat as no frontmatter.
     String::new()
+}
+
+/// True for Quarto documents dispatched to `quarto render`. Every other name —
+/// `.R`, `.r`, and extensionless scripts run via shebang — keeps the R-script
+/// flow, preserving backward compatibility.
+fn is_quarto(script: &Path) -> bool {
+    matches!(
+        script
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("qmd") | Some("rmd")
+    )
+}
+
+/// quarto's QUARTO_KNITR_RSCRIPT_ARGS is comma-separated with no escaping, so an
+/// Rscript option containing a comma cannot be forwarded faithfully. Reject it up
+/// front, before resolution, rather than mis-splitting silently.
+fn reject_comma_rscript_args(rscript_args: &[String]) -> Result<(), Box<dyn Error>> {
+    if let Some(arg) = rscript_args.iter().find(|arg| arg.contains(',')) {
+        return Err(format!(
+            "Rscript option `{arg}` contains a comma, which cannot be forwarded to \
+             quarto's knitr engine: QUARTO_KNITR_RSCRIPT_ARGS is comma-separated \
+             with no escaping."
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// The Rscript executable to use: `$IR_RSCRIPT` if set, otherwise `Rscript`

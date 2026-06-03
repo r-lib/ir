@@ -1158,6 +1158,236 @@ kill -KILL $$
     assert_eq!(out.status.signal(), Some(9), "killed by SIGKILL");
 }
 
+#[cfg(unix)]
+#[test]
+fn run_qmd_renders_with_quarto_and_injects_env() {
+    let dir = unique_path("ir-quarto-test", "d");
+    fs::create_dir_all(&dir).unwrap();
+    let fake_rscript = dir.join("fake-rscript.sh");
+    let fake_quarto = dir.join("quarto");
+    let doc = unique_path("ir-doc", "qmd");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  cat > /dev/null
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+echo "fake Rscript should not run the document" >&2
+exit 5
+"#,
+    );
+
+    write_executable(
+        &fake_quarto,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+test "$1" = "render"
+test "$3" = "--to"
+test "$4" = "pdf"
+test "${{QUARTO_R:-}}" = "{rscript}"
+test "${{R_LIBS:-}}" = "/tmp/ir-test-library"
+test "${{QUARTO_KNITR_RSCRIPT_ARGS:-}}" = "--vanilla"
+echo "fake quarto rendered $2"
+"#,
+            rscript = fake_rscript.display()
+        ),
+    );
+
+    fs::write(
+        &doc,
+        "---\nir:\n  dependencies:\n    - dplyr>=1.0\n---\n\n```{r}\n1 + 1\n```\n",
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .env("IR_QUARTO", &fake_quarto)
+        .args(["run", "--vanilla", doc.to_str().unwrap(), "--to", "pdf"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("fake quarto rendered"),
+        "{:?}",
+        out
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_qmd_with_comma_in_rscript_arg_errors_before_quarto() {
+    let doc = unique_path("ir-doc", "qmd");
+    fs::write(&doc, "---\nir:\n  dependencies:\n    - dplyr\n---\n").unwrap();
+
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    write_executable(
+        &fake_rscript,
+        "#!/bin/sh\necho \"resolver should not run\" >&2\nexit 7\n",
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "--max-connections=1,2", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("contains a comma"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_extensionless_script_still_uses_rscript() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let script = unique_path("ir-bare-script", "");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  cat > /dev/null
+  : > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+echo "ran as R script"
+"#,
+    );
+    fs::write(&script, "cat('unused by fake Rscript\\n')\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_file(&script);
+
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran as R script"),
+        "{:?}",
+        out
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_rmd_routes_to_quarto() {
+    let dir = unique_path("ir-rmd-test", "d");
+    fs::create_dir_all(&dir).unwrap();
+    let fake_rscript = dir.join("fake-rscript.sh");
+    let fake_quarto = dir.join("quarto");
+    let doc = unique_path("ir-doc", "Rmd");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  cat > /dev/null
+  : > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+echo "fake Rscript should not run the document" >&2
+exit 5
+"#,
+    );
+    write_executable(
+        &fake_quarto,
+        "#!/bin/sh\nset -eu\ntest \"$1\" = \"render\"\necho \"fake quarto rendered $2\"\n",
+    );
+    fs::write(&doc, "---\ntitle: doc\n---\n\n```{r}\n1\n```\n").unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .env("IR_QUARTO", &fake_quarto)
+        .args(["run", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("fake quarto rendered"),
+        "{:?}",
+        out
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn run_qmd_renders_with_quarto_and_injects_env_windows() {
+    let dir = unique_path("ir-quarto-test", "d");
+    fs::create_dir_all(&dir).unwrap();
+    let fake_rscript = dir.join("fake-rscript.cmd");
+    let fake_quarto = dir.join("quarto.cmd");
+    let doc = unique_path("ir-doc", "qmd");
+
+    write_executable(
+        &fake_rscript,
+        "@echo off\r\nif defined IR_RESOLVE_RESULT_FILE (\r\n  echo C:\\ir-test-library> \"%IR_RESOLVE_RESULT_FILE%\"\r\n  exit /b 0\r\n)\r\nexit /b 5\r\n",
+    );
+
+    write_executable(
+        &fake_quarto,
+        &format!(
+            "@echo off\r\n\
+             if not \"%1\"==\"render\" exit /b 10\r\n\
+             if not \"%~3\"==\"--to\" exit /b 11\r\n\
+             if not \"%~4\"==\"pdf\" exit /b 12\r\n\
+             if not \"%QUARTO_R%\"==\"{rscript}\" exit /b 13\r\n\
+             if not \"%R_LIBS%\"==\"C:\\ir-test-library\" exit /b 14\r\n\
+             if not \"%QUARTO_KNITR_RSCRIPT_ARGS%\"==\"--vanilla\" exit /b 15\r\n\
+             echo fake quarto rendered\r\n",
+            rscript = fake_rscript.display()
+        ),
+    );
+
+    fs::write(
+        &doc,
+        "---\nir:\n  dependencies:\n    - dplyr>=1.0\n---\n\n```{r}\n1 + 1\n```\n",
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .env("IR_QUARTO", &fake_quarto)
+        .args(["run", "--vanilla", doc.to_str().unwrap(), "--to", "pdf"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(
+        out.status.success(),
+        "quarto.cmd exit code signals which assertion failed: {:?}",
+        out
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("fake quarto rendered"),
+        "{:?}",
+        out
+    );
+}
+
 /// Run the comprehensive R resolution suite under `cargo test`. Skips (passes
 /// as a no-op) when no usable R toolchain with the required R packages is
 /// present.
