@@ -17,6 +17,21 @@ fn ir() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ir"))
 }
 
+fn assert_help_snapshot(name: &str, args: &[&str]) {
+    let out = ir().args(args).output().unwrap();
+    assert!(out.status.success(), "{args:?} should exit 0");
+    assert!(out.stderr.is_empty(), "{args:?} should not write stderr");
+
+    let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("snapshots")
+        .join(format!("{name}.stdout"));
+    let expected = fs::read_to_string(&snapshot)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", snapshot.display()));
+    let actual = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(actual, expected, "{args:?} changed {}", snapshot.display());
+}
+
 fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -39,6 +54,25 @@ fn write_executable(path: &Path, contents: &str) {
         let mut permissions = fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).unwrap();
+    }
+}
+
+#[test]
+fn help_outputs_match_snapshots() {
+    for (name, args) in [
+        ("help", &["--help"][..]),
+        ("help", &["-h"]),
+        ("help", &[]),
+        ("run-help", &["run", "--help"]),
+        ("run-help", &["run", "-h"]),
+        ("cache-help", &["cache", "--help"]),
+        ("cache-help", &["cache", "-h"]),
+        ("cache-clean-help", &["cache", "clean", "--help"]),
+        ("cache-clean-help", &["cache", "clean", "-h"]),
+        ("cache-dir-help", &["cache", "dir", "--help"]),
+        ("cache-dir-help", &["cache", "dir", "-h"]),
+    ] {
+        assert_help_snapshot(name, args);
     }
 }
 
