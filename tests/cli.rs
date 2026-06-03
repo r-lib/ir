@@ -219,7 +219,7 @@ for arg in "$@"; do
   fi
 done
 
-if [ "${IR_RESOLVE_OUT_FILE:-}" != "" ]; then
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
   if [ "${R_PKG_SHOW_PROGRESS:-}" != "true" ]; then
     echo "pak progress disabled" >&2
     exit 7
@@ -246,7 +246,7 @@ if [ "${IR_RESOLVE_OUT_FILE:-}" != "" ]; then
   fi
   echo "pak progress stdout"
   echo "pak progress stderr" >&2
-  echo "/tmp/ir-test-library" > "$IR_RESOLVE_OUT_FILE"
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
 
@@ -344,9 +344,9 @@ fn run_propagates_user_script_exit_code() {
         &fake_rscript,
         r#"#!/bin/sh
 set -eu
-# Phase 1 (resolve) gets the driver path and IR_RESOLVE_OUT_FILE.
-if [ "${IR_RESOLVE_OUT_FILE:-}" != "" ]; then
-  : > "$IR_RESOLVE_OUT_FILE"
+# Phase 1 (resolve) gets the driver path and IR_RESOLVE_RESULT_FILE.
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  : > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
 # Phase 2 (user script): exit with a distinctive code.
@@ -369,7 +369,7 @@ exit 42
 
 /// Windows has no `exec`, so `ir` runs R as a child and forwards its exit code
 /// via `status.code()`. The fake distinguishes phases by the presence of
-/// `IR_RESOLVE_OUT_FILE`.
+/// `IR_RESOLVE_RESULT_FILE`.
 #[cfg(windows)]
 #[test]
 fn run_propagates_user_script_exit_code() {
@@ -382,8 +382,8 @@ fn run_propagates_user_script_exit_code() {
             "@echo off\r\n",
             // Phase 1 (resolve): report an empty library to its output path
             // and succeed.
-            "if not \"%IR_RESOLVE_OUT_FILE%\"==\"\" (\r\n",
-            "  type nul > \"%IR_RESOLVE_OUT_FILE%\"\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type nul > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
             "  exit /b 0\r\n",
             ")\r\n",
             // Phase 2 (user script): exit with a distinctive code.
@@ -420,8 +420,8 @@ fn run_propagates_user_script_signal_death() {
         &fake_rscript,
         r#"#!/bin/sh
 set -eu
-if [ "${IR_RESOLVE_OUT_FILE:-}" != "" ]; then
-  : > "$IR_RESOLVE_OUT_FILE"
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  : > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
 # Phase 2: after exec this shell *is* ir's process, so SIGKILL kills ir itself.

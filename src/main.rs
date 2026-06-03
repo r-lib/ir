@@ -241,7 +241,7 @@ fn cmd_run(script: &str, script_args: &[String]) -> Result<(), Box<dyn Error>> {
 fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let tmp = env::temp_dir();
     let driver = unique_path(&tmp, "ir-resolve", "R");
-    let out = unique_path(&tmp, "ir-libpath", "txt");
+    let result_file = unique_path(&tmp, "ir-libpath", "txt");
     let spec = read_script_spec(script)?;
     fs::write(&driver, RESOLVE_DRIVER)?;
 
@@ -250,7 +250,7 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .env("IR_RESOLVE_OUT_FILE", &out)
+        .env("IR_RESOLVE_RESULT_FILE", &result_file)
         // pak suppresses progress in noninteractive Rscript unless this is set.
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
         .env("R_PKG_SHOW_PROGRESS", "true");
@@ -273,8 +273,8 @@ fn resolve_library(rscript: &OsStr, script: &Path) -> Result<Option<PathBuf>, Bo
         .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
 
     let _ = fs::remove_file(&driver);
-    let result = fs::read_to_string(&out).unwrap_or_default();
-    let _ = fs::remove_file(&out);
+    let result = fs::read_to_string(&result_file).unwrap_or_default();
+    let _ = fs::remove_file(&result_file);
 
     if !status.success() {
         return Err("dependency resolution failed".into());

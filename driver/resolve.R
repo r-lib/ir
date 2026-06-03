@@ -2,7 +2,7 @@
 #
 # Run by the `ir` Rust binary in a private, throw-away R session.
 #
-#   IR_RESOLVE_OUT_FILE=<out_file> Rscript resolve.R
+#   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
 # Responsibilities (steps 1-4 of the `ir` pipeline):
 #   1. Consume package dependency specs from stdin, one dependency per line.
@@ -12,9 +12,10 @@
 #   4. Materialise that path as a light-weight library of symlinks into
 #      renv's package cache via renv::use().
 #
-# The resulting library path is written to <out_file> for the Rust process
-# to pick up. This session then exits; the Rust process launches the user's
-# script in a fresh, isolated R session pointed at the library.
+# The resulting library path is written to the temp result file named by
+# IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
+# This session then exits; the Rust process launches the user's script in a
+# fresh, isolated R session pointed at the library.
 #
 # The helpers below are pure and side-effect free so they can be unit tested
 # (see tests/test-resolve.R). The pipeline runs only when this file is executed
@@ -139,8 +140,8 @@ ir_input_key <- function(deps,
 ir_resolve_main <- function() {
 
   deps        <- readLines(stdin(), warn = FALSE)
-  out_file    <- ir_env_optional("IR_RESOLVE_OUT_FILE")
-  stopifnot(!is.null(out_file))
+  result_file <- ir_env_optional("IR_RESOLVE_RESULT_FILE")
+  stopifnot(!is.null(result_file))
   cache_dir   <- ir_cache_dir()
 
   ## 1. Consume inputs parsed by Rust from script frontmatter
@@ -158,7 +159,7 @@ ir_resolve_main <- function() {
   if (file.exists(marker)) {
     cached <- readLines(marker, n = 1L, warn = FALSE)
     if (length(cached) && nzchar(cached) && dir.exists(cached)) {
-      writeLines(cached, out_file)
+      writeLines(cached, result_file)
       return(invisible())
     }
   }
@@ -222,7 +223,7 @@ ir_resolve_main <- function() {
   dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
   writeLines(library_path, marker)
 
-  writeLines(library_path, out_file)
+  writeLines(library_path, result_file)
   invisible()
 }
 
