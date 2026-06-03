@@ -1,8 +1,8 @@
 # ir
 
-A [uv](https://docs.astral.sh/uv/)-style front-end to R. Write a self-contained
-R script that declares its own dependencies in a comment header, and `ir` will
-resolve them, build a dedicated package library, and run the script against it.
+`ir` runs standalone R scripts that declare their own runtime requirements in
+the script itself. It resolves those requirements into cached, isolated package
+libraries and runs the script against them.
 
 ```r
 #!/usr/bin/env -S ir run
@@ -61,7 +61,7 @@ are shared system-wide through renv's cache.
 
 ## Cache management
 
-`ir` exposes `uv`-style cache commands:
+`ir` exposes cache management commands:
 
 ```console
 $ ir cache dir

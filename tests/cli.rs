@@ -50,6 +50,11 @@ fn help_is_shown_for_help_flag_and_no_args() {
         let out = ir().args(&args).output().unwrap();
         assert!(out.status.success(), "args {args:?} should exit 0");
         let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("self-describing R scripts"),
+            "args {args:?}: {stdout}"
+        );
+        assert!(!stdout.contains("uv-style"), "args {args:?}: {stdout}");
         assert!(stdout.contains("USAGE"), "args {args:?}: {stdout}");
         assert!(stdout.contains("ir run"), "args {args:?}: {stdout}");
         assert!(

@@ -1,6 +1,6 @@
-//! `ir` — a uv-style front-end to R.
+//! `ir` — self-describing R scripts.
 //!
-//! Runs a self-contained R script whose dependencies are declared in a YAML
+//! Runs a standalone R script whose dependencies are declared in a YAML
 //! comment block at the top of the file:
 //!
 //! ```r
@@ -131,7 +131,7 @@ fn cmd_cache_dir(args: &[String]) -> Result<(), Box<dyn Error>> {
 fn print_help() {
     println!(
         concat!(
-            "ir {} — a uv-style front-end to R\n",
+            "ir {} — self-describing R scripts\n",
             "\n",
             "USAGE:\n",
             "    ir run <script.R> [args...]\n",

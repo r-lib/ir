@@ -2,7 +2,7 @@
 name = "ir"
 version = "0.1.0"
 edition = "2021"
-description = "A uv-style front-end to R: run self-contained R scripts with inline dependencies."
+description = "Run standalone R scripts from embedded dependency metadata."
 license = "MIT"
 
 [[bin]]
