@@ -441,10 +441,10 @@ fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>
 }
 
 fn read_script_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
-    parse_frontmatter(&read_op_frontmatter_to_string(script)?)
+    parse_frontmatter(&read_op_frontmatter_to_string(script)?, false)
 }
 
-fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
+fn parse_frontmatter(frontmatter: &str, nested: bool) -> Result<ScriptSpec, Box<dyn Error>> {
     if frontmatter.trim().is_empty() {
         return Ok(ScriptSpec::default());
     }
@@ -463,10 +463,26 @@ fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
         return Err("script frontmatter must be a YAML mapping".into());
     }
 
+    // For Quarto documents the dependency spec lives under the `ir:` key,
+    // alongside ordinary quarto metadata; for scripts it is the document itself.
+    let spec_node = if nested {
+        match doc.as_mapping_get("ir") {
+            None => return Ok(ScriptSpec::default()),
+            Some(node) if node.is_null() => return Ok(ScriptSpec::default()),
+            Some(node) => node,
+        }
+    } else {
+        doc
+    };
+
+    if nested && !spec_node.is_mapping() {
+        return Err("frontmatter `ir` must be a YAML mapping".into());
+    }
+
     Ok(ScriptSpec {
-        dependencies: frontmatter_dependencies(doc)?,
-        exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
-        r_requirement: frontmatter_optional_string(doc, "r-version")?,
+        dependencies: frontmatter_dependencies(spec_node)?,
+        exclude_newer: frontmatter_optional_string(spec_node, "exclude-newer")?,
+        r_requirement: frontmatter_optional_string(spec_node, "r-version")?,
     })
 }
 
@@ -684,5 +700,49 @@ fn spawn_error(rscript: &OsStr, err: io::Error) -> String {
         )
     } else {
         format!("failed to launch `{}`: {err}", rscript.to_string_lossy())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_frontmatter_reads_top_level_for_scripts() {
+        let spec = parse_frontmatter(
+            "dependencies:\n  - dplyr>=1.0\n  - tidyr\nr-version: \">= 4.0\"\n",
+            false,
+        )
+        .unwrap();
+        assert_eq!(spec.dependencies, vec!["dplyr>=1.0", "tidyr"]);
+        assert_eq!(spec.r_requirement.as_deref(), Some(">= 4.0"));
+    }
+
+    #[test]
+    fn parse_frontmatter_descends_into_ir_for_quarto() {
+        let yaml = "title: Demo\nir:\n  dependencies:\n    - gt@1.0\n  exclude-newer: \"2024-01-15\"\n";
+        let spec = parse_frontmatter(yaml, true).unwrap();
+        assert_eq!(spec.dependencies, vec!["gt@1.0"]);
+        assert_eq!(spec.exclude_newer.as_deref(), Some("2024-01-15"));
+    }
+
+    #[test]
+    fn parse_frontmatter_quarto_without_ir_key_is_empty() {
+        let spec = parse_frontmatter("title: Demo\nformat: html\n", true).unwrap();
+        assert!(spec.dependencies.is_empty());
+        assert!(spec.exclude_newer.is_none());
+        assert!(spec.r_requirement.is_none());
+    }
+
+    #[test]
+    fn parse_frontmatter_quarto_null_ir_key_is_empty() {
+        let spec = parse_frontmatter("ir:\n", true).unwrap();
+        assert!(spec.dependencies.is_empty());
+    }
+
+    #[test]
+    fn parse_frontmatter_quarto_non_mapping_ir_errors() {
+        let err = parse_frontmatter("ir: nope\n", true).unwrap_err().to_string();
+        assert!(err.contains("`ir`"), "{err}");
     }
 }
