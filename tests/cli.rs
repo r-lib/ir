@@ -243,9 +243,7 @@ echo "user script stdout"
 #| dependencies:
 #|   dplyr>=1.0
 #| exclude after: "2024-01-15"
-#|dependencies: ignored
-#| also_not_frontmatter: true
-# ordinary comments are not frontmatter
+
 cat('unused by fake Rscript\n')
 "#,
     )
