@@ -38,6 +38,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use saphyr::{LoadableYamlNode, Yaml};
 
+mod quarto;
 mod rig;
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
@@ -424,9 +425,14 @@ fn print_help() {
             "passed through to the program.\n",
             "`ir cache` manages the dependency resolution and materialised library cache.\n",
             "\n",
+            "Quarto documents (.qmd, .Rmd) are also supported: declare\n",
+            "dependencies under an `ir:` key in the document's YAML frontmatter\n",
+            "and ir renders them with `quarto render`.\n",
+            "\n",
             "ENVIRONMENT:\n",
             "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
-            "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)"
+            "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)\n",
+            "    IR_QUARTO      path to the quarto executable (default: quarto on PATH)"
         ),
         env!("CARGO_PKG_VERSION")
     );
@@ -461,9 +467,14 @@ fn print_run_help() {
         "    --isolated    Disable the user library (R_LIBS_USER) so the run cannot\n",
         "                  borrow undeclared packages from it.\n",
         "\n",
+        "Quarto documents (.qmd, .Rmd) are also supported: declare\n",
+        "dependencies under an `ir:` key in the document's YAML frontmatter\n",
+        "and ir renders them with `quarto render`.\n",
+        "\n",
         "ENVIRONMENT:\n",
         "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
-        "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)"
+        "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)\n",
+        "    IR_QUARTO      path to the quarto executable (default: quarto on PATH)"
     ));
 }
 
@@ -561,18 +572,21 @@ fn cmd_run(
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
-    // A script file declares its dependencies, `exclude-newer`, and `r-version`
-    // in YAML frontmatter and is canonicalised so the run is independent of the
-    // working directory. An inline `-e` expression has no frontmatter; its deps
-    // come solely from `--with`.
-    let (script_path, mut spec) = match source {
+    // A script file declares its dependencies, `exclude-newer`, and `r-version` in
+    // YAML frontmatter and is canonicalised so the run is independent of the
+    // working directory. Quarto documents (.qmd/.Rmd) declare them under an
+    // `ir:` key in that frontmatter. An inline `-e` expression has no
+    // frontmatter and is never a Quarto document; its deps come solely from
+    // `--with`.
+    let (script_path, mut spec, quarto) = match source {
         RunSource::Script(script) => {
             let path = fs::canonicalize(script)
                 .map_err(|e| format!("cannot read script `{script}`: {e}"))?;
-            let spec = read_script_spec(&path)?;
-            (Some(path), spec)
+            let quarto = quarto::is_quarto(&path);
+            let spec = read_script_spec(&path, quarto)?;
+            (Some(path), spec, quarto)
         }
-        RunSource::Expressions(_) => (None, ScriptSpec::default()),
+        RunSource::Expressions(_) => (None, ScriptSpec::default(), false),
     };
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
@@ -580,24 +594,47 @@ fn cmd_run(
     }
     let rscript = rscript_for_spec(&spec)?;
 
+    // Reject comma-bearing Rscript options before resolving, so a run that could
+    // never be launched fails fast instead of after phase-1 resolution. quarto
+    // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
+    // escaping.
+    if quarto {
+        quarto::reject_comma_rscript_args(rscript_args)?;
+    }
+
     // Phase 1: private R session resolves deps and materialises the library.
     // Rust parses the frontmatter and sends the dependency specs on stdin.
     let library = resolve_library(&rscript, &spec)?;
 
-    // Phase 2: run the user's program in an isolated R session.
-    let expressions: &[String] = match source {
-        RunSource::Expressions(exprs) => exprs,
-        RunSource::Script(_) => &[],
+    // Phase 2: render the document, or run the user's program, in an isolated
+    // R session.
+    let code = if quarto {
+        let doc = script_path
+            .as_deref()
+            .expect("is_quarto is only true for a RunSource::Script path");
+        quarto::run(
+            &rscript,
+            library.as_deref(),
+            doc,
+            rscript_args,
+            script_args,
+            isolated,
+        )?
+    } else {
+        let expressions: &[String] = match source {
+            RunSource::Expressions(exprs) => exprs,
+            RunSource::Script(_) => &[],
+        };
+        run_script(
+            &rscript,
+            library.as_deref(),
+            script_path.as_deref(),
+            expressions,
+            rscript_args,
+            script_args,
+            isolated,
+        )?
     };
-    let code = run_script(
-        &rscript,
-        library.as_deref(),
-        script_path.as_deref(),
-        expressions,
-        rscript_args,
-        script_args,
-        isolated,
-    )?;
     std::process::exit(code);
 }
 
@@ -840,11 +877,16 @@ fn shebang_mentions(shebang: &str, name: &str) -> bool {
         .any(|word| word == name)
 }
 
-fn read_script_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
-    parse_frontmatter(&read_op_frontmatter_to_string(script)?)
+fn read_script_spec(script: &Path, quarto: bool) -> Result<ScriptSpec, Box<dyn Error>> {
+    let frontmatter = if quarto {
+        quarto::read_yaml_block_to_string(script)?
+    } else {
+        read_op_frontmatter_to_string(script)?
+    };
+    parse_frontmatter(&frontmatter, quarto)
 }
 
-fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
+fn parse_frontmatter(frontmatter: &str, nested: bool) -> Result<ScriptSpec, Box<dyn Error>> {
     if frontmatter.trim().is_empty() {
         return Ok(ScriptSpec::default());
     }
@@ -863,10 +905,26 @@ fn parse_frontmatter(frontmatter: &str) -> Result<ScriptSpec, Box<dyn Error>> {
         return Err("script frontmatter must be a YAML mapping".into());
     }
 
+    // For Quarto documents the dependency spec lives under the `ir:` key,
+    // alongside ordinary quarto metadata; for scripts it is the document itself.
+    let spec_node = if nested {
+        match doc.as_mapping_get("ir") {
+            None => return Ok(ScriptSpec::default()),
+            Some(node) if node.is_null() => return Ok(ScriptSpec::default()),
+            Some(node) => node,
+        }
+    } else {
+        doc
+    };
+
+    if nested && !spec_node.is_mapping() {
+        return Err("frontmatter `ir` must be a YAML mapping".into());
+    }
+
     Ok(ScriptSpec {
-        dependencies: frontmatter_dependencies(doc)?,
-        exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
-        r_requirement: frontmatter_optional_string(doc, "r-version")?,
+        dependencies: frontmatter_dependencies(spec_node)?,
+        exclude_newer: frontmatter_optional_string(spec_node, "exclude-newer")?,
+        r_requirement: frontmatter_optional_string(spec_node, "r-version")?,
     })
 }
 

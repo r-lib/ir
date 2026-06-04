@@ -17,6 +17,11 @@ are passed to Rscript for script and tool targets; trailing args are
 passed through to the program.
 `ir cache` manages the dependency resolution and materialised library cache.
 
+Quarto documents (.qmd, .Rmd) are also supported: declare
+dependencies under an `ir:` key in the document's YAML frontmatter
+and ir renders them with `quarto render`.
+
 ENVIRONMENT:
     IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))
     IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)
+    IR_QUARTO      path to the quarto executable (default: quarto on PATH)

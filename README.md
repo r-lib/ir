@@ -95,6 +95,33 @@ Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
 are shared system-wide through renv's cache.
 
+## Quarto documents
+
+`ir run` also renders Quarto documents (`.qmd`, `.Rmd`). Declare dependencies
+under an `ir:` key in the document's YAML frontmatter:
+
+```yaml
+---
+title: "My report"
+ir:
+  dependencies:
+    - dplyr>=1.0
+    - gt@1.0
+  r-version: ">= 4.0"
+  exclude-newer: "2024-01-15"
+---
+```
+
+The `ir:` key accepts the same fields as a script's frontmatter: `dependencies`,
+`r-version`, and `exclude-newer`. `r-version` selects an installed R through rig
+(see above), and the document is rendered with that same R.
+
+`ir run report.qmd` resolves those dependencies into the same cached, isolated
+library used for scripts, then runs `quarto render report.qmd` with that library
+and the selected R. Trailing arguments are passed to `quarto render`
+(`ir run report.qmd --to pdf`); leading Rscript options are forwarded to the
+knitr engine (`ir run --vanilla report.qmd`).
+
 ## Cache management
 
 `ir` exposes cache management commands:
