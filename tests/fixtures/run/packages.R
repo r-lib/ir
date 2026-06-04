@@ -6,12 +6,10 @@
 #|   - jsonlite
 
 pkgs <- c("dplyr", "tidyr", "glue", "jsonlite")
-available <- vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)
-stopifnot(all(available))
-
-lib <- normalizePath(.libPaths()[[1]], winslash = "/", mustWork = TRUE)
-expected <- normalizePath(Sys.getenv("IR_EXPECT_CACHE_DIR"), winslash = "/", mustWork = FALSE)
-stopifnot(all(file.exists(file.path(lib, pkgs, "DESCRIPTION"))))
+suppressPackageStartupMessages(invisible(lapply(pkgs, library, character.only = TRUE)))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, pkgs), mustWork = TRUE)
+pkg_in_cache <- setNames(path.package(pkgs) == expected, pkgs)
 
 data <- dplyr::tibble(group = c("a", "b", "a"), value = c(1L, 2L, 3L)) |>
   dplyr::group_by(group) |>
@@ -20,8 +18,8 @@ data <- dplyr::tibble(group = c("a", "b", "a"), value = c(1L, 2L, 3L)) |>
 
 cat("ir.fixture=run-script\n")
 cat("script.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
-cat("script.lib_in_cache=", tolower(startsWith(lib, file.path(expected, "libraries"))), "\n", sep = "")
+cat("script.lib_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
 cat("script.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "\n", sep = "")
-cat("script.packages=", paste(names(available), tolower(available), sep = ":", collapse = ","), "\n", sep = "")
+cat("script.packages=", paste(names(pkg_in_cache), tolower(pkg_in_cache), sep = ":", collapse = ","), "\n", sep = "")
 cat(glue::glue("script.result=a:{data$a},b:{data$b}"), "\n", sep = "")
 cat("script.json=", jsonlite::toJSON(list(ok = TRUE, rows = nrow(data)), auto_unbox = TRUE), "\n", sep = "")

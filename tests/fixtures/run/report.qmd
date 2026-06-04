@@ -12,18 +12,10 @@ ir:
 
 ```{r}
 pkgs <- c("dplyr", "tidyr", "glue")
-available <- vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)
-stopifnot(all(available))
-
-lib <- normalizePath(.libPaths()[[1]], winslash = "/", mustWork = TRUE)
-expected <- normalizePath(Sys.getenv("IR_EXPECT_CACHE_DIR"), winslash = "/", mustWork = FALSE)
-libraries <- file.path(expected, "libraries")
-# The declared packages must be physically in the run library, not merely
-# loadable from a system or site copy that --isolated leaves on the path. Check
-# the DESCRIPTION at the library path rather than resolving find.package(),
-# since renv symlinks the package dir to its global cache.
-pkgs_in_cache <- startsWith(lib, libraries) &&
-  all(file.exists(file.path(lib, pkgs, "DESCRIPTION")))
+suppressPackageStartupMessages(invisible(lapply(pkgs, library, character.only = TRUE)))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, pkgs), mustWork = TRUE)
+pkg_in_cache <- path.package(pkgs) == expected
 
 data <- dplyr::tibble(group = c("a", "b", "a"), value = c(1L, 2L, 3L)) |>
   dplyr::group_by(group) |>
@@ -31,7 +23,7 @@ data <- dplyr::tibble(group = c("a", "b", "a"), value = c(1L, 2L, 3L)) |>
   tidyr::pivot_wider(names_from = group, values_from = total)
 
 cat("ir.fixture=qmd\n")
-cat("qmd.lib_in_cache=", tolower(startsWith(lib, libraries)), "\n", sep = "")
-cat("qmd.pkgs_in_cache=", tolower(pkgs_in_cache), "\n", sep = "")
+cat("qmd.lib_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
+cat("qmd.pkgs_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
 cat(glue::glue("qmd.result=a:{data$a},b:{data$b}"), "\n", sep = "")
 ```

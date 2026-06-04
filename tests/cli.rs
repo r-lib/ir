@@ -392,7 +392,6 @@ fn run_script_fixture_resolves_packages_and_isolates_user_library() {
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .args(["--script-arg", "value"])
@@ -443,21 +442,18 @@ fn run_inline_expression_resolves_with_dependencies() {
     let expr = r#"
 library(cli)
 library(glue)
-lib <- normalizePath(.libPaths()[[1]], winslash = "/", mustWork = TRUE)
-expected <- normalizePath(Sys.getenv("IR_EXPECT_CACHE_DIR"), winslash = "/", mustWork = FALSE)
-libraries <- file.path(expected, "libraries")
-pkgs_in_cache <- startsWith(lib, libraries) &&
-  all(file.exists(file.path(lib, c("cli", "glue"), "DESCRIPTION")))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, c("cli", "glue")), mustWork = TRUE)
+pkg_in_cache <- path.package(c("cli", "glue")) == expected
 cat("ir.fixture=inline\n")
 cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
-cat("inline.lib_in_cache=", tolower(startsWith(lib, libraries)), "\n", sep = "")
-cat("inline.pkgs_in_cache=", tolower(pkgs_in_cache), "\n", sep = "")
+cat("inline.lib_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
+cat("inline.pkgs_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
 cat(glue::glue("inline.glue={1 + 1}\n"))
 "#;
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         .args([
             "run",
             "--isolated",
@@ -490,7 +486,6 @@ fn run_quarto_fixture_renders_html_with_resolved_packages() {
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated"])
         .arg(&doc)
         .args(["--to", "html", "--output-dir"])
@@ -627,7 +622,6 @@ fn run_reticulate_fixture_uses_managed_ephemeral_venv() {
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         .env("IR_TEST_PYTHON_VERSION", &python_version)
         .env("RETICULATE_PYTHON", "managed")
         .args(["run", "--isolated", "--vanilla"])
