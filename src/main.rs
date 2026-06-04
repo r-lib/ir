@@ -243,11 +243,91 @@ fn raw_args_arg(help: &'static str) -> Arg {
         .help(help)
 }
 
-/// Where the user's program comes from: a script file, or one or more inline
-/// `-e` expressions evaluated in its place (mirroring `Rscript -e`).
+/// Where the user's program comes from.
 enum RunSource {
-    Script(String),
+    Script(PathBuf),
+    Quarto(PathBuf),
     Expressions(Vec<String>),
+    Stdin,
+}
+
+enum RscriptSource<'a> {
+    Script(&'a Path),
+    Expressions(&'a [String]),
+    Stdin,
+}
+
+impl RunSource {
+    fn from_script_arg(script: String) -> Result<Self, Box<dyn Error>> {
+        if script == "-" {
+            return Ok(Self::Stdin);
+        }
+
+        let path =
+            fs::canonicalize(&script).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
+        if quarto::is_quarto(&path) {
+            Ok(Self::Quarto(path))
+        } else {
+            Ok(Self::Script(path))
+        }
+    }
+
+    fn script_spec(&self) -> Result<ScriptSpec, Box<dyn Error>> {
+        match self {
+            Self::Script(script) => read_script_spec(script, false),
+            Self::Quarto(doc) => read_script_spec(doc, true),
+            Self::Expressions(_) | Self::Stdin => Ok(ScriptSpec::default()),
+        }
+    }
+
+    fn reject_unsupported_rscript_args(
+        &self,
+        rscript_args: &[String],
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::Quarto(_) => quarto::reject_comma_rscript_args(rscript_args),
+            Self::Script(_) | Self::Expressions(_) | Self::Stdin => Ok(()),
+        }
+    }
+
+    fn run_user_code(
+        &self,
+        rscript: &OsStr,
+        library: Option<&Path>,
+        rscript_args: &[String],
+        script_args: &[String],
+        isolated: bool,
+    ) -> Result<i32, Box<dyn Error>> {
+        match self {
+            Self::Quarto(doc) => {
+                quarto::run(rscript, library, doc, rscript_args, script_args, isolated)
+            }
+            Self::Script(script) => run_script(
+                rscript,
+                library,
+                RscriptSource::Script(script),
+                rscript_args,
+                script_args,
+                isolated,
+            ),
+            Self::Expressions(expressions) => run_script(
+                rscript,
+                library,
+                RscriptSource::Expressions(expressions),
+                rscript_args,
+                script_args,
+                isolated,
+            ),
+            Self::Stdin => run_script(
+                rscript,
+                library,
+                RscriptSource::Stdin,
+                rscript_args,
+                script_args,
+                isolated,
+            ),
+        }
+    }
 }
 
 struct PackageExecTarget {
@@ -325,6 +405,9 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
             r_requirement = Some(value.to_string());
         } else if arg == "--isolated" {
             isolated = true;
+        } else if arg == "-" {
+            positional = Some(arg);
+            break;
         } else if arg.starts_with('-') {
             rscript_args.push(arg);
         } else {
@@ -338,7 +421,7 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let (source, script_args) = if expressions.is_empty() {
         let script = positional
             .ok_or("`ir run` requires a script path or -e expression (try `ir run script.R`)")?;
-        (RunSource::Script(script), script_args)
+        (RunSource::from_script_arg(script)?, script_args)
     } else {
         // With `-e`, there is no script file; the first non-option and anything
         // after it are program args (commandArgs), matching Rscript.
@@ -599,22 +682,7 @@ fn cmd_run(
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
-    // A script file declares its dependencies, `exclude-newer`, and `r-version` in
-    // YAML frontmatter and is canonicalised so the run is independent of the
-    // working directory. Quarto documents (.qmd/.Rmd) declare them under an
-    // `ir:` key in that frontmatter. An inline `-e` expression has no
-    // frontmatter and is never a Quarto document; its deps come solely from
-    // `--with`.
-    let (script_path, mut spec, quarto) = match source {
-        RunSource::Script(script) => {
-            let path = fs::canonicalize(script)
-                .map_err(|e| format!("cannot read script `{script}`: {e}"))?;
-            let quarto = quarto::is_quarto(&path);
-            let spec = read_script_spec(&path, quarto)?;
-            (Some(path), spec, quarto)
-        }
-        RunSource::Expressions(_) => (None, ScriptSpec::default(), false),
-    };
+    let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
@@ -625,9 +693,7 @@ fn cmd_run(
     // never be launched fails fast instead of after phase-1 resolution. quarto
     // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
     // escaping.
-    if quarto {
-        quarto::reject_comma_rscript_args(rscript_args)?;
-    }
+    source.reject_unsupported_rscript_args(rscript_args)?;
 
     // Phase 1: private R session resolves deps and materialises the library.
     // Rust parses the frontmatter and sends the dependency specs on stdin.
@@ -635,33 +701,13 @@ fn cmd_run(
 
     // Phase 2: render the document, or run the user's program, in an isolated
     // R session.
-    let code = if quarto {
-        let doc = script_path
-            .as_deref()
-            .expect("is_quarto is only true for a RunSource::Script path");
-        quarto::run(
-            &rscript,
-            library.as_deref(),
-            doc,
-            rscript_args,
-            script_args,
-            isolated,
-        )?
-    } else {
-        let expressions: &[String] = match source {
-            RunSource::Expressions(exprs) => exprs,
-            RunSource::Script(_) => &[],
-        };
-        run_script(
-            &rscript,
-            library.as_deref(),
-            script_path.as_deref(),
-            expressions,
-            rscript_args,
-            script_args,
-            isolated,
-        )?
-    };
+    let code = source.run_user_code(
+        &rscript,
+        library.as_deref(),
+        rscript_args,
+        script_args,
+        isolated,
+    )?;
     std::process::exit(code);
 }
 
@@ -1222,16 +1268,16 @@ fn frontmatter_optional_string(
 }
 
 /// Phase 2 — run the user's program in an ordinary R session pointed at
-/// `library`. The program is either a script file (`script`) or, when that is
-/// `None`, the inline `expressions` evaluated via `Rscript -e` in its place.
+/// `library`. The program is a script file, `-` stdin source, or one or more
+/// inline expressions evaluated via `Rscript -e`.
 ///
-/// It runs as an ordinary `Rscript [Rscript-options...] (script.R | -e expr...)` -
-/// its `.Renviron`, `.Rprofile` and site files are read unless the forwarded
-/// Rscript options disable them. The resolved library is injected via `R_LIBS`,
-/// which is *prepended* to `.libPaths()`: resolved dependencies take precedence,
-/// while the user's other libraries remain available. (`R_LIBS` is used rather
-/// than `R_LIBS_USER`, since a user `.Renviron` setting `R_LIBS_USER` would
-/// override the latter.)
+/// It runs as an ordinary `Rscript [Rscript-options...] (script.R | - | -e
+/// expr...)` - its `.Renviron`, `.Rprofile` and site files are read unless the
+/// forwarded Rscript options disable them. The resolved library is injected via
+/// `R_LIBS`, which is *prepended* to `.libPaths()`: resolved dependencies take
+/// precedence, while the user's other libraries remain available. (`R_LIBS` is
+/// used rather than `R_LIBS_USER`, since a user `.Renviron` setting
+/// `R_LIBS_USER` would override the latter.)
 ///
 /// When `isolated` is set, the user library is dropped too: `R_LIBS_USER=NULL`
 /// is R's documented way to disable it, so `.libPaths()` is the resolved library
@@ -1245,22 +1291,24 @@ fn frontmatter_optional_string(
 fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
-    script: Option<&Path>,
-    expressions: &[String],
+    source: RscriptSource<'_>,
     rscript_args: &[String],
     script_args: &[String],
     isolated: bool,
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(rscript);
     cmd.args(rscript_args);
-    match script {
-        Some(script) => {
+    match source {
+        RscriptSource::Script(script) => {
             cmd.arg(script);
         }
-        None => {
+        RscriptSource::Expressions(expressions) => {
             for expr in expressions {
                 cmd.arg("-e").arg(expr);
             }
+        }
+        RscriptSource::Stdin => {
+            cmd.arg("-");
         }
     }
     cmd.args(script_args);

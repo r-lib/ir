@@ -1586,6 +1586,46 @@ echo "ran long expr alias"
 
 #[cfg(unix)]
 #[test]
+fn run_dash_uses_rscript_stdin_source() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+
+    write_executable(
+        &fake_rscript,
+        r#"#!/bin/sh
+set -eu
+if [ "${IR_RESOLVE_RESULT_FILE:-}" != "" ]; then
+  actual="$(cat)"
+  if [ -n "$actual" ]; then
+    echo "unexpected resolver stdin: $actual" >&2
+    exit 10
+  fi
+  echo "/tmp/ir-test-library" > "$IR_RESOLVE_RESULT_FILE"
+  exit 0
+fi
+test "$1" = "-"
+test "$2" = "arg"
+test "${R_LIBS:-}" = "/tmp/ir-test-library"
+echo "ran stdin source"
+"#,
+    );
+
+    let out = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args(["run", "-", "arg"])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&fake_rscript);
+
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ran stdin source"),
+        "{out:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn run_uses_latest_installed_r_without_rig_available() {
     let Some((real_r, real_rscript)) = real_r_tools() else {
         return;
