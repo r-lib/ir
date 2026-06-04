@@ -1,0 +1,25 @@
+Run a package executable
+
+USAGE:
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]
+
+`ir tool run` resolves <pkg-ref>, finds <library>/<package>/exec/<command>
+or <command>.R, and launches it with the selected Rscript. A bare package
+ref such as `btw` is treated as `--from btw btw`. Tool runs are isolated:
+R_LIBS_USER is set to NULL so undeclared user-library packages are not
+borrowed.
+
+OPTIONS:
+    --from <pkg-ref>
+                  Resolve a package ref and run <command> from its exec/
+                  directory. Omit for self-named commands such as `btw`.
+    --with <pkg>  Add a dependency for this run, resolved alongside the
+                  provider package. May be repeated and accepts a
+                  comma-separated list (e.g. --with cli,jsonlite).
+    --r-version <spec>
+                  Select the R version for this tool run with rig.
+
+ENVIRONMENT:
+    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))
+    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)

@@ -25,19 +25,27 @@ $ ir run --vanilla script.R
 $ ./script.R
 ```
 
-It can also evaluate inline expressions and pull in extra dependencies from the
-command line:
+It can also evaluate inline expressions, pull in extra dependencies from the
+command line, and run package-shipped executables from `exec/`:
 
 ```console
 $ ir run -e '1 + 1'                          # inline expression, isolated library
 $ ir run --with cli -e 'cli::cli_alert_success("hi")'
 $ ir run --with dplyr,tidyr script.R         # add to the script's own deps
 $ ir run --r-version 4.5 script.R            # select R with rig
+$ ir tool run --from btw btw --help          # run exec/btw from package btw
+$ ir tool run btw --help                     # shorthand for --from btw btw
+$ ir tool run --from github::r-lib/Rapp Rapp
 ```
+
+For `ir tool run --from pkg tool`, `ir` resolves `pkg`, finds `exec/tool` or
+`exec/tool.R` in the installed package, and launches that file with the selected
+Rscript. The package ref can be a pak package ref or supported version spec. Use
+quotes when the shell would otherwise interpret characters such as `>`.
 
 ## How it works
 
-`ir run script.R` runs in two phases:
+`ir run` and `ir tool run` run in two phases:
 
 1. **Resolve + materialise** (a private, throw-away R session).
    - The YAML frontmatter is parsed by Rust with **saphyr**.
@@ -68,15 +76,20 @@ $ ir run --r-version 4.5 script.R            # select R with rig
    - **renv** (`renv::use`) installs the packages into renv's package cache and
      materialises that path as a light-weight library of **symlinks** into the
      cache. The library lives in our cache, not R's temp dir, so it persists.
-2. **Run** (an ordinary R session).
-   - The script runs as `Rscript [Rscript-options...] script.R`, so it sees the
-     user's normal R environment unless forwarded Rscript options such as
+2. **Run**.
+   - Script files run as `Rscript [Rscript-options...] script.R`, so they see
+     the user's normal R environment unless forwarded Rscript options such as
      `--vanilla` disable startup files.
+   - Inline expressions run as `Rscript -e <expr>`.
    - The materialised library is injected via `R_LIBS`, which **prepends** it to
      `.libPaths()`: the resolved dependencies take precedence, while the user's
      other libraries remain available as a fallback. With `--isolated`, the user
      library is dropped (`R_LIBS_USER=NULL`); the system library stays on the
      path. See [Isolated runs](#isolated-runs).
+   - Package executables use their shebang to choose Rscript or Rapp execution.
+     `R_LIBS` points to the resolved library, `R_LIBS_USER` is set to `NULL`,
+     and `PATH` is prepended with the resolved package `exec/` directories plus
+     the directory that contains `IR_RSCRIPT` when it is an explicit path.
 
 Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
@@ -138,26 +151,34 @@ and `pkg!=1.2`, are not resolved by `ir`.
   expression has no frontmatter, so it runs against an empty isolated library
   unless dependencies are supplied with `--with`.
 
+- **`ir tool run --from <pkg-ref> <command>`** resolves a package ref and runs
+  the command from that package's `exec/` directory. A bare self-named package
+  ref such as `ir tool run btw` is treated as `ir tool run --from btw btw`.
+
 - **`--with <pkg>`** adds a dependency for this run. It can be repeated and
   accepts a comma-separated list (`--with dplyr,tidyr`), and uses the same spec
   format as the `dependencies:` frontmatter (e.g. `cli`, `dplyr>=1.0`,
   `cli==3.6.6`). With a script file, `--with` packages are *merged* with the
   script's declared dependencies; with `-e`, they are the only dependencies.
+  With `ir tool run`, they are resolved alongside the provider package.
 
 - **`--r-version <spec>`** selects the R version for this run with rig. With a
-  script file, it overrides `r-version:` in the frontmatter; with `-e`, it is the
-  only R version requirement.
+  script file, it overrides `r-version:` in the frontmatter; with `-e` or
+  `ir tool run`, it is the only R version requirement.
 
 ```console
 $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
+$ ir tool run --with cli --from btw btw
+$ ir tool run --from 'btw>=0.1.0' btw
 $ ir run --r-version 4.5 -e 'getRversion()'
 $ ir run --vanilla --with cli script.R       # Rscript options still apply
 ```
 
-`--with` packages and `--r-version` join the resolved set that is hashed into the
-content-addressed library, so a given combination of frontmatter and command-line
-requirements resolves once and is reused on later runs.
+`--with` packages, `ir tool run` provider packages, and `--r-version` join the
+resolved set that is hashed into the content-addressed library, so a given
+combination of frontmatter and command-line requirements resolves once and is
+reused on later runs.
 
 ## Isolated runs
 
@@ -168,14 +189,15 @@ the user library for the run:
 ```console
 $ ir run --isolated script.R
 $ ir run --isolated --with cli -e 'cli::cli_alert_success("hi")'
+$ ir tool run btw
 ```
 
 `--isolated` sets `R_LIBS_USER=NULL` — R's documented way to disable the user
 library — so `.libPaths()` is the resolved library plus the site and base/system
-libraries. This stops a run from silently borrowing an undeclared package from
-your personal library. The system library stays on the path, so base and
-recommended packages keep working (and anything else installed there is still
-visible).
+libraries. Tool runs always set `R_LIBS_USER=NULL`. This stops a run from
+silently borrowing an undeclared package from your personal library. The system
+library stays on the path, so base and recommended packages keep working (and
+anything else installed there is still visible).
 
 ## Requirements
 
@@ -226,3 +248,6 @@ The default cache directory follows R's per-package convention (e.g.
 - Dependency specs support bare names, `>=`, `==`, and pak package refs.
   Upper-bound syntax such as `pkg<=1.2` is not resolved by `ir`.
 - Repositories default to CRAN (`https://cran.r-project.org`).
+- The self-named package executable shortcut is for package refs whose package
+  name can be inferred locally, such as `btw` or `btw>=0.1.0`. Use
+  `ir tool run --from <pkg-ref> <command>` for remotes and other refs.

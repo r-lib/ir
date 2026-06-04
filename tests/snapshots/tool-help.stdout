@@ -1,0 +1,12 @@
+Run package executables
+
+USAGE:
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]
+
+COMMANDS:
+    run  Resolve a package and run an executable from its exec directory
+
+ENVIRONMENT:
+    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))
+    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)
