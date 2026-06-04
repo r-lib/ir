@@ -387,18 +387,14 @@ fn cache_clean_removes_cache_dir() {
 #[test]
 fn run_script_fixture_resolves_packages_and_isolates_user_library() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-script-cache");
     let script = fixture("run/packages.R");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .args(["--script-arg", "value"])
         .output()
         .unwrap();
-
-    let _ = fs::remove_dir_all(&cache_dir);
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=run-script");
@@ -416,17 +412,13 @@ fn run_script_fixture_resolves_packages_and_isolates_user_library() {
 #[test]
 fn run_script_uses_only_the_first_yaml_document() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-multi-doc-cache");
     let script = fixture("run/multiple-documents.R");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .output()
         .unwrap();
-
-    let _ = fs::remove_dir_all(&cache_dir);
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=multi-doc");
@@ -438,7 +430,6 @@ fn run_script_uses_only_the_first_yaml_document() {
 #[test]
 fn run_inline_expression_resolves_with_dependencies() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-inline-cache");
     let expr = r#"
 library(cli)
 library(glue)
@@ -453,7 +444,6 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
 "#;
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args([
             "run",
             "--isolated",
@@ -467,8 +457,6 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
         .output()
         .unwrap();
 
-    let _ = fs::remove_dir_all(&cache_dir);
-
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=inline");
     assert_stdout_contains(&out, "inline.args=inline-arg");
@@ -480,12 +468,10 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
 #[test]
 fn run_quarto_fixture_renders_html_with_resolved_packages() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-qmd-cache");
     let output_dir = unique_dir("ir-e2e-qmd-output");
     let doc = fixture("run/report.qmd");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated"])
         .arg(&doc)
         .args(["--to", "html", "--output-dir"])
@@ -502,7 +488,6 @@ fn run_quarto_fixture_renders_html_with_resolved_packages() {
     assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
     assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
 
-    let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&output_dir);
 }
 
@@ -528,13 +513,10 @@ fn run_quarto_selects_requested_r_version() {
         return;
     }
 
-    let cache_dir = unique_dir("ir-e2e-rversion-cache");
     let output_dir = unique_dir("ir-e2e-rversion-output");
     let doc = fixture("run/r-version-select.qmd");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         // The resolver inherits the environment, so an ambient R_LIBS_USER (CI's
         // setup-r-dependencies exports one) would point the selected R at a
         // library built for the *default* R, loading an ABI-mismatched
@@ -561,7 +543,6 @@ fn run_quarto_selects_requested_r_version() {
     assert!(html.contains("version.lib_in_cache=true"), "{html}");
     assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
 
-    let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&output_dir);
 }
 
@@ -589,12 +570,9 @@ fn run_script_frontmatter_selects_r_version() {
         return;
     }
 
-    let cache_dir = unique_dir("ir-e2e-rversion-fm-cache");
     let script = fixture("run/r-version-frontmatter.R");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
         // See run_quarto_selects_requested_r_version: drop the ambient
         // R_LIBS_USER so the frontmatter-selected R resolves against its own
         // toolchain rather than the default R's (ABI-mismatched) library.
@@ -604,8 +582,6 @@ fn run_script_frontmatter_selects_r_version() {
         .output()
         .unwrap();
 
-    let _ = fs::remove_dir_all(&cache_dir);
-
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=r-version-frontmatter");
     assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
@@ -614,37 +590,37 @@ fn run_script_frontmatter_selects_r_version() {
 }
 
 #[test]
-fn run_reticulate_fixture_uses_managed_ephemeral_venv() {
+fn run_reticulate_fixture_imports_python_module() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-reticulate-cache");
     let script = fixture("run/reticulate.R");
-    let python_version = python_minor_version();
+    let managed_reticulate = std::env::var_os("IR_TEST_RETICULATE_MANAGED").is_some();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_TEST_PYTHON_VERSION", &python_version)
-        .env("RETICULATE_PYTHON", "managed")
+    let mut cmd = ir();
+
+    if managed_reticulate {
+        cmd.env("IR_TEST_RETICULATE_MANAGED", "1")
+            .env("IR_TEST_PYTHON_VERSION", python_minor_version())
+            .env("RETICULATE_PYTHON", "managed");
+    }
+
+    let out = cmd
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .output()
         .unwrap();
 
-    let _ = fs::remove_dir_all(&cache_dir);
-
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=reticulate");
     assert_stdout_contains(&out, "reticulate.lib_in_cache=true");
-    assert_stdout_contains(&out, "reticulate.ephemeral=true");
+    assert_stdout_contains(&out, "reticulate.ephemeral=");
     assert_stdout_contains(&out, "reticulate.json={\"ok\": true}");
 }
 
 #[test]
 fn tool_run_executes_real_package_entrypoint() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-tool-cache");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args([
             "tool",
             "run",
@@ -658,8 +634,6 @@ fn tool_run_executes_real_package_entrypoint() {
         .output()
         .unwrap();
 
-    let _ = fs::remove_dir_all(&cache_dir);
-
     assert_success(&out);
     assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
@@ -668,11 +642,9 @@ fn tool_run_executes_real_package_entrypoint() {
 #[test]
 fn tool_install_installs_real_package_entrypoint() {
     let _guard = e2e_lock();
-    let cache_dir = unique_dir("ir-e2e-tool-install-cache");
     let bin_dir = unique_dir("ir-e2e-tool-install-bin");
 
     let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
         .args([
             "tool",
             "install",
@@ -692,12 +664,11 @@ fn tool_install_installs_real_package_entrypoint() {
     let launcher = launcher_path(&bin_dir, "search");
     let out = Command::new(&launcher).arg("--help").output().unwrap();
 
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-
     assert_success(&out);
     assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
+
+    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {

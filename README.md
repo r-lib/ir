@@ -303,6 +303,10 @@ run on its own:
 $ Rscript -e 'testthat::test_file("tests/test-resolve.R", stop_on_failure = TRUE)'
 ```
 
+The end-to-end CLI tests use real R package resolution and the normal `ir`
+cache. Repeat runs with a warm cache skip the download and materialisation path;
+fresh CI jobs download and materialise packages when pak is called.
+
 ## Configuration
 
 | Variable       | Default                                          |

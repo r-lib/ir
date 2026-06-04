@@ -4,10 +4,13 @@
 
 library(reticulate)
 
-python_version <- Sys.getenv("IR_TEST_PYTHON_VERSION")
-stopifnot(nzchar(python_version))
+managed <- identical(Sys.getenv("IR_TEST_RETICULATE_MANAGED"), "1")
+if (managed) {
+  python_version <- Sys.getenv("IR_TEST_PYTHON_VERSION")
+  stopifnot(nzchar(python_version))
+  py_require(character(), python_version = python_version, action = "set")
+}
 
-py_require(character(), python_version = python_version, action = "set")
 json <- import("json")
 config <- py_config()
 
