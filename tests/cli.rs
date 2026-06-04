@@ -161,7 +161,15 @@ pkgs <- c(
   "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
   "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
 )
-missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+# Check that each package is installed, not that they all load together.
+# requireNamespace loads the namespace and its native DLL; loading all of these
+# into one R session co-loads their DLLs, which faults on Windows (0xC0000005)
+# in a way no `ir` workflow reproduces -- `ir` loads only a single document's
+# resolved deps in an isolated library. find.package verifies availability
+# without dlopen, which is all this probe needs.
+missing <- pkgs[!vapply(pkgs, function(p) {
+  length(find.package(p, quiet = TRUE)) > 0
+}, logical(1))]
 if (length(missing)) {
   stop("missing R packages: ", paste(missing, collapse = ", "), call. = FALSE)
 }
