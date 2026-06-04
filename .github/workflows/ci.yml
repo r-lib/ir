@@ -106,22 +106,24 @@ jobs:
 
       - run: cargo build --verbose
 
-      # DEBUG (#54): isolate which package's namespace load segfaults
-      # (0xC0000005) on the runner. Each package loads in its own Rscript so a
-      # crash names exactly one package instead of killing the whole probe.
-      - name: Diagnose segfaulting package (system library)
+      # DEBUG (#54): each package loads fine in isolation, but loading all 16 in
+      # one R session crashes (0xC0000005) — a native DLL interaction. Load them
+      # cumulatively in one process, flushing before each, so the last "loading
+      # X" line printed before the crash names the package that triggers it.
+      - name: Diagnose co-load segfault (single process)
         shell: bash
         run: |
-          echo "=== R library paths ==="
-          Rscript -e 'print(.libPaths())'
-          for pkg in pak renv secretbase cli glue jsonlite dplyr tidyr reticulate knitr rmarkdown btw Rapp docopt pkgsearch prettyunits; do
-            echo "=== $pkg ==="
-            if Rscript -e "suppressMessages(requireNamespace('$pkg', quietly = TRUE)); cat('loaded', '$pkg', as.character(packageVersion('$pkg')), '\n')"; then
-              echo "ok $pkg"
-            else
-              echo "FAILED $pkg (exit $?)"
-            fi
-          done
+          Rscript -e '
+            pkgs <- c("pak", "renv", "secretbase", "cli", "glue", "jsonlite",
+                      "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
+                      "btw", "Rapp", "docopt", "pkgsearch", "prettyunits")
+            for (p in pkgs) {
+              cat("loading", p, "...\n"); flush(stdout())
+              requireNamespace(p, quietly = TRUE)
+              cat("  ok", p, as.character(packageVersion(p)), "\n"); flush(stdout())
+            }
+            cat("ALL LOADED\n")
+          ' && echo "no crash" || echo "CRASHED (exit $?)"
 
       # DEBUG (#54): run only the crashing tests for a fast loop.
       - run: cargo test --verbose -- ci_dependencies_are_available run_inline_expression_resolves_with_dependencies
