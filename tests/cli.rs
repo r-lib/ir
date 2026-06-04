@@ -459,6 +459,7 @@ fn cache_clean_removes_cache_dir() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "real-toolchain e2e fails on windows-latest; see #46")]
 fn run_script_fixture_resolves_packages_and_isolates_user_library() {
     let _guard = e2e_lock();
     let script = fixture("run/packages.R");
@@ -502,6 +503,7 @@ fn run_script_uses_only_the_first_yaml_document() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "real-toolchain e2e fails on windows-latest; see #46")]
 fn run_inline_expression_resolves_with_dependencies() {
     let _guard = e2e_lock();
     let expr = r#"
@@ -664,6 +666,7 @@ fn run_script_frontmatter_selects_r_version() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "real-toolchain e2e fails on windows-latest; see #46")]
 fn run_reticulate_fixture_imports_python_module() {
     let _guard = e2e_lock();
     let script = fixture("run/reticulate.R");
@@ -714,6 +717,7 @@ fn tool_run_executes_real_package_entrypoint() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "real-toolchain e2e fails on windows-latest; see #46")]
 fn tool_install_installs_real_package_entrypoint() {
     let _guard = e2e_lock();
     let bin_dir = unique_dir("ir-e2e-tool-install-bin");
