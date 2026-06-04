@@ -533,10 +533,11 @@ fn run_quarto_selects_requested_r_version() {
         .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
     assert!(html.contains("ir.fixture=r-version"), "{html}");
     assert!(
-        html.contains(&format!("version.r_version={target}")),
+        html.contains(&format!("version.r_version=[{target}]")),
         "rendered under a different R than the requested {target}\n{html}"
     );
     assert!(html.contains("version.lib_in_cache=true"), "{html}");
+    assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
 
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&output_dir);
@@ -581,8 +582,9 @@ fn run_script_frontmatter_selects_r_version() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=r-version-frontmatter");
-    assert_stdout_contains(&out, &format!("version.r_version={FIXTURE_R_VERSION}"));
+    assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
     assert_stdout_contains(&out, "version.lib_in_cache=true");
+    assert_stdout_contains(&out, "version.jsonlite_in_cache=true");
 }
 
 #[test]
