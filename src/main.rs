@@ -50,6 +50,7 @@ const RESOLVE_DRIVER: &str = include_str!("../driver/resolve.R");
 #[derive(Debug, Default)]
 struct ScriptSpec {
     dependencies: Vec<String>,
+    with_suggests: Vec<String>,
     exclude_newer: Option<String>,
     r_requirement: Option<String>,
 }
@@ -76,6 +77,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 &run.source,
                 &run.rscript_args,
                 &run.with_deps,
+                &run.with_suggests,
                 run.r_requirement.as_deref(),
                 &run.script_args,
                 run.isolated,
@@ -116,6 +118,14 @@ fn run_command() -> ClapCommand {
                 .num_args(1)
                 .action(ArgAction::Append)
                 .help("Add a dependency for this run; may be repeated"),
+        )
+        .arg(
+            Arg::new("with-suggests")
+                .long("with-suggests")
+                .value_name("PKG")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Also resolve PKG's Suggests; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
@@ -162,6 +172,14 @@ fn tool_run_command() -> ClapCommand {
                 .help("Add a dependency for this tool run; may be repeated"),
         )
         .arg(
+            Arg::new("with-suggests")
+                .long("with-suggests")
+                .value_name("PKG")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Also resolve PKG's Suggests; may be repeated"),
+        )
+        .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
@@ -189,6 +207,14 @@ fn tool_install_command() -> ClapCommand {
                 .num_args(1)
                 .action(ArgAction::Append)
                 .help("Add a dependency for installed launchers; may be repeated"),
+        )
+        .arg(
+            Arg::new("with-suggests")
+                .long("with-suggests")
+                .value_name("PKG")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Also resolve PKG's Suggests; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
@@ -345,6 +371,7 @@ struct PackageExecTarget {
 struct RunArgs {
     rscript_args: Vec<String>,
     with_deps: Vec<String>,
+    with_suggests: Vec<String>,
     r_requirement: Option<String>,
     source: RunSource,
     script_args: Vec<String>,
@@ -354,6 +381,7 @@ struct RunArgs {
 struct ToolRunArgs {
     rscript_args: Vec<String>,
     with_deps: Vec<String>,
+    with_suggests: Vec<String>,
     r_requirement: Option<String>,
     target: PackageExecTarget,
     tool_args: Vec<String>,
@@ -362,6 +390,7 @@ struct ToolRunArgs {
 struct ToolInstallArgs {
     package_ref: String,
     with_deps: Vec<String>,
+    with_suggests: Vec<String>,
     r_requirement: Option<String>,
     bin_dir: PathBuf,
     force: bool,
@@ -379,6 +408,7 @@ struct ToolInstallArgs {
 fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
+    let mut with_suggests = Vec::new();
     let mut r_requirement = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
@@ -402,6 +432,13 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--with-suggests" {
+            let value = iter.next().ok_or(
+                "`--with-suggests` requires a package (try `ir run --with-suggests dplyr script.R`)",
+            )?;
+            push_with_deps(&mut with_suggests, &value);
+        } else if let Some(value) = arg.strip_prefix("--with-suggests=") {
+            push_with_deps(&mut with_suggests, value);
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir run --r-version 4.5 script.R`)",
@@ -440,6 +477,7 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     Ok(RunArgs {
         rscript_args,
         with_deps,
+        with_suggests,
         r_requirement,
         source,
         script_args,
@@ -484,6 +522,7 @@ fn is_package_executable_name(name: &str) -> bool {
 fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
+    let mut with_suggests = Vec::new();
     let mut r_requirement = None;
     let mut from = None;
     let mut iter = args.into_iter();
@@ -507,6 +546,13 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--with-suggests" {
+            let value = iter.next().ok_or(
+                "`--with-suggests` requires a package (try `ir tool run --with-suggests btw btw`)",
+            )?;
+            push_with_deps(&mut with_suggests, &value);
+        } else if let Some(value) = arg.strip_prefix("--with-suggests=") {
+            push_with_deps(&mut with_suggests, value);
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir tool run --r-version 4.5 btw`)",
@@ -553,6 +599,7 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
     Ok(ToolRunArgs {
         rscript_args,
         with_deps,
+        with_suggests,
         r_requirement,
         target,
         tool_args,
@@ -561,6 +608,7 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
 
 fn parse_tool_install_args(args: Vec<String>) -> Result<ToolInstallArgs, Box<dyn Error>> {
     let mut with_deps = Vec::new();
+    let mut with_suggests = Vec::new();
     let mut r_requirement = None;
     let mut bin_dir = None;
     let mut force = false;
@@ -575,6 +623,13 @@ fn parse_tool_install_args(args: Vec<String>) -> Result<ToolInstallArgs, Box<dyn
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--with-suggests" {
+            let value = iter.next().ok_or(
+                "`--with-suggests` requires a package (try `ir tool install --with-suggests btw btw`)",
+            )?;
+            push_with_deps(&mut with_suggests, &value);
+        } else if let Some(value) = arg.strip_prefix("--with-suggests=") {
+            push_with_deps(&mut with_suggests, value);
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir tool install --r-version 4.5 btw`)",
@@ -615,6 +670,7 @@ fn parse_tool_install_args(args: Vec<String>) -> Result<ToolInstallArgs, Box<dyn
     Ok(ToolInstallArgs {
         package_ref: package_arg,
         with_deps,
+        with_suggests,
         r_requirement,
         bin_dir: bin_dir.unwrap_or(tool_install_bin_dir()?),
         force,
@@ -684,12 +740,14 @@ fn cmd_run(
     source: &RunSource,
     rscript_args: &[String],
     with_deps: &[String],
+    with_suggests: &[String],
     r_requirement: Option<&str>,
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
+    spec.with_suggests = with_suggests.to_vec();
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
@@ -723,6 +781,7 @@ fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
         ..ScriptSpec::default()
     };
     spec.dependencies.extend(run.with_deps.iter().cloned());
+    spec.with_suggests = run.with_suggests.clone();
     if let Some(req) = &run.r_requirement {
         spec.r_requirement = Some(req.clone());
     }
@@ -752,6 +811,7 @@ fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
         ..ScriptSpec::default()
     };
     spec.dependencies.extend(install.with_deps.iter().cloned());
+    spec.with_suggests = install.with_suggests.clone();
     if let Some(req) = &install.r_requirement {
         spec.r_requirement = Some(req.clone());
     }
@@ -864,6 +924,9 @@ fn resolve_library_inner(
     }
     if let Some(exclude_newer) = &spec.exclude_newer {
         cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
+    }
+    if !spec.with_suggests.is_empty() {
+        cmd.env("IR_WITH_SUGGESTS", spec.with_suggests.join(","));
     }
 
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
@@ -1222,6 +1285,9 @@ fn script_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<ScriptSpec, Box<dyn E
         dependencies: frontmatter_dependencies(doc)?,
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
+        // `--with-suggests` is a command-line flag, not frontmatter: a script
+        // declares only its hard dependencies; pulling Suggests is a per-run choice.
+        ..ScriptSpec::default()
     })
 }
 

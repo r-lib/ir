@@ -50,6 +50,8 @@ jobs:
             any::docopt
             any::pkgsearch
             any::prettyunits
+            any::cachem
+            any::testthat
 
       # `ir run --r-version` resolves through rig, so the version-selection test
       # needs rig plus a second, non-default R. Provision both on Linux and

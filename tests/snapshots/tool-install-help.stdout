@@ -6,8 +6,9 @@ Arguments:
   <PKG_REF>  Package ref that resolves to the package exposing exec/ launchers
 
 Options:
-      --with <PKG>        Add a dependency for installed launchers; may be repeated
-      --r-version <SPEC>  Select the R version for installed launchers with rig
-      --bin-dir <DIR>     Directory where launchers are written
-      --force             Overwrite an existing launcher path
-  -h, --help              Print help
+      --with <PKG>           Add a dependency for installed launchers; may be repeated
+      --with-suggests <PKG>  Also resolve PKG's Suggests; may be repeated
+      --r-version <SPEC>     Select the R version for installed launchers with rig
+      --bin-dir <DIR>        Directory where launchers are written
+      --force                Overwrite an existing launcher path
+  -h, --help                 Print help

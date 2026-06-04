@@ -159,7 +159,8 @@ fn ci_dependencies_are_available() {
 pkgs <- c(
   "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
   "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
-  "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
+  "btw", "Rapp", "docopt", "pkgsearch", "prettyunits",
+  "cachem", "testthat"
 )
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) {
@@ -529,6 +530,94 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
     assert_stdout_contains(&out, "inline.lib_in_cache=true");
     assert_stdout_contains(&out, "inline.pkgs_in_cache=true");
     assert_stdout_contains(&out, "inline.glue=2");
+}
+
+/// `--with-suggests` resolves a package together with its Suggests, materialising
+/// them into the isolated library. cachem declares a single Suggest (testthat),
+/// so the baseline run lacks testthat while the augmented run includes it. Both
+/// runs share a cache directory, so the second reuses the first's renv entries.
+#[test]
+fn run_with_suggests_pulls_a_packages_suggests() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-e2e-suggests-cache");
+    let expr = r#"
+lib <- .libPaths()[[1]]
+installed <- rownames(installed.packages(lib.loc = lib))
+cat("ir.fixture=suggests\n")
+cat("suggests.cachem=", tolower("cachem" %in% installed), "\n", sep = "")
+cat("suggests.testthat=", tolower("testthat" %in% installed), "\n", sep = "")
+"#;
+
+    let baseline = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cachem",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&baseline);
+    assert_stdout_contains(&baseline, "suggests.cachem=true");
+    assert_stdout_contains(&baseline, "suggests.testthat=false");
+
+    let augmented = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cachem",
+            "--with-suggests",
+            "cachem",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert_success(&augmented);
+    assert_stdout_contains(&augmented, "suggests.cachem=true");
+    assert_stdout_contains(&augmented, "suggests.testthat=true");
+}
+
+/// `--with-suggests` augments an existing dependency, so it is rejected when the
+/// named package is not among the resolved dependencies. With nothing declared,
+/// the resolver errors before contacting any repository.
+#[test]
+fn run_with_suggests_requires_a_declared_package() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-e2e-suggests-error-cache");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "--with-suggests",
+            "cachem",
+            "-e",
+            "1",
+        ])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("not among resolved dependencies"),
+        "{}",
+        output_text(&out)
+    );
 }
 
 #[test]

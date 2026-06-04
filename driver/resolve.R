@@ -42,6 +42,15 @@ ir_exclude_newer <- function(value) {
   value
 }
 
+# Optional per-package Suggests resolution. `--with-suggests` packages arrive as
+# a comma-separated env value; this splits them into the bare package names whose
+# Suggests should join the resolution. Order independent and de-duplicated.
+ir_with_suggests <- function(value) {
+  if (is.null(value)) return(character())
+  parts <- trimws(strsplit(value, ",", fixed = TRUE)[[1L]])
+  unique(parts[nzchar(parts)])
+}
+
 ## --- pak ref normalisation --------------------------------------------------
 
 # Translate one dependency spec into a pak package reference:
@@ -60,6 +69,29 @@ ir_to_ref <- function(d) {
   if (length(m) != 4L) return(d)
   if (m[[3L]] == ">=") sprintf("%s@>=%s", m[[2L]], m[[4L]])
   else sprintf("%s@%s", m[[2L]], m[[4L]])
+}
+
+# The bare package name from a dependency spec, used to match `--with-suggests`
+# entries against resolved package names. Strips a trailing version constraint
+# (`dplyr>=1.0`) or pak version suffix (`dplyr@1.0`). Other ref forms such as
+# `r-lib/dplyr` are left for the resolved-set check to reject with a clear
+# message, so `--with-suggests` takes a package name.
+ir_pkg_name <- function(spec) {
+  sub("^[[:space:]]*([A-Za-z][A-Za-z0-9.]*).*$", "\\1", spec)
+}
+
+# Suggests package names declared by `pkg`, read from a pak::pkg_deps() result.
+# Returns NULL when `pkg` is absent from the resolved set (the caller treats that
+# as an error) and character() when present but suggesting nothing. Dependency
+# `type`s in pak's `deps` column are lower case; "R" is not an installable
+# package.
+ir_suggested_packages <- function(res, pkg) {
+  row <- res[res$package == pkg, , drop = FALSE]
+  if (!nrow(row)) return(NULL)
+  deps <- row$deps[[1L]]
+  if (is.null(deps) || !nrow(deps)) return(character())
+  suggested <- deps$package[tolower(deps$type) == "suggests"]
+  setdiff(unique(suggested), "R")
 }
 
 ## --- cache location ---------------------------------------------------------
@@ -101,16 +133,27 @@ ir_input_key <- function(deps,
                          date          = Sys.Date(),
                          rversion      = getRversion(),
                          platform      = R.version$platform,
-                         exclude_newer = NULL) {
+                         exclude_newer = NULL,
+                         with_suggests = character()) {
   source_key <- if (is.null(exclude_newer))
     as.character(date)
   else
     sprintf("exclude-newer: %s", exclude_newer)
 
+  # Pulling a package's Suggests yields a different closure for the same declared
+  # deps, so it gets its own resolution marker. Omitted when empty, leaving the
+  # key identical to a no-suggests request and reusing existing cache entries.
+  suggests_key <- if (length(with_suggests))
+    sprintf("with-suggests: %s",
+            paste(sort(unique(with_suggests)), collapse = ","))
+  else
+    NULL
+
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
                              as.character(rversion),
-                             platform),
+                             platform,
+                             suggests_key),
                            collapse = "\n"))
 }
 
@@ -129,13 +172,19 @@ ir_resolve_main <- function() {
   repos <- ir_repos(exclude_newer)
   options(repos = repos)
 
+  # Packages whose Suggests should join the closure (from `--with-suggests`),
+  # reduced to bare package names so they match the resolved set.
+  suggest_names <- unique(vapply(ir_with_suggests(ir_env_optional("IR_WITH_SUGGESTS")),
+                                 ir_pkg_name, character(1L), USE.NAMES = FALSE))
+
   ## 1b. Resolution cache: if this exact request was resolved already and its
   ## library still exists, reuse it and skip pak entirely. The marker is written
   ## only after a successful materialise (below), so its presence implies a
   ## complete library.
   primary_ref <- if (length(deps)) ir_to_ref(deps[[1L]]) else NULL
   marker <- file.path(cache_dir, "resolutions",
-                      ir_input_key(deps, exclude_newer = exclude_newer))
+                      ir_input_key(deps, exclude_newer = exclude_newer,
+                                   with_suggests = suggest_names))
   package_marker <- if (!is.null(primary_ref)) {
     file.path(cache_dir, "resolutions",
               paste0(basename(marker), "-primary-", secretbase::sha256(primary_ref)))
@@ -182,6 +231,37 @@ ir_resolve_main <- function() {
       primary_package <- primary[[1L]]
     }
 
+    # Per-package Suggests: promote the Suggests of the requested packages to
+    # direct refs and re-solve, so just those packages' suggested dependencies
+    # (and the hard dependencies they pull) join the closure. Unlike pak's global
+    # `dependencies = TRUE`, this does not add every direct package's Suggests.
+    if (length(suggest_names)) {
+      missing <- setdiff(suggest_names, res$package)
+      if (length(missing))
+        stop("`--with-suggests` package(s) not among resolved dependencies: ",
+             paste(missing, collapse = ", "),
+             " (declare them, or add with `--with`)", call. = FALSE)
+      extra <- unique(unlist(lapply(suggest_names,
+                                    function(p) ir_suggested_packages(res, p)),
+                             use.names = FALSE))
+      # Skip Suggests already resolved, and those absent from the configured
+      # repos -- as a direct ref an unavailable Suggests would fail the whole
+      # solve, whereas a soft dependency is meant to be skipped when unavailable.
+      extra <- setdiff(extra, res$package)
+      if (length(extra)) {
+        available <- tryCatch(rownames(available.packages(repos = repos, type = "source")),
+                              error = function(e) character())
+        extra <- intersect(extra, available)
+      }
+      if (length(extra)) {
+        res <- pak::pkg_deps(c(refs_in, extra), dependencies = NA, upgrade = TRUE)
+        failed <- res[res$status != "OK", , drop = FALSE]
+        if (nrow(failed))
+          stop("pak could not resolve suggested dependencies: ",
+               paste(failed$ref, collapse = ", "), call. = FALSE)
+      }
+    }
+
     # Drop base / recommended packages: those are supplied by R itself.
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
@@ -191,6 +271,13 @@ ir_resolve_main <- function() {
   } else {
     pkgs     <- character()
     resolved <- character()
+    # `--with-suggests` augments an existing dependency, so with nothing declared
+    # there is nothing for it to attach to. Reject it for the same reason the
+    # resolution path does, rather than silently ignoring the request.
+    if (length(suggest_names))
+      stop("`--with-suggests` package(s) not among resolved dependencies: ",
+           paste(suggest_names, collapse = ", "),
+           " (declare them, or add with `--with`)", call. = FALSE)
     if (!is.null(package_result_file))
       stop("cannot resolve a primary package without dependencies",
            call. = FALSE)

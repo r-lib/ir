@@ -223,6 +223,18 @@ and `pkg!=1.2`, are not resolved by `ir`.
   With `ir tool run` or `ir tool install`, they are resolved alongside the
   provider package.
 
+- **`--with-suggests <pkg>`** also pulls a package's `Suggests` into the resolved
+  library. It can be repeated and accepts a comma-separated list
+  (`--with-suggests dplyr,tidyr`), and takes a package *name*. Each named package
+  must already be in the resolved set — declared in the frontmatter, added with
+  `--with`, or (for `ir tool run` / `ir tool install`) the provider package — so
+  the flag augments how an existing dependency is resolved rather than adding a
+  new one. Unlike resolving everything with its suggests, this is *per-package*:
+  only the named packages contribute their `Suggests`, and only their direct
+  `Suggests` (not the suggests of those suggests). `Suggests` that are not
+  available in the active repository are skipped, mirroring
+  `install.packages(dependencies = TRUE)`.
+
 - **`--r-version <spec>`** selects the R version for this run with rig. With a
   script file, it overrides `r-version:` in the frontmatter; with `-e` or
   `ir tool run`, it is the only R version requirement. With `ir tool install`,
@@ -231,8 +243,10 @@ and `pkg!=1.2`, are not resolved by `ir`.
 ```console
 $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
+$ ir run --with dplyr --with-suggests dplyr -e 'library(dplyr)'
 $ ir tool run --with cli --from btw btw
 $ ir tool run --from 'btw>=0.1.0' btw
+$ ir tool run --with-suggests btw btw         # btw resolved with its Suggests
 $ ir tool install --with cli btw
 $ ir tool install --r-version 4.5 btw
 $ echo 'print(commandArgs(TRUE))' | ir run - stdin-arg
@@ -240,10 +254,10 @@ $ ir run --r-version 4.5 -e 'getRversion()'
 $ ir run --vanilla --with cli script.R       # Rscript options still apply
 ```
 
-`--with` packages, `ir tool run` provider packages, and `--r-version` join the
-resolved set that is hashed into the content-addressed library, so a given
-combination of frontmatter and command-line requirements resolves once and is
-reused on later runs.
+`--with` packages, `--with-suggests` packages, `ir tool run` provider packages,
+and `--r-version` join the resolved set that is hashed into the content-addressed
+library, so a given combination of frontmatter and command-line requirements
+resolves once and is reused on later runs.
 
 ## Isolated runs
 
