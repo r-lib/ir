@@ -54,12 +54,16 @@ jobs:
       # macOS; the Windows job is wired up separately once the `\\?\` path bug
       # in `ir run` is fixed (#32).
       #
-      # Pin the default Rscript to the one set up above before installing rig:
-      # on Linux `rig add` sets the first rig-managed R as the default and links
-      # it into /usr/local/bin, which can otherwise shadow it on PATH.
+      # Pin the default Rscript to the one set up above before installing rig.
+      # On Linux `rig add` makes the first rig-managed R the default and relinks
+      # /usr/local/bin/Rscript to it, so pinning the symlink (`which Rscript`)
+      # would silently follow rig's R. Resolve the real per-version binary
+      # instead, which rig never touches.
       - name: Pin the default Rscript before installing rig
         if: runner.os != 'Windows'
-        run: echo "IR_RSCRIPT=$(which Rscript)" >> "$GITHUB_ENV"
+        run: |
+          rscript_path=$(Rscript -e 'cat(file.path(R.home("bin"), "Rscript"))')
+          echo "IR_RSCRIPT=$rscript_path" >> "$GITHUB_ENV"
 
       - name: Install rig (Linux)
         if: runner.os == 'Linux'
@@ -84,7 +88,11 @@ jobs:
         run: |
           rig add 4.4.3
           name=$(rig list --json | jq -r '[.[] | select(.version == "4.4.3")][0].name')
-          rig run -r "$name" -e 'pak::pkg_install(c("pak", "renv", "secretbase"))'
+          # setup-r-dependencies exports R_LIBS_USER pointing at the default R's
+          # package cache. Install the resolver toolchain without it so these
+          # compiled packages land in 4.4.3's own library and match its ABI; the
+          # version-selection test likewise drops R_LIBS_USER when it runs `ir`.
+          env -u R_LIBS_USER rig run -r "$name" -e 'pak::pkg_install(c("pak", "renv", "secretbase"))'
           echo "IR_TEST_R_VERSION=4.4.3" >> "$GITHUB_ENV"
 
       - run: cargo build --verbose

@@ -525,6 +525,12 @@ fn run_quarto_selects_requested_r_version() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_EXPECT_CACHE_DIR", &cache_dir)
+        // The resolver inherits the environment, so an ambient R_LIBS_USER (CI's
+        // setup-r-dependencies exports one) would point the selected R at a
+        // library built for the *default* R, loading an ABI-mismatched
+        // secretbase. A real `--r-version` user has no R_LIBS_USER exported; drop
+        // it so the requested R uses its own toolchain.
+        .env_remove("R_LIBS_USER")
         .args(["run", "--isolated", "--r-version"])
         .arg(&target)
         .arg(&doc)
@@ -579,6 +585,10 @@ fn run_script_frontmatter_selects_r_version() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_EXPECT_CACHE_DIR", &cache_dir)
+        // See run_quarto_selects_requested_r_version: drop the ambient
+        // R_LIBS_USER so the frontmatter-selected R resolves against its own
+        // toolchain rather than the default R's (ABI-mismatched) library.
+        .env_remove("R_LIBS_USER")
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .output()
