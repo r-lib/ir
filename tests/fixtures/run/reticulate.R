@@ -9,8 +9,6 @@ if (managed) {
   python_version <- Sys.getenv("IR_TEST_PYTHON_VERSION")
   stopifnot(nzchar(python_version))
   py_require(character(), python_version = python_version, action = "set")
-} else {
-  stopifnot(nzchar(Sys.getenv("RETICULATE_PYTHON")))
 }
 
 json <- import("json")

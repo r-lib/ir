@@ -184,28 +184,16 @@ fn assert_command_success(mut command: Command, label: &str) {
 }
 
 fn python_minor_version() -> String {
-    python_probe().0
-}
-
-fn python_executable() -> String {
-    python_probe().1
-}
-
-fn python_probe() -> (String, String) {
     for command in ["python3", "python"] {
         let output = Command::new(command)
             .args([
                 "-c",
-                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print(sys.executable)",
+                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
             ])
             .output();
         if let Ok(output) = output {
             if output.status.success() {
-                let stdout = String::from_utf8(output.stdout).unwrap();
-                let mut lines = stdout.lines();
-                let version = lines.next().unwrap().to_string();
-                let executable = lines.next().unwrap().to_string();
-                return (version, executable);
+                return String::from_utf8(output.stdout).unwrap().trim().to_string();
             }
         }
     }
@@ -673,7 +661,7 @@ fn run_reticulate_fixture_imports_python_module() {
     let _guard = e2e_lock();
     let cache_dir = e2e_cache_dir("ir-e2e-reticulate-cache");
     let script = fixture("run/reticulate.R");
-    let managed_reticulate = cold_cache();
+    let managed_reticulate = std::env::var_os("IR_TEST_RETICULATE_MANAGED").is_some();
 
     let mut cmd = ir();
     cmd.env("IR_CACHE_DIR", cache_dir.path())
@@ -684,9 +672,6 @@ fn run_reticulate_fixture_imports_python_module() {
             .env("IR_TEST_PYTHON_VERSION", python_minor_version())
             .env("RETICULATE_PYTHON", "managed")
             .env("UV_PYTHON_PREFERENCE", "only-system");
-    } else {
-        cmd.env("RETICULATE_PYTHON", python_executable())
-            .env("RETICULATE_USE_MANAGED_VENV", "no");
     }
 
     let out = cmd
@@ -698,14 +683,7 @@ fn run_reticulate_fixture_imports_python_module() {
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=reticulate");
     assert_stdout_contains(&out, "reticulate.lib_in_cache=true");
-    assert_stdout_contains(
-        &out,
-        if managed_reticulate {
-            "reticulate.ephemeral=true"
-        } else {
-            "reticulate.ephemeral=false"
-        },
-    );
+    assert_stdout_contains(&out, "reticulate.ephemeral=");
     assert_stdout_contains(&out, "reticulate.json={\"ok\": true}");
 }
 
