@@ -158,7 +158,7 @@ fn ci_dependencies_are_available() {
     let r_expr = r#"
 pkgs <- c(
   "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
-  "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
+  "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown", "quarto",
   "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
 )
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -531,8 +531,11 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
     assert_stdout_contains(&out, "inline.glue=2");
 }
 
+// report.qmd deliberately does NOT declare rmarkdown, so the render only
+// succeeds because ir injects it (the knitr engine needs it). The advisory on
+// stderr confirms the injected seed was used.
 #[test]
-fn run_quarto_fixture_renders_html_with_resolved_packages() {
+fn run_quarto_fixture_injects_rmarkdown_and_renders() {
     let _guard = e2e_lock();
     let output_dir = unique_dir("ir-e2e-qmd-output");
     let doc = fixture("run/report.qmd");
@@ -554,6 +557,136 @@ fn run_quarto_fixture_renders_html_with_resolved_packages() {
     assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
     assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
 
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("using latest rmarkdown"),
+        "expected the rmarkdown injection advisory\n{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&output_dir);
+}
+
+// report-pinned.qmd declares rmarkdown itself, so the injected seed is
+// deduped away and the advisory stays silent.
+#[test]
+fn run_quarto_fixture_with_declared_rmarkdown_skips_injection() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-e2e-qmd-pinned-cache");
+    let output_dir = unique_dir("ir-e2e-qmd-pinned-output");
+    let doc = fixture("run/report-pinned.qmd");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--isolated"])
+        .arg(&doc)
+        .args(["--to", "html", "--output-dir"])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let html = fs::read_to_string(output_dir.join("report-pinned.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
+    assert!(html.contains("ir.fixture=qmd-pinned"), "{html}");
+    // The declared rmarkdown must load from the resolved run library, with its
+    // version read from that library's DESCRIPTION.
+    assert!(html.contains("pinned.rmarkdown_in_cache=true"), "{html}");
+    assert!(html.contains("pinned.rmarkdown_version="), "{html}");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("using latest rmarkdown"),
+        "advisory should stay silent when rmarkdown is declared\n{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&output_dir);
+}
+
+// report-transitive.qmd declares `quarto`, which Imports rmarkdown. The
+// resolver sees rmarkdown already in the resolved set and skips its own seed,
+// so the advisory stays silent even though the document never names rmarkdown.
+#[test]
+fn run_quarto_fixture_with_transitive_rmarkdown_skips_advisory() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-e2e-qmd-transitive-cache");
+    let output_dir = unique_dir("ir-e2e-qmd-transitive-output");
+    let doc = fixture("run/report-transitive.qmd");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--isolated"])
+        .arg(&doc)
+        .args(["--to", "html", "--output-dir"])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let html = fs::read_to_string(output_dir.join("report-transitive.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
+    assert!(html.contains("ir.fixture=qmd-transitive"), "{html}");
+    // Both the declared `quarto` and the transitively-pulled rmarkdown must be
+    // materialised into the resolved run library, with rmarkdown's version read
+    // from that library's DESCRIPTION.
+    assert!(html.contains("transitive.quarto_in_cache=true"), "{html}");
+    assert!(
+        html.contains("transitive.rmarkdown_in_cache=true"),
+        "{html}"
+    );
+    assert!(html.contains("transitive.rmarkdown_version="), "{html}");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("using latest rmarkdown"),
+        "advisory should stay silent when rmarkdown is a transitive dependency\n{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&output_dir);
+}
+
+// report-bare.qmd declares no dependencies at all, so the resolver must still
+// inject rmarkdown (with the advisory) for the knitr engine to render.
+#[test]
+fn run_quarto_bare_fixture_injects_rmarkdown() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-e2e-qmd-bare-cache");
+    let output_dir = unique_dir("ir-e2e-qmd-bare-output");
+    let doc = fixture("run/report-bare.qmd");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--isolated"])
+        .arg(&doc)
+        .args(["--to", "html", "--output-dir"])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let html = fs::read_to_string(output_dir.join("report-bare.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
+    assert!(html.contains("ir.fixture=qmd-bare"), "{html}");
+    // The injected rmarkdown must be materialised into the resolved run
+    // library, with its version read from that library's DESCRIPTION.
+    assert!(html.contains("bare.rmarkdown_in_cache=true"), "{html}");
+    assert!(html.contains("bare.rmarkdown_version="), "{html}");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("using latest rmarkdown"),
+        "expected the rmarkdown injection advisory for a bare quarto doc\n{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&output_dir);
 }
 

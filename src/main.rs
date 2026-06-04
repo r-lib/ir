@@ -52,6 +52,8 @@ struct ScriptSpec {
     dependencies: Vec<String>,
     exclude_newer: Option<String>,
     r_requirement: Option<String>,
+    // A Quarto source: the resolver injects rmarkdown for the knitr engine.
+    quarto: bool,
 }
 
 fn main() {
@@ -284,6 +286,12 @@ impl RunSource {
             Self::Quarto(doc) => read_script_spec(doc, true),
             Self::Expressions(_) | Self::Stdin => Ok(ScriptSpec::default()),
         }
+    }
+
+    /// True for Quarto documents, which are rendered with `quarto render` and
+    /// whose knitr engine needs `rmarkdown` injected into the resolved library.
+    fn is_quarto(&self) -> bool {
+        matches!(self, Self::Quarto(_))
     }
 
     fn reject_unsupported_rscript_args(
@@ -690,6 +698,7 @@ fn cmd_run(
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
+    spec.quarto = source.is_quarto();
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
@@ -718,11 +727,12 @@ fn cmd_run(
 }
 
 fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
+    let mut deps = vec![run.target.package_ref.clone()];
+    deps.extend(run.with_deps.iter().cloned());
     let mut spec = ScriptSpec {
-        dependencies: vec![run.target.package_ref.clone()],
+        dependencies: deps,
         ..ScriptSpec::default()
     };
-    spec.dependencies.extend(run.with_deps.iter().cloned());
     if let Some(req) = &run.r_requirement {
         spec.r_requirement = Some(req.clone());
     }
@@ -864,6 +874,11 @@ fn resolve_library_inner(
     }
     if let Some(exclude_newer) = &spec.exclude_newer {
         cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
+    }
+    if spec.quarto {
+        // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
+        // this flag tells the resolver a Quarto render needs rmarkdown.
+        cmd.env("IR_QUARTO_RENDER", "1");
     }
 
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
@@ -1222,6 +1237,9 @@ fn script_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<ScriptSpec, Box<dyn E
         dependencies: frontmatter_dependencies(doc)?,
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
+        // Quarto-ness is a property of the source, not its frontmatter; cmd_run
+        // sets it from RunSource::is_quarto after parsing.
+        ..ScriptSpec::default()
     })
 }
 

@@ -1,0 +1,24 @@
+---
+title: "ir fixture pinned rmarkdown"
+format: html
+ir:
+  dependencies:
+    - glue
+    - rmarkdown
+---
+
+```{r}
+# The document declares rmarkdown directly, so the resolver leaves it alone (no
+# injected seed, no advisory). Attach rmarkdown and confirm it loads from ir's
+# resolved run library: the normalised path.package location (renv symlink
+# resolved) must equal the normalised run library entry. Read the version from
+# that library's DESCRIPTION.
+suppressPackageStartupMessages(library("rmarkdown", character.only = TRUE))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "rmarkdown"), mustWork = TRUE)
+in_cache <- normalizePath(path.package("rmarkdown"), mustWork = TRUE) == expected
+
+cat("ir.fixture=qmd-pinned\n")
+cat("pinned.rmarkdown_in_cache=", tolower(in_cache), "\n", sep = "")
+cat("pinned.rmarkdown_version=", read.dcf(file.path(expected, "DESCRIPTION"), "Version")[1, 1], "\n", sep = "")
+```

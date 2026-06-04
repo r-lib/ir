@@ -45,6 +45,7 @@ jobs:
             any::reticulate
             any::knitr
             any::rmarkdown
+            any::quarto
             any::btw
             any::Rapp
             any::docopt

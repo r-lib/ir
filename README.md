@@ -142,6 +142,14 @@ cannot be forwarded to Quarto because `QUARTO_KNITR_RSCRIPT_ARGS` is
 comma-separated with no escaping. Set `IR_QUARTO` to use a specific Quarto
 executable.
 
+Rendering a Quarto document needs the `rmarkdown` package (the knitr engine).
+`ir` appends `rmarkdown` to the resolved dependencies automatically, pulling the
+latest version (or the latest as of `exclude-newer` when set). To pin it, declare
+`rmarkdown` yourself under `ir.dependencies` (e.g. `rmarkdown@2.29`); an explicit
+ref overrides the injected one and silences the reproducibility advisory. When
+the injected `rmarkdown` is used, `ir` prints a one-line note advising you to pin
+a version.
+
 ## Cache management
 
 `ir` exposes cache management commands:
@@ -270,7 +278,10 @@ anything else installed there is still visible).
   `r-version` is not set.
 - `rig` on `PATH` when `r-version` is set.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd` or `.Rmd` files.
-- The R packages `pak`, `renv`, and `secretbase` installed in that R.
+- `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first
+  use into a dedicated library under the cache directory, so you do not need to
+  pre-install them. If they are already on your R library path, `ir` uses those
+  instead of installing a private copy.
 - A Rust toolchain only if you build `ir` from source (not needed for the
   pre-built binaries below).
 
@@ -312,16 +323,12 @@ $ cp target/release/ir ~/.local/bin/   # or anywhere on PATH
 $ cargo test
 ```
 
-`cargo test` runs the Rust CLI tests (`tests/cli.rs`) and, when an R toolchain
-with the required test packages is available, the R resolution suite
-(`tests/test-resolve.R`) — which covers pak ref normalisation, unsupported
-version-operator pass-through, exotic-ref pass-through, snapshot repository
-selection, cache keys, and `exclude-newer` handling. The R suite can also be
-run on its own:
-
-```console
-$ Rscript -e 'testthat::test_file("tests/test-resolve.R", stop_on_failure = TRUE)'
-```
+`cargo test` runs the Rust CLI tests (`tests/cli.rs`). The end-to-end fixtures
+under `tests/fixtures/run/` drive the R resolver (`driver/resolve.R`) through
+real renders and package executions, covering pak ref normalisation,
+`exclude-newer` snapshot selection, the resolution cache, and rmarkdown
+injection for Quarto documents. They require an R toolchain with the fixture
+packages installed (see `.github/workflows/ci.yml`) plus Quarto on `PATH`.
 
 The end-to-end CLI tests use real R package resolution and the normal `ir`
 cache. Repeat runs with a warm cache skip the download and materialisation path;
@@ -360,3 +367,9 @@ default destination for `ir tool install`; `--bin-dir <dir>` overrides them.
 - The self-named package executable shortcut is for package refs whose package
   name can be inferred locally, such as `btw` or `btw>=0.1.0`. Use
   `ir tool run --from <pkg-ref> <command>` for remotes and other refs.
+- Duplicate dependencies are collapsed by package name, the last ref winning
+  (so an explicit `rmarkdown` overrides the auto-injected one). This applies to
+  parseable refs (`pkg`, `pkg@ver`, `pkg>=ver`, `pkg==ver`); exotic refs such as
+  `github::user/repo` and URL refs cannot be name-matched and are passed through
+  unchanged — declaring `rmarkdown` via such a ref will not suppress the injected
+  seed.

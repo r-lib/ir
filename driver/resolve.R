@@ -17,9 +17,11 @@
 # This session then exits; the Rust process launches the user's script in a
 # fresh, isolated R session pointed at the library.
 #
-# The helpers below are pure and side-effect free so they can be unit tested
-# (see tests/test-resolve.R). The pipeline runs only when this file is executed
-# as a script -- `sys.nframe() == 0L` is false when the file is sourced.
+# The helpers below are pure and side-effect free. The pipeline runs only when
+# this file is executed as a script -- `sys.nframe() == 0L` is false when the
+# file is sourced. End-to-end coverage lives in the Rust CLI tests
+# (tests/cli.rs), which drive this resolver through real renders and package
+# executions.
 
 ## --- resolver input ---------------------------------------------------------
 
@@ -62,6 +64,16 @@ ir_to_ref <- function(d) {
   else sprintf("%s@%s", m[[2L]], m[[4L]])
 }
 
+# Resolve dependency refs with pak, stopping if any ref fails to resolve.
+ir_resolve_refs <- function(refs) {
+  res <- pak::pkg_deps(refs, dependencies = NA, upgrade = TRUE)
+  failed <- res[res$status != "OK", , drop = FALSE]
+  if (nrow(failed))
+    stop("pak could not resolve: ",
+         paste(failed$ref, collapse = ", "), call. = FALSE)
+  res
+}
+
 ## --- cache location ---------------------------------------------------------
 
 # The cache root: the standard per-package user cache directory, overridable
@@ -70,6 +82,50 @@ ir_to_ref <- function(d) {
 ir_cache_dir <- function() {
   env <- Sys.getenv("IR_CACHE_DIR")
   if (nzchar(env)) env else tools::R_user_dir("ir", "cache")
+}
+
+## --- resolver tooling bootstrap ---------------------------------------------
+
+# Packages the resolver itself needs. pak resolves dependencies, renv
+# materialises the library, secretbase hashes the cache keys. They are
+# installed into a dedicated tooling library so users need not pre-install them.
+ir_tooling_packages <- function() c("pak", "renv", "secretbase")
+
+# Repository for tooling installs: always the latest PPM snapshot, independent
+# of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
+# reproducibility date. PPM serves binaries for Windows and macOS.
+ir_tooling_repos <- function()
+  c(CRAN = "https://packagemanager.posit.co/cran/latest")
+
+# Tooling packages not loadable from the current library paths. Uses
+# requireNamespace so a user who already has pak/renv/secretbase anywhere on
+# their search path pays nothing.
+ir_missing_tooling <- function(packages = ir_tooling_packages())
+  Filter(function(p) !requireNamespace(p, quietly = TRUE), packages)
+
+# Path to the tooling library, keyed by R version and platform so compiled
+# packages match the running R, mirroring renv's cache layout.
+ir_tooling_lib <- function(cache_dir = ir_cache_dir())
+  file.path(cache_dir, "tooling",
+            paste0(getRversion(), "-", R.version$platform))
+
+# Ensure pak/renv/secretbase are available. Any that are missing are installed
+# into the tooling library, which is then put first on the search path.
+ir_ensure_tooling <- function(cache_dir = ir_cache_dir(),
+                              repos = ir_tooling_repos()) {
+  missing <- ir_missing_tooling()
+  if (!length(missing)) return(invisible())
+
+  lib <- ir_tooling_lib(cache_dir)
+  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  .libPaths(c(lib, .libPaths()))
+  utils::install.packages(missing, lib = lib, repos = repos)
+
+  still_missing <- ir_missing_tooling()
+  if (length(still_missing))
+    stop("could not install resolver tooling into ", lib, ": ",
+         paste(still_missing, collapse = ", "), call. = FALSE)
+  invisible()
 }
 
 ## --- repositories -----------------------------------------------------------
@@ -101,14 +157,19 @@ ir_input_key <- function(deps,
                          date          = Sys.Date(),
                          rversion      = getRversion(),
                          platform      = R.version$platform,
-                         exclude_newer = NULL) {
+                         exclude_newer = NULL,
+                         quarto        = FALSE) {
   source_key <- if (is.null(exclude_newer))
     as.character(date)
   else
     sprintf("exclude-newer: %s", exclude_newer)
 
+  # `quarto` folds in only when TRUE: a Quarto render may inject rmarkdown, so
+  # its resolved set differs from a plain run of the same deps. Omitting the
+  # marker for non-Quarto runs keeps their existing keys (and cache) stable.
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
+                             if (quarto) "quarto" else NULL,
                              as.character(rversion),
                              platform),
                            collapse = "\n"))
@@ -117,6 +178,10 @@ ir_input_key <- function(deps,
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
+
+  ## 0. Ensure the resolver's own tooling (pak/renv/secretbase) is available
+  ## before any secretbase/pak/renv use below.
+  ir_ensure_tooling()
 
   deps        <- readLines(file("stdin"), warn = FALSE)
   result_file <- ir_env_optional("IR_RESOLVE_RESULT_FILE")
@@ -129,13 +194,19 @@ ir_resolve_main <- function() {
   repos <- ir_repos(exclude_newer)
   options(repos = repos)
 
+  # A Quarto render needs rmarkdown for the knitr engine; Rust sets
+  # IR_QUARTO_RENDER so the resolver can inject it when the resolved set does not
+  # already provide it. (Distinct from IR_QUARTO, the quarto executable path.)
+  quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
+
   ## 1b. Resolution cache: if this exact request was resolved already and its
   ## library still exists, reuse it and skip pak entirely. The marker is written
   ## only after a successful materialise (below), so its presence implies a
   ## complete library.
   primary_ref <- if (length(deps)) ir_to_ref(deps[[1L]]) else NULL
   marker <- file.path(cache_dir, "resolutions",
-                      ir_input_key(deps, exclude_newer = exclude_newer))
+                      ir_input_key(deps, exclude_newer = exclude_newer,
+                                   quarto = quarto))
   package_marker <- if (!is.null(primary_ref)) {
     file.path(cache_dir, "resolutions",
               paste0(basename(marker), "-primary-", secretbase::sha256(primary_ref)))
@@ -161,39 +232,51 @@ ir_resolve_main <- function() {
   }
 
   ## 2. Resolve with pak
-  # A script may legitimately declare no dependencies; it then gets an empty
-  # but still isolated library (base R only), so undeclared library() calls
-  # fail loudly instead of silently borrowing the user's packages.
+  # A script may legitimately declare no dependencies; a non-Quarto run then
+  # gets an empty but still isolated library (base R only), so undeclared
+  # library() calls fail loudly instead of silently borrowing the user's
+  # packages. A Quarto render still resolves rmarkdown (injected below).
   primary_package <- NULL
-  if (length(deps)) {
-    refs_in <- vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
-    res <- pak::pkg_deps(refs_in, dependencies = NA, upgrade = TRUE)
+  refs_in <- if (length(deps))
+    vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
+  else
+    character()
+  res <- if (length(refs_in)) ir_resolve_refs(refs_in) else NULL
 
-    failed <- res[res$status != "OK", , drop = FALSE]
-    if (nrow(failed))
-      stop("pak could not resolve: ",
-           paste(failed$ref, collapse = ", "), call. = FALSE)
+  if (!is.null(package_result_file)) {
+    if (is.null(res))
+      stop("cannot resolve a primary package without dependencies",
+           call. = FALSE)
+    primary <- unique(res$package[res$direct & res$ref == refs_in[[1L]]])
+    if (length(primary) != 1L)
+      stop("package ref must resolve to exactly one R package: ",
+           deps[[1L]], call. = FALSE)
+    primary_package <- primary[[1L]]
+  }
 
-    if (!is.null(package_result_file)) {
-      primary <- unique(res$package[res$direct & res$ref == refs_in[[1L]]])
-      if (length(primary) != 1L)
-        stop("package ref must resolve to exactly one R package: ",
-             deps[[1L]], call. = FALSE)
-      primary_package <- primary[[1L]]
-    }
+  ## 2b. Quarto's knitr engine needs rmarkdown. Inject it (latest) only when the
+  ## resolved set does not already provide it -- whether the user declared it
+  ## directly or it arrived as a transitive dependency of a declared package.
+  ## A dated `exclude-newer` snapshot already pins the injected version, so the
+  ## reproducibility advisory fires only for unpinned (latest) resolution.
+  have_rmarkdown <- !is.null(res) && "rmarkdown" %in% res$package
+  if (quarto && !have_rmarkdown) {
+    refs_in <- c(refs_in, "rmarkdown")
+    res <- ir_resolve_refs(refs_in)
+    if (is.null(exclude_newer))
+      message("ir: using latest rmarkdown; pin a version under ir.dependencies ",
+              "for reproducibility.")
+  }
 
+  if (is.null(res)) {
+    pkgs     <- character()
+    resolved <- character()
+  } else {
     # Drop base / recommended packages: those are supplied by R itself.
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
-
     pkgs     <- res$package
     resolved <- sort(unique(sprintf("%s@%s", res$package, res$version)))
-  } else {
-    pkgs     <- character()
-    resolved <- character()
-    if (!is.null(package_result_file))
-      stop("cannot resolve a primary package without dependencies",
-           call. = FALSE)
   }
 
   ## 3. Hash the resolved set -> content-addressed library path

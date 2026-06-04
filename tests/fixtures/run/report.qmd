@@ -6,8 +6,6 @@ ir:
     - dplyr
     - tidyr
     - glue
-    - knitr
-    - rmarkdown
 ---
 
 ```{r}

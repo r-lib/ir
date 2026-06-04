@@ -1,0 +1,20 @@
+---
+title: "ir fixture bare quarto"
+format: html
+---
+
+```{r}
+# No declared dependencies: the resolver still injects rmarkdown (latest, with
+# the advisory) so the knitr engine has what it needs to render. Attach
+# rmarkdown so path.package can report where it loaded from, then confirm that
+# is ir's resolved run library (the first R_LIBS entry ir prepends). Both paths
+# are normalised so the renv symlink resolves to the same target on either side.
+suppressPackageStartupMessages(library("rmarkdown", character.only = TRUE))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "rmarkdown"), mustWork = TRUE)
+in_cache <- normalizePath(path.package("rmarkdown"), mustWork = TRUE) == expected
+
+cat("ir.fixture=qmd-bare\n")
+cat("bare.rmarkdown_in_cache=", tolower(in_cache), "\n", sep = "")
+cat("bare.rmarkdown_version=", read.dcf(file.path(expected, "DESCRIPTION"), "Version")[1, 1], "\n", sep = "")
+```
