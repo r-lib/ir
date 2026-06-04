@@ -113,24 +113,22 @@ jobs:
       - name: Diagnose co-load segfault (single process)
         shell: bash
         run: |
-          # R buffers both stdout and stderr to a pipe on Windows, so a segfault
-          # discards all in-flight output. Append progress to a file instead:
-          # cat() with a filename opens, writes and closes per call, flushing to
-          # disk each line, so the trace survives the crash. The last package
-          # logged without a matching " OK" is the one that faults.
-          rm -f coload-progress.txt
-          Rscript -e '
-            pkgs <- c("pak", "renv", "secretbase", "cli", "glue", "jsonlite",
-                      "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
-                      "btw", "Rapp", "docopt", "pkgsearch", "prettyunits")
-            for (p in pkgs) {
-              cat(p, "\n", sep = "", file = "coload-progress.txt", append = TRUE)
-              requireNamespace(p, quietly = TRUE)
-              cat(p, " OK\n", sep = "", file = "coload-progress.txt", append = TRUE)
-            }
-          ' || echo "CRASHED (exit $?)"
-          echo "=== load progress (last line without OK = culprit) ==="
-          cat coload-progress.txt || echo "(no progress file written)"
+          # A segfault discards all in-process output (stdout, stderr, even
+          # per-line file flushes), so trace it across processes instead: load
+          # the first N packages in their own Rscript and check the exit code.
+          # The first prefix that segfaults names the package that triggers the
+          # conflict when it joins the already-loaded set.
+          pkgs=(pak renv secretbase cli glue jsonlite dplyr tidyr reticulate knitr rmarkdown btw Rapp docopt pkgsearch prettyunits)
+          for n in $(seq 1 ${#pkgs[@]}); do
+            prefix="${pkgs[*]:0:n}"
+            last="${pkgs[n-1]}"
+            if Rscript -e "invisible(lapply(strsplit('$prefix', ' ')[[1]], requireNamespace, quietly = TRUE))"; then
+              echo "ok through $last (prefix size $n)"
+            else
+              echo ">>> CRASH when $last joined the session (prefix size $n, exit $?)"
+              break
+            fi
+          done
 
       # DEBUG (#54): run only the crashing tests for a fast loop.
       - run: cargo test --verbose -- ci_dependencies_are_available run_inline_expression_resolves_with_dependencies
