@@ -25,6 +25,11 @@ OPTIONS:
     --isolated    Disable the user library (R_LIBS_USER) so the run cannot
                   borrow undeclared packages from it.
 
+Quarto documents (.qmd, .Rmd) are also supported: declare
+dependencies under an `ir:` key in the document's YAML frontmatter
+and ir renders them with `quarto render`.
+
 ENVIRONMENT:
     IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir("ir", "cache"))
     IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)
+    IR_QUARTO      path to the quarto executable (default: quarto on PATH)

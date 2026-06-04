@@ -1,0 +1,15 @@
+---
+title: "ir + Quarto"
+ir:
+  dependencies:
+    - dplyr>=1.0
+    - glue
+  r-version: ">= 4.0"
+---
+
+```{r}
+library(dplyr)
+library(glue)
+
+glue("rows: {nrow(mtcars)}")
+```
