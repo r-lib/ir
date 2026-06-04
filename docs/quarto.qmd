@@ -1,0 +1,29 @@
+---
+title: "Quarto Documents"
+---
+
+`ir run` renders `.qmd` and `.Rmd` files with `quarto render`. Dependencies live under an `ir:` key in the document YAML.
+
+```yaml
+---
+title: "My report"
+ir:
+  dependencies:
+    - dplyr>=1.0
+    - gt@1.0
+  r-version: ">= 4.0"
+  exclude-newer: "2024-01-15"
+---
+```
+
+Run the document with the same command used for scripts:
+
+```console
+$ ir run report.qmd
+$ ir run report.qmd --to pdf
+$ ir run --vanilla report.qmd
+```
+
+`ir` resolves the document dependencies into the same cached library model used for scripts, then launches `quarto render`. Leading Rscript options are forwarded to Quarto's knitr engine. Trailing arguments are passed to `quarto render`.
+
+When an R version is selected by frontmatter or `--r-version`, `ir` pins Quarto's knitr R to that selection.

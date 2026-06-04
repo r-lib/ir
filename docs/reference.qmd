@@ -1,0 +1,65 @@
+---
+title: "Reference"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+This page renders the current CLI help by running the `ir` executable on `PATH` during the Quarto render.
+
+## `ir`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir run`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("run", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir tool`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("tool", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir tool run`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("tool", "run", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir tool install`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("tool", "install", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir cache`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("cache", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir cache dir`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("cache", "dir", "--help"), stdout = TRUE), sep = "\n")
+```
+
+## `ir cache clean`
+
+```{r}
+#| comment: ""
+cat(system2("ir", c("cache", "clean", "--help"), stdout = TRUE), sep = "\n")
+```

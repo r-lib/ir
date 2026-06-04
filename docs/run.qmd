@@ -1,0 +1,58 @@
+---
+title: "Scripts"
+---
+
+`ir run` executes R scripts whose dependency metadata is embedded at the top of the file. The metadata block is YAML, with each line prefixed by `#| ` after an optional shebang.
+
+```r
+#!/usr/bin/env -S ir run
+#| dependencies:
+#|   - dplyr>=1.0
+#|   - tidyr
+#| r-version: ">= 4.0"
+#| exclude-newer: "2024-01-15"
+
+library(dplyr)
+library(tidyr)
+
+1 + 1
+```
+
+Run the file through `ir`:
+
+```console
+$ ir run script.R
+$ ir run --vanilla script.R
+$ ./script.R
+```
+
+## Dependency metadata
+
+The script frontmatter supports:
+
+- `dependencies`: package refs resolved with pak.
+- `r-version`: an optional R version requirement selected from installed versions reported by rig.
+- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date.
+
+Supported version specs include `pkg`, `pkg>=1.0`, and `pkg==1.2`. Other pak refs, including GitHub refs and URL refs, pass through unchanged.
+
+## Inline runs
+
+Inline expressions use the same resolver and cache:
+
+```console
+$ ir run -e '1 + 1'
+$ ir run --with cli -e 'cli::cli_alert_success("works")'
+$ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
+```
+
+`--with` may be repeated and accepts comma-separated packages. With a script, command-line packages are merged with the script metadata; with `-e`, they are the only declared dependencies.
+
+## Isolation
+
+By default, `ir` prepends the resolved library to `.libPaths()` and leaves user libraries available as a fallback. Use `--isolated` to remove the user library for the run:
+
+```console
+$ ir run --isolated script.R
+$ ir run --isolated --with cli -e 'cli::cli_alert_success("hi")'
+```

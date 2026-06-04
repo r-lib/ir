@@ -1,0 +1,18 @@
+---
+title: "Cache"
+---
+
+`ir` caches both dependency resolution and materialised package libraries.
+
+Resolution requests are keyed by declared dependencies, resolution source, R version, and platform. If the same request was already resolved, `ir` reuses the cached library and does not invoke pak again. Latest resolution includes the current date in the key, so newly published versions are picked up at most once per day. Snapshot resolution uses the `exclude-newer` date.
+
+Materialised libraries are content-addressed by the resolved package set, R version, and platform. Scripts or tools that resolve to the same set share one library.
+
+## Commands
+
+```console
+$ ir cache dir
+$ ir cache clean
+```
+
+`ir cache dir` prints the cache root. `ir cache clean` removes the whole `ir` cache, including materialised libraries and resolution markers.

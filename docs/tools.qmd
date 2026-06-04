@@ -1,0 +1,36 @@
+---
+title: "Package Tools"
+---
+
+`ir tool run` resolves a package and runs an executable from that package's `exec/` directory.
+
+```console
+$ ir tool run --from btw btw --help
+$ ir tool run btw --help
+$ ir tool run --from github::r-lib/Rapp Rapp
+```
+
+For `ir tool run --from pkg tool`, `ir` installs `pkg`, finds `exec/tool` or `exec/tool.R`, and launches it with the selected Rscript. A bare self-named package ref such as `ir tool run btw` is shorthand for `ir tool run --from btw btw`.
+
+Tool runs support the same dependency and R selection flags as script runs:
+
+```console
+$ ir tool run --with cli --from btw btw
+$ ir tool run --from 'btw>=0.1.0' btw
+$ ir tool run --r-version 4.5 --from btw btw
+```
+
+Package refs use pak syntax. Quote refs when the shell would otherwise interpret characters such as `>`.
+
+## Install launchers
+
+`ir tool install` resolves a package, scans that package's `exec/` directory, and writes launchers for the executables it finds.
+
+```console
+$ ir tool install btw
+$ ir tool install github::r-lib/Rapp
+$ ir tool install --bin-dir ~/.local/bin btw
+$ ir tool install --force btw
+```
+
+Installed launchers keep the same resolved package ref, dependency additions, and R version selection that were used at install time.

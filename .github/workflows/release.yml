@@ -1,0 +1,179 @@
+name: Release
+
+# Build pre-built `ir` binaries and publish them to a GitHub Release so users
+# can install without a Rust toolchain (see issue #30).
+#
+# Releases are tag-driven: push a tag like `v0.1.0` (or `v0.1.0-rc1` for a
+# prerelease) and the matching release is built and published. A manual
+# `workflow_dispatch` run builds the artifacts for inspection; pass an existing
+# tag to (re)publish that tag's release.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing semver tag to build and publish, e.g. v0.1.0. Leave empty to only build artifacts."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: ir-aarch64-apple-darwin.tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: ir-x86_64-apple-darwin.tar.gz
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: ir-x86_64-unknown-linux-gnu.tar.gz
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: ir-aarch64-unknown-linux-gnu.tar.gz
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            archive: ir-x86_64-pc-windows-msvc.zip
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Rust (stable)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          # The lint job owns `-D warnings`; release builds should not fail on warnings.
+          rustflags: ""
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke test
+        if: runner.os != 'Windows'
+        run: ./target/${{ matrix.target }}/release/ir --help
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\target\${{ matrix.target }}\release\ir.exe --help
+
+      - name: Package
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="dist/ir-${{ matrix.target }}"
+          mkdir -p "$pkg"
+          cp "target/${{ matrix.target }}/release/ir" "$pkg/ir"
+          cp README.md "$pkg/README.md"
+          tar -C dist -czf "dist/${{ matrix.archive }}" "ir-${{ matrix.target }}"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pkg = "dist/ir-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/ir.exe" "$pkg/ir.exe"
+          Copy-Item "README.md" "$pkg/README.md"
+          Push-Location dist
+          Compress-Archive -Path "ir-${{ matrix.target }}" -DestinationPath "${{ matrix.archive }}" -Force
+          Pop-Location
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    # Only publish for a real tag: a tag push, or a manual run given a tag.
+    if: ${{ github.ref_type == 'tag' || inputs.tag != '' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Validate tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag must be semver like v0.1.0 or v0.1.0-rc1, got: $TAG" >&2
+            exit 1
+          fi
+          git rev-parse "refs/tags/$TAG" >/dev/null
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify asset set and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          expected=(
+            ir-aarch64-apple-darwin.tar.gz
+            ir-x86_64-apple-darwin.tar.gz
+            ir-x86_64-unknown-linux-gnu.tar.gz
+            ir-aarch64-unknown-linux-gnu.tar.gz
+            ir-x86_64-pc-windows-msvc.zip
+          )
+          for asset in "${expected[@]}"; do
+            test -f "$asset" || { echo "missing expected asset: $asset" >&2; exit 1; }
+          done
+          sha256sum "${expected[@]}" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update release
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease_args=()
+          if [ "${{ steps.tag.outputs.prerelease }}" = "true" ]; then
+            prerelease_args=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes "${prerelease_args[@]}"
+          fi

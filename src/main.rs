@@ -264,8 +264,13 @@ impl RunSource {
             return Ok(Self::Stdin);
         }
 
-        let path =
-            fs::canonicalize(&script).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
+        // The path is passed through untouched: R and quarto both inherit `ir`'s
+        // working directory, so a relative path resolves exactly as the user
+        // typed it. (`fs::canonicalize` was avoided because on Windows it returns
+        // a `\\?\C:\...` verbatim path that quarto's Deno `expandGlobSync` cannot
+        // stat — `os error 123`.) Verify existence here for a clear error.
+        let path = PathBuf::from(&script);
+        fs::metadata(&path).map_err(|e| format!("cannot read script `{script}`: {e}"))?;
         if quarto::is_quarto(&path) {
             Ok(Self::Quarto(path))
         } else {
@@ -1389,10 +1394,18 @@ fn read_r_script_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn 
     Ok(frontmatter)
 }
 
-/// The Rscript executable to use: `$IR_RSCRIPT` if set, otherwise `Rscript`
-/// resolved via `PATH`.
+/// The Rscript executable to use when no `r-version` is requested: `$IR_RSCRIPT`
+/// if set, else rig's default R install, else bare `Rscript` resolved via `PATH`.
+///
+/// The rig step matters on Windows: `rig system make-links` puts only
+/// `Rscript.bat` on `PATH`, which `std::process::Command` won't spawn. Resolving
+/// the default install's real `Rscript.exe` from `rig list --json` avoids the
+/// shim — the same mechanism the `--r-version` path already uses.
 fn rscript_command() -> OsString {
-    env::var_os("IR_RSCRIPT").unwrap_or_else(|| "Rscript".into())
+    if let Some(rscript) = env::var_os("IR_RSCRIPT") {
+        return rscript;
+    }
+    rig::default_rscript().unwrap_or_else(|| "Rscript".into())
 }
 
 /// The `ir` cache root, matching `tools::R_user_dir("ir", "cache")` unless

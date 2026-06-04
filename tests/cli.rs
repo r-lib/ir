@@ -227,6 +227,20 @@ fn python_probe() -> (String, String) {
     panic!("python3 or python is required for the reticulate fixture");
 }
 
+/// Version of the default R on `PATH` — the one `ir` uses without `--r-version`.
+/// `None` when that Rscript can't be run or reports nothing.
+fn default_r_version() -> Option<String> {
+    let out = Command::new(rscript())
+        .args(["-e", "cat(as.character(getRversion()))"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!version.is_empty()).then_some(version)
+}
+
 #[test]
 fn ci_dependencies_are_available() {
     let r_expr = r#"
@@ -282,6 +296,37 @@ fn help_outputs_match_snapshots() {
         ("cache-dir-help", &["cache", "dir", "-h"]),
     ] {
         assert_help_snapshot(name, args);
+    }
+}
+
+#[test]
+fn website_reference_page_runs_live_cli_help_chunks() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let reference = manifest_dir.join("docs").join("reference.qmd");
+    let source = fs::read_to_string(&reference)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", reference.display()));
+
+    assert!(
+        source.contains("echo: false"),
+        "{} should hide chunk source in rendered CLI help",
+        reference.display()
+    );
+
+    for expected in [
+        r#"system2("ir", c("--help")"#,
+        r#"system2("ir", c("run", "--help")"#,
+        r#"system2("ir", c("tool", "--help")"#,
+        r#"system2("ir", c("tool", "run", "--help")"#,
+        r#"system2("ir", c("tool", "install", "--help")"#,
+        r#"system2("ir", c("cache", "--help")"#,
+        r#"system2("ir", c("cache", "dir", "--help")"#,
+        r#"system2("ir", c("cache", "clean", "--help")"#,
+    ] {
+        assert!(
+            source.contains(expected),
+            "{} should contain {expected}",
+            reference.display()
+        );
     }
 }
 
@@ -469,9 +514,13 @@ library(cli)
 library(glue)
 lib <- normalizePath(.libPaths()[[1]], winslash = "/", mustWork = TRUE)
 expected <- normalizePath(Sys.getenv("IR_EXPECT_CACHE_DIR"), winslash = "/", mustWork = FALSE)
+libraries <- file.path(expected, "libraries")
+pkgs_in_cache <- startsWith(lib, libraries) &&
+  all(file.exists(file.path(lib, c("cli", "glue"), "DESCRIPTION")))
 cat("ir.fixture=inline\n")
 cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
-cat("inline.lib_in_cache=", tolower(startsWith(lib, file.path(expected, "libraries"))), "\n", sep = "")
+cat("inline.lib_in_cache=", tolower(startsWith(lib, libraries)), "\n", sep = "")
+cat("inline.pkgs_in_cache=", tolower(pkgs_in_cache), "\n", sep = "")
 cat(glue::glue("inline.glue={1 + 1}\n"))
 "#;
 
@@ -495,6 +544,7 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
     assert_stdout_contains(&out, "ir.fixture=inline");
     assert_stdout_contains(&out, "inline.args=inline-arg");
     assert_stdout_contains(&out, "inline.lib_in_cache=true");
+    assert_stdout_contains(&out, "inline.pkgs_in_cache=true");
     assert_stdout_contains(&out, "inline.glue=2");
 }
 
@@ -521,7 +571,115 @@ fn run_quarto_fixture_renders_html_with_resolved_packages() {
         .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
     assert!(html.contains("ir.fixture=qmd"), "{html}");
     assert!(html.contains("qmd.lib_in_cache=true"), "{html}");
+    assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
     assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
+}
+
+#[test]
+fn run_quarto_selects_requested_r_version() {
+    let _guard = e2e_lock();
+
+    // Opt-in: needs rig plus a non-default R installed (CI provisions both).
+    // `ir`'s `--r-version` path resolves through rig unconditionally, so with a
+    // single R there is nothing to select.
+    let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
+        eprintln!(
+            "SKIP run_quarto_selects_requested_r_version: set IR_TEST_R_VERSION to a rig-installed, non-default R version"
+        );
+        return;
+    };
+
+    // Selecting the version the default path already uses would prove nothing.
+    if default_r_version().as_deref() == Some(target.as_str()) {
+        eprintln!(
+            "SKIP run_quarto_selects_requested_r_version: IR_TEST_R_VERSION ({target}) matches the default R; pick a different installed version"
+        );
+        return;
+    }
+
+    let cache_dir = unique_dir("ir-e2e-rversion-cache");
+    let output_dir = unique_dir("ir-e2e-rversion-output");
+    let doc = fixture("run/r-version-select.qmd");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
+        // The resolver inherits the environment, so an ambient R_LIBS_USER (CI's
+        // setup-r-dependencies exports one) would point the selected R at a
+        // library built for the *default* R, loading an ABI-mismatched
+        // secretbase. A real `--r-version` user has no R_LIBS_USER exported; drop
+        // it so the requested R uses its own toolchain.
+        .env_remove("R_LIBS_USER")
+        .args(["run", "--isolated", "--r-version"])
+        .arg(&target)
+        .arg(&doc)
+        .args(["--to", "html", "--output-dir"])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let html = fs::read_to_string(output_dir.join("r-version-select.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
+    assert!(html.contains("ir.fixture=r-version"), "{html}");
+    assert!(
+        html.contains(&format!("version.r_version=[{target}]")),
+        "rendered under a different R than the requested {target}\n{html}"
+    );
+    assert!(html.contains("version.lib_in_cache=true"), "{html}");
+    assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&output_dir);
+}
+
+#[test]
+fn run_script_frontmatter_selects_r_version() {
+    let _guard = e2e_lock();
+
+    // The fixture pins `#| r-version` to this version, so the test only runs
+    // when CI has provisioned that exact R through rig (signalled by
+    // IR_TEST_R_VERSION). Unlike the flag, the frontmatter value can't come from
+    // the environment because it lives in the static fixture.
+    const FIXTURE_R_VERSION: &str = "4.4.3";
+    if std::env::var("IR_TEST_R_VERSION").ok().as_deref() != Some(FIXTURE_R_VERSION) {
+        eprintln!(
+            "SKIP run_script_frontmatter_selects_r_version: set IR_TEST_R_VERSION={FIXTURE_R_VERSION} (rig plus that R) to match the fixture's `#| r-version`"
+        );
+        return;
+    }
+
+    // Selecting the version the default path already uses would prove nothing.
+    if default_r_version().as_deref() == Some(FIXTURE_R_VERSION) {
+        eprintln!(
+            "SKIP run_script_frontmatter_selects_r_version: the fixture's R ({FIXTURE_R_VERSION}) matches the default R; nothing to select"
+        );
+        return;
+    }
+
+    let cache_dir = unique_dir("ir-e2e-rversion-fm-cache");
+    let script = fixture("run/r-version-frontmatter.R");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXPECT_CACHE_DIR", &cache_dir)
+        // See run_quarto_selects_requested_r_version: drop the ambient
+        // R_LIBS_USER so the frontmatter-selected R resolves against its own
+        // toolchain rather than the default R's (ABI-mismatched) library.
+        .env_remove("R_LIBS_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=r-version-frontmatter");
+    assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
+    assert_stdout_contains(&out, "version.lib_in_cache=true");
+    assert_stdout_contains(&out, "version.jsonlite_in_cache=true");
 }
 
 #[test]

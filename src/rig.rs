@@ -52,6 +52,8 @@ struct InstalledR {
     version: String,
     #[serde(default)]
     aliases: Vec<String>,
+    #[serde(default)]
+    default: bool,
     binary: PathBuf,
 }
 
@@ -102,6 +104,21 @@ pub fn resolve_rscript(req: &str, exclude_newer: Option<&str>) -> Result<OsStrin
         required.version, required.name
     )
     .into())
+}
+
+/// Rscript of rig's default R install (`"default": true` in `rig list --json`),
+/// or `None` when rig is absent, has no default, or the binary is missing.
+///
+/// Best-effort: the caller falls back to a bare `"Rscript"` on `None`, so any
+/// failure here (rig not on PATH, unparseable output) resolves to `None` rather
+/// than aborting the run. On rig-managed Windows the only `Rscript` on PATH is a
+/// `.bat` shim that `std::process::Command` cannot spawn, so resolving the real
+/// `Rscript.exe` from the default install's `binary` is what makes the
+/// no-`--r-version` path work there.
+pub fn default_rscript() -> Option<OsString> {
+    let default = rig_list().ok()?.into_iter().find(|r| r.default)?;
+    let rscript = rscript_from_r_binary(&default.binary);
+    rscript.exists().then(|| rscript.into_os_string())
 }
 
 fn parse_iso_date_field(key: &str, value: &str) -> Result<String, Box<dyn Error>> {

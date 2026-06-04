@@ -1,0 +1,36 @@
+project:
+  type: website
+  render:
+    - index.qmd
+    - run.qmd
+    - quarto.qmd
+    - tools.qmd
+    - cache.qmd
+    - reference.qmd
+
+website:
+  title: "ir"
+  description: "Run standalone R scripts and Quarto documents from embedded dependency metadata."
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: run.qmd
+        text: Scripts
+      - href: quarto.qmd
+        text: Quarto
+      - href: tools.qmd
+        text: Tools
+      - href: cache.qmd
+        text: Cache
+      - href: reference.qmd
+        text: Reference
+
+format:
+  html:
+    theme:
+      - cosmo
+      - brand
+    css: styles.css
+    toc: true
+
