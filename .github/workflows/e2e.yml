@@ -54,23 +54,26 @@ jobs:
         run: |
           rig add 4.5.3
           rig add ${{ env.IR_E2E_R_VERSION }}
-          # rig names installs differently per platform (e.g. `4.5-arm64` on
-          # macOS), and `rig default` matches the name, not the patch version.
-          # Resolve the 4.5.x install's name from `rig list --json` and use that.
-          default_name=$(rig list --json | jq -r '[.[] | select(.version | startswith("4.5"))][0].name')
-          rig default "$default_name"
           rig list
+          # rig names installs per-platform (e.g. `4.5-arm64` on macOS arm64),
+          # and both `rig default` and `rig run -r` match the name, not the patch
+          # version. Resolve the names rig assigned to the two versions.
+          default_name=$(rig list --json | jq -r '[.[] | select(.version | startswith("4.5"))][0].name')
+          target_name=$(rig list --json | jq -r --arg v "${{ env.IR_E2E_R_VERSION }}" '[.[] | select(.version == $v)][0].name')
+          echo "R_DEFAULT_NAME=$default_name" >> "$GITHUB_ENV"
+          echo "R_TARGET_NAME=$target_name" >> "$GITHUB_ENV"
+          rig default "$default_name"
 
-      # The resolver runs under the selected R, so both R versions need pak,
-      # renv (>= 1.2 — older renv mishandles PPM dated snapshots), and
-      # secretbase. The qmd render additionally needs knitr + rmarkdown, and the
-      # fixtures install jsonlite. Installed fresh from PPM "latest", so the
-      # versions are current. (A future change tracked upstream lets `ir`
-      # bootstrap these itself, retiring this step.)
-      - name: Install resolver + render packages
+      # The resolver runs under the selected R and needs renv (>= 1.2 — older
+      # renv mishandles PPM dated snapshots) and secretbase; rendering the .qmd
+      # needs knitr + rmarkdown. rig installs pak into each R automatically, and
+      # pak pulls binaries from PPM (no source builds, and it resolves transitive
+      # deps like bslib). jsonlite is the document's own dependency, resolved by
+      # ir into the run library.
+      - name: Install resolver and render packages
         run: |
-          for v in 4.5.3 ${{ env.IR_E2E_R_VERSION }}; do
-            rig run -r "$v" -e 'install.packages(c("pak","renv","secretbase","jsonlite","knitr","rmarkdown"), repos = "https://packagemanager.posit.co/cran/latest")'
+          for name in "$R_DEFAULT_NAME" "$R_TARGET_NAME"; do
+            rig run -r "$name" -e 'pak::pkg_install(c("renv", "secretbase", "knitr", "rmarkdown"))'
           done
 
       - uses: quarto-dev/quarto-actions/setup@v2
