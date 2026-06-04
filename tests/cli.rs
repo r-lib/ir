@@ -132,20 +132,6 @@ fn e2e_cache_dir(prefix: &str) -> TestDir {
     }
 }
 
-fn e2e_reticulate_dir(prefix: &str, warm_name: &str) -> TestDir {
-    if cold_cache() {
-        TestDir {
-            path: unique_dir(prefix),
-            cleanup: true,
-        }
-    } else {
-        TestDir {
-            path: shared_e2e_dir(warm_name),
-            cleanup: false,
-        }
-    }
-}
-
 fn scratch_dir(prefix: &str) -> TestDir {
     TestDir {
         path: unique_dir(prefix),
@@ -686,18 +672,12 @@ fn run_script_frontmatter_selects_r_version() {
 fn run_reticulate_fixture_imports_python_module() {
     let _guard = e2e_lock();
     let cache_dir = e2e_cache_dir("ir-e2e-reticulate-cache");
-    let reticulate_cache =
-        e2e_reticulate_dir("ir-e2e-reticulate-r-cache", "ir-e2e-reticulate-r-cache");
-    let reticulate_data =
-        e2e_reticulate_dir("ir-e2e-reticulate-r-data", "ir-e2e-reticulate-r-data");
     let script = fixture("run/reticulate.R");
     let managed_reticulate = cold_cache();
 
     let mut cmd = ir();
     cmd.env("IR_CACHE_DIR", cache_dir.path())
-        .env("IR_EXPECT_CACHE_DIR", cache_dir.path())
-        .env("R_USER_CACHE_DIR", reticulate_cache.path())
-        .env("R_USER_DATA_DIR", reticulate_data.path());
+        .env("IR_EXPECT_CACHE_DIR", cache_dir.path());
 
     if managed_reticulate {
         cmd.env("IR_TEST_RETICULATE_MANAGED", "1")
