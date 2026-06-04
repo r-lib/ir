@@ -248,12 +248,38 @@ anything else installed there is still visible).
 
 ## Requirements
 
-- A Rust toolchain (to build `ir`).
 - `R` / `Rscript` on `PATH` when `r-version` is not set.
 - `rig` on `PATH` when `r-version` is set.
 - The R packages `pak`, `renv`, and `secretbase` installed in that R.
+- A Rust toolchain only if you build `ir` from source (not needed for the
+  pre-built binaries below).
 
-## Build & install
+## Install
+
+Install a pre-built binary — no Rust toolchain required.
+
+On Linux or macOS:
+
+```console
+$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
+```
+
+On Windows (PowerShell):
+
+```console
+> irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
+```
+
+The installer downloads the archive for your platform from the latest
+[release](https://github.com/t-kalinowski/ir/releases) and installs `ir` into
+`~/.local/bin` (`$HOME\bin` on Windows); set `IR_INSTALL_DIR` to choose another
+directory. Pre-built binaries are provided for macOS (arm64, x86_64), Linux
+(x86_64, arm64; glibc 2.35+), and Windows (x86_64). Each release also lists the
+archives and a `SHA256SUMS.txt` for manual download and verification.
+
+### Build from source
+
+With a Rust toolchain installed:
 
 ```console
 $ cargo build --release
