@@ -430,9 +430,13 @@ library(cli)
 library(glue)
 lib <- normalizePath(.libPaths()[[1]], winslash = "/", mustWork = TRUE)
 expected <- normalizePath(Sys.getenv("IR_EXPECT_CACHE_DIR"), winslash = "/", mustWork = FALSE)
+libraries <- file.path(expected, "libraries")
+pkgs_in_cache <- startsWith(lib, libraries) &&
+  all(file.exists(file.path(lib, c("cli", "glue"), "DESCRIPTION")))
 cat("ir.fixture=inline\n")
 cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
-cat("inline.lib_in_cache=", tolower(startsWith(lib, file.path(expected, "libraries"))), "\n", sep = "")
+cat("inline.lib_in_cache=", tolower(startsWith(lib, libraries)), "\n", sep = "")
+cat("inline.pkgs_in_cache=", tolower(pkgs_in_cache), "\n", sep = "")
 cat(glue::glue("inline.glue={1 + 1}\n"))
 "#;
 
@@ -458,6 +462,7 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
     assert_stdout_contains(&out, "ir.fixture=inline");
     assert_stdout_contains(&out, "inline.args=inline-arg");
     assert_stdout_contains(&out, "inline.lib_in_cache=true");
+    assert_stdout_contains(&out, "inline.pkgs_in_cache=true");
     assert_stdout_contains(&out, "inline.glue=2");
 }
 
