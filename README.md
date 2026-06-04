@@ -36,12 +36,23 @@ $ ir run --r-version 4.5 script.R            # select R with rig
 $ ir tool run --from btw btw --help          # run exec/btw from package btw
 $ ir tool run btw --help                     # shorthand for --from btw btw
 $ ir tool run --from github::r-lib/Rapp Rapp
+$ ir tool install btw                        # install launchers for exec/* apps
+$ ir tool install github::r-lib/Rapp
 ```
 
 For `ir tool run --from pkg tool`, `ir` resolves `pkg`, finds `exec/tool` or
 `exec/tool.R` in the installed package, and launches that file with the selected
 Rscript. The package ref can be a pak package ref or supported version spec. Use
 quotes when the shell would otherwise interpret characters such as `>`.
+
+For `ir tool install pkg-ref`, `ir` resolves `pkg-ref`, scans that package's
+`exec/` directory for files whose shebang names `Rscript` or `Rapp`, and writes
+launchers into `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`,
+`XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix. Use `--bin-dir <dir>` for an
+explicit destination and `--force` to overwrite existing launcher paths. The
+launchers pin `R_LIBS` to the resolved `ir` cache library and set
+`R_LIBS_USER=NULL`; if `ir cache clean` removes that library, rerun
+`ir tool install --force pkg-ref`.
 
 ## How it works
 
@@ -90,6 +101,9 @@ quotes when the shell would otherwise interpret characters such as `>`.
      `R_LIBS` points to the resolved library, `R_LIBS_USER` is set to `NULL`,
      and `PATH` is prepended with the resolved package `exec/` directories plus
      the directory that contains `IR_RSCRIPT` when it is an explicit path.
+   - Installed tool launchers use the same Rscript/Rapp dispatch, but keep the
+     resolved library path in the launcher so the tool can be run directly from
+     `PATH`.
 
 Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
@@ -182,6 +196,11 @@ and `pkg!=1.2`, are not resolved by `ir`.
   the command from that package's `exec/` directory. A bare self-named package
   ref such as `ir tool run btw` is treated as `ir tool run --from btw btw`.
 
+- **`ir tool install <pkg-ref>`** resolves a package ref and installs launchers
+  for every supported `Rscript` or `Rapp` executable in that package's `exec/`
+  directory. Remote refs work directly, for example `ir tool install
+  github::r-lib/Rapp`.
+
 - **`--with <pkg>`** adds a dependency for this run. It can be repeated and
   accepts a comma-separated list (`--with dplyr,tidyr`), and uses the same spec
   format as the `dependencies:` frontmatter (e.g. `cli`, `dplyr>=1.0`,
@@ -198,6 +217,7 @@ $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
 $ ir tool run --with cli --from btw btw
 $ ir tool run --from 'btw>=0.1.0' btw
+$ ir tool install --with cli btw
 $ ir run --r-version 4.5 -e 'getRversion()'
 $ ir run --vanilla --with cli script.R       # Rscript options still apply
 ```

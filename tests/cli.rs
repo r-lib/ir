@@ -148,6 +148,8 @@ fn help_outputs_match_snapshots() {
         ("tool-help", &["tool", "-h"]),
         ("tool-run-help", &["tool", "run", "--help"]),
         ("tool-run-help", &["tool", "run", "-h"]),
+        ("tool-install-help", &["tool", "install", "--help"]),
+        ("tool-install-help", &["tool", "install", "-h"]),
         ("cache-help", &["cache", "--help"]),
         ("cache-help", &["cache", "-h"]),
         ("cache-clean-help", &["cache", "clean", "--help"]),
@@ -197,6 +199,15 @@ fn help_is_generated_by_clap() {
                 format!("Usage: {bin} tool run [OPTIONS] [ARGS]..."),
                 "--from <PKG_REF>".to_string(),
                 "--with <PKG>".to_string(),
+            ],
+        ),
+        (
+            vec!["tool", "install", "--help"],
+            true,
+            vec![
+                format!("Usage: {bin} tool install [OPTIONS] <PKG_REF>"),
+                "--bin-dir <DIR>".to_string(),
+                "--force".to_string(),
             ],
         ),
         (
@@ -961,6 +972,274 @@ echo "remote package exec ran"
         String::from_utf8_lossy(&out.stdout).contains("remote package exec ran"),
         "{out:?}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_writes_launchers_for_package_execs() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let library = unique_path("ir-library", "dir");
+    let bin_dir = unique_path("ir-bin", "dir");
+    let exec_dir = library.join("btw").join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    let rapp_app = exec_dir.join("btw.R");
+    let rscript_app = exec_dir.join("plain");
+
+    write_executable(
+        &rapp_app,
+        r#"#!/usr/bin/env Rapp
+"#,
+    );
+    write_executable(
+        &rscript_app,
+        r#"#!/usr/bin/env Rscript
+"#,
+    );
+    fs::write(exec_dir.join("skip.txt"), "#!/usr/bin/env python\n").unwrap();
+
+    write_executable(
+        &fake_rscript,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  cat > "$actual"
+  printf 'btw\ncli\n' > "$expected"
+  if ! cmp -s "$actual" "$expected"; then
+    echo "unexpected resolver stdin" >&2
+    cat "$actual" >&2
+    exit 10
+  fi
+  printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
+  printf 'btw\n' > "$IR_RESOLVE_PACKAGE_RESULT_FILE"
+  exit 0
+fi
+test "${{R_LIBS:-}}" = "{}"
+test "${{R_LIBS_USER:-}}" = "NULL"
+case "$1" in
+  -e)
+    test "$2" = "Rapp::run()"
+    test "$3" = "{}"
+    test "$4" = "arg"
+    test "${{RAPP_LAUNCHER_NAME:-}}" = "btw"
+    echo "Rapp launcher ran"
+    ;;
+  "{}")
+    test "$2" = "arg"
+    test "${{RAPP_LAUNCHER_NAME:-}}" = "plain"
+    echo "Rscript launcher ran"
+    ;;
+  *)
+    echo "unexpected launcher args: $*" >&2
+    exit 11
+    ;;
+esac
+"#,
+            library.display(),
+            library.display(),
+            rapp_app.display(),
+            rscript_app.display()
+        ),
+    );
+
+    let install = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args([
+            "tool",
+            "install",
+            "--bin-dir",
+            bin_dir.to_str().unwrap(),
+            "--with",
+            "cli",
+            "btw",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(install.status.success(), "{install:?}");
+    assert!(bin_dir.join("btw").is_file());
+    assert!(bin_dir.join("plain").is_file());
+    assert!(!bin_dir.join("skip").exists());
+    assert!(
+        String::from_utf8_lossy(&install.stdout).contains("Installed 2 executables: btw, plain"),
+        "{install:?}"
+    );
+
+    let rapp = Command::new(bin_dir.join("btw"))
+        .arg("arg")
+        .output()
+        .unwrap();
+    assert!(rapp.status.success(), "{rapp:?}");
+    assert!(
+        String::from_utf8_lossy(&rapp.stdout).contains("Rapp launcher ran"),
+        "{rapp:?}"
+    );
+
+    let rscript = Command::new(bin_dir.join("plain"))
+        .arg("arg")
+        .output()
+        .unwrap();
+    assert!(rscript.status.success(), "{rscript:?}");
+    assert!(
+        String::from_utf8_lossy(&rscript.stdout).contains("Rscript launcher ran"),
+        "{rscript:?}"
+    );
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_remote_ref_uses_resolved_package_name() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let library = unique_path("ir-library", "dir");
+    let bin_dir = unique_path("ir-bin", "dir");
+    let exec_dir = library.join("Rapp").join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    let app = exec_dir.join("Rapp");
+
+    write_executable(
+        &app,
+        r#"#!/usr/bin/env Rscript
+"#,
+    );
+
+    write_executable(
+        &fake_rscript,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  cat > "$actual"
+  printf 'github::r-lib/Rapp\n' > "$expected"
+  if ! cmp -s "$actual" "$expected"; then
+    echo "unexpected resolver stdin" >&2
+    cat "$actual" >&2
+    exit 10
+  fi
+  printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
+  printf 'Rapp\n' > "$IR_RESOLVE_PACKAGE_RESULT_FILE"
+  exit 0
+fi
+test "$1" = "{}"
+test "${{R_LIBS:-}}" = "{}"
+echo "remote launcher ran"
+"#,
+            library.display(),
+            app.display(),
+            library.display()
+        ),
+    );
+
+    let install = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .args([
+            "tool",
+            "install",
+            "--bin-dir",
+            bin_dir.to_str().unwrap(),
+            "github::r-lib/Rapp",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(install.status.success(), "{install:?}");
+    assert!(bin_dir.join("Rapp").is_file());
+
+    let run = Command::new(bin_dir.join("Rapp")).output().unwrap();
+    assert!(run.status.success(), "{run:?}");
+    assert!(
+        String::from_utf8_lossy(&run.stdout).contains("remote launcher ran"),
+        "{run:?}"
+    );
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_launcher_reports_cache_clean_recovery() {
+    let fake_rscript = unique_path("ir-fake-rscript", "sh");
+    let cache_dir = unique_path("ir-cache", "dir");
+    let library = cache_dir.join("libraries").join("library");
+    let bin_dir = unique_path("ir-bin", "dir");
+    let exec_dir = library.join("btw").join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    let app = exec_dir.join("btw");
+
+    write_executable(
+        &app,
+        r#"#!/usr/bin/env Rscript
+"#,
+    );
+
+    write_executable(
+        &fake_rscript,
+        &format!(
+            r#"#!/bin/sh
+set -eu
+if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
+  cat > /dev/null
+  printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
+  printf 'btw\n' > "$IR_RESOLVE_PACKAGE_RESULT_FILE"
+  exit 0
+fi
+echo "launcher should not reach Rscript after cache clean" >&2
+exit 12
+"#,
+            library.display()
+        ),
+    );
+
+    let install = ir()
+        .env("IR_RSCRIPT", &fake_rscript)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "tool",
+            "install",
+            "--bin-dir",
+            bin_dir.to_str().unwrap(),
+            "btw",
+        ])
+        .output()
+        .unwrap();
+    assert!(install.status.success(), "{install:?}");
+
+    let clean = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["cache", "clean", "--force"])
+        .output()
+        .unwrap();
+    assert!(clean.status.success(), "{clean:?}");
+
+    let run = Command::new(bin_dir.join("btw")).output().unwrap();
+    assert_eq!(run.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("missing ir cache library"), "{stderr}");
+    assert!(stderr.contains("ir tool install --force btw"), "{stderr}");
+
+    let _ = fs::remove_file(&fake_rscript);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_rejects_from_option() {
+    let out = ir()
+        .args(["tool", "install", "--from", "btw", "btw"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unexpected argument '--from'"), "{stderr}");
 }
 
 #[cfg(unix)]

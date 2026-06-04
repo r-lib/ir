@@ -120,6 +120,7 @@ ir_resolve_main <- function() {
 
   deps        <- readLines(file("stdin"), warn = FALSE)
   result_file <- ir_env_optional("IR_RESOLVE_RESULT_FILE")
+  package_result_file <- ir_env_optional("IR_RESOLVE_PACKAGE_RESULT_FILE")
   stopifnot(!is.null(result_file))
   cache_dir   <- ir_cache_dir()
 
@@ -132,13 +133,30 @@ ir_resolve_main <- function() {
   ## library still exists, reuse it and skip pak entirely. The marker is written
   ## only after a successful materialise (below), so its presence implies a
   ## complete library.
+  primary_ref <- if (length(deps)) ir_to_ref(deps[[1L]]) else NULL
   marker <- file.path(cache_dir, "resolutions",
                       ir_input_key(deps, exclude_newer = exclude_newer))
+  package_marker <- if (!is.null(primary_ref)) {
+    file.path(cache_dir, "resolutions",
+              paste0(basename(marker), "-primary-", secretbase::sha256(primary_ref)))
+  } else {
+    NULL
+  }
   if (file.exists(marker)) {
     cached <- readLines(marker, n = 1L, warn = FALSE)
     if (length(cached) && nzchar(cached) && dir.exists(cached)) {
-      writeLines(cached, result_file)
-      return(invisible())
+      if (!is.null(package_result_file) &&
+          (is.null(package_marker) || !file.exists(package_marker))) {
+        # The library is reusable, but this caller needs primary-package
+        # metadata that older cache entries did not record.
+      } else {
+        writeLines(cached, result_file)
+        if (!is.null(package_result_file)) {
+          package <- readLines(package_marker, n = 1L, warn = FALSE)
+          writeLines(package, package_result_file)
+        }
+        return(invisible())
+      }
     }
   }
 
@@ -146,6 +164,7 @@ ir_resolve_main <- function() {
   # A script may legitimately declare no dependencies; it then gets an empty
   # but still isolated library (base R only), so undeclared library() calls
   # fail loudly instead of silently borrowing the user's packages.
+  primary_package <- NULL
   if (length(deps)) {
     refs_in <- vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
     res <- pak::pkg_deps(refs_in, dependencies = NA, upgrade = TRUE)
@@ -154,6 +173,14 @@ ir_resolve_main <- function() {
     if (nrow(failed))
       stop("pak could not resolve: ",
            paste(failed$ref, collapse = ", "), call. = FALSE)
+
+    if (!is.null(package_result_file)) {
+      primary <- unique(res$package[res$direct & res$ref == refs_in[[1L]]])
+      if (length(primary) != 1L)
+        stop("package ref must resolve to exactly one R package: ",
+             deps[[1L]], call. = FALSE)
+      primary_package <- primary[[1L]]
+    }
 
     # Drop base / recommended packages: those are supplied by R itself.
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
@@ -164,6 +191,9 @@ ir_resolve_main <- function() {
   } else {
     pkgs     <- character()
     resolved <- character()
+    if (!is.null(package_result_file))
+      stop("cannot resolve a primary package without dependencies",
+           call. = FALSE)
   }
 
   ## 3. Hash the resolved set -> content-addressed library path
@@ -200,8 +230,14 @@ ir_resolve_main <- function() {
   ## 4b. Record the resolution so an identical request skips pak.
   dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
   writeLines(library_path, marker)
+  if (!is.null(primary_package)) {
+    writeLines(primary_package, package_marker)
+  }
 
   writeLines(library_path, result_file)
+  if (!is.null(package_result_file)) {
+    writeLines(primary_package, package_result_file)
+  }
   invisible()
 }
 
