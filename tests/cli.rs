@@ -413,7 +413,8 @@ fn run_inline_expression_resolves_with_dependencies() {
     let expr = r#"
 library(cli)
 library(glue)
-expected <- normalizePath(file.path(Sys.getenv("R_LIBS"), c("cli", "glue")), mustWork = TRUE)
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, c("cli", "glue")), mustWork = TRUE)
 pkg_in_cache <- path.package(c("cli", "glue")) == expected
 cat("ir.fixture=inline\n")
 cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")

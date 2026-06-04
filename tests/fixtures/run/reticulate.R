@@ -11,7 +11,8 @@ py_require(character(), python_version = python_version, action = "set")
 json <- import("json")
 config <- py_config()
 
-expected <- normalizePath(file.path(Sys.getenv("R_LIBS"), "reticulate"), mustWork = TRUE)
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "reticulate"), mustWork = TRUE)
 pkg_in_cache <- path.package("reticulate") == expected
 
 cat("ir.fixture=reticulate\n")
