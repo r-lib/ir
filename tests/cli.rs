@@ -166,6 +166,12 @@ fn website_reference_page_runs_live_cli_help_chunks() {
     let source = fs::read_to_string(&reference)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", reference.display()));
 
+    assert!(
+        source.contains("echo: false"),
+        "{} should hide chunk source in rendered CLI help",
+        reference.display()
+    );
+
     for expected in [
         r#"system2("ir", c("--help")"#,
         r#"system2("ir", c("run", "--help")"#,
