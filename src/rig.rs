@@ -1,10 +1,45 @@
 use std::error::Error;
 use std::ffi::OsString;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[derive(Debug, serde::Deserialize)]
+const EMBEDDED_AVAILABLE_BUILD_DATE: &str = "2026-06-03";
+const EMBEDDED_AVAILABLE: &[AvailableCandidate<'static>] = &[
+    AvailableCandidate {
+        name: "4.1.3",
+        version: "4.1.3",
+        date: Some("2022-03-10"),
+    },
+    AvailableCandidate {
+        name: "4.2.3",
+        version: "4.2.3",
+        date: Some("2023-03-15"),
+    },
+    AvailableCandidate {
+        name: "4.3.3",
+        version: "4.3.3",
+        date: Some("2024-02-29"),
+    },
+    AvailableCandidate {
+        name: "4.4.3",
+        version: "4.4.3",
+        date: Some("2025-02-28"),
+    },
+    AvailableCandidate {
+        name: "4.5.3",
+        version: "4.5.3",
+        date: Some("2026-03-11"),
+    },
+    AvailableCandidate {
+        name: "4.6.0",
+        version: "4.6.0",
+        date: Some("2026-04-24"),
+    },
+];
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct AvailableR {
     name: String,
     version: String,
@@ -18,6 +53,13 @@ struct InstalledR {
     #[serde(default)]
     aliases: Vec<String>,
     binary: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AvailableCandidate<'a> {
+    name: &'a str,
+    version: &'a str,
+    date: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -94,6 +136,13 @@ fn rig_list() -> Result<Vec<InstalledR>, Box<dyn Error>> {
 }
 
 fn rig_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, Box<dyn Error>> {
+    let output = rig_output(args)?;
+
+    serde_json::from_slice(&output)
+        .map_err(|e| format!("failed to parse `rig {}` JSON: {e}", args.join(" ")).into())
+}
+
+fn rig_output(args: &[&str]) -> Result<Vec<u8>, Box<dyn Error>> {
     let output = Command::new("rig")
         .args(args)
         .stdin(Stdio::null())
@@ -111,8 +160,7 @@ fn rig_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, Box<dyn 
         return Err(format!("`rig {}` failed: {stderr}", args.join(" ")).into());
     }
 
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("failed to parse `rig {}` JSON: {e}", args.join(" ")).into())
+    Ok(output.stdout)
 }
 
 fn required_available_version(
@@ -120,28 +168,125 @@ fn required_available_version(
     requirement: &VersionRequirement,
     exclude_newer: Option<&str>,
 ) -> Result<AvailableR, Box<dyn Error>> {
-    rig_available()?
+    if let Some(exclude_newer) = exclude_newer {
+        if exclude_newer <= EMBEDDED_AVAILABLE_BUILD_DATE {
+            return required_available_version_from_candidates(
+                req,
+                requirement,
+                Some(exclude_newer),
+                EMBEDDED_AVAILABLE.iter().copied(),
+            );
+        }
+
+        let available = cached_rig_available()?;
+        return required_available_version_from_candidates(
+            req,
+            requirement,
+            Some(exclude_newer),
+            available.iter().map(AvailableCandidate::from),
+        );
+    }
+
+    let available = rig_available()?;
+    required_available_version_from_candidates(
+        req,
+        requirement,
+        None,
+        available.iter().map(AvailableCandidate::from),
+    )
+}
+
+fn required_available_version_from_candidates<'a>(
+    req: &str,
+    requirement: &VersionRequirement,
+    exclude_newer: Option<&str>,
+    candidates: impl IntoIterator<Item = AvailableCandidate<'a>>,
+) -> Result<AvailableR, Box<dyn Error>> {
+    candidates
         .into_iter()
         .filter(|version| released_before_or_on(version, exclude_newer))
-        .filter(|version| requirement.matches_available(version))
-        .max_by(|a, b| compare_versions(&a.version, &b.version))
+        .filter(|version| requirement.matches_candidate(version.name, version.version, &[]))
+        .max_by(|a, b| compare_versions(a.version, b.version))
+        .map(AvailableR::from)
         .ok_or_else(|| {
             let suffix = exclude_newer
                 .map(|date| format!(" before or on {date}"))
                 .unwrap_or_default();
-            format!("could not resolve R version `{req}` with `rig available --json`{suffix}")
-                .into()
+            format!("could not resolve R version `{req}` with available R versions{suffix}").into()
         })
 }
 
-fn released_before_or_on(version: &AvailableR, exclude_newer: Option<&str>) -> bool {
+fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    let path = crate::ir_cache_dir()?.join("rig").join("available.json");
+    if path.exists() {
+        let json = fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
+        return parse_rig_available_json(&json);
+    }
+
+    let json = String::from_utf8(rig_output(&["available", "--json"])?)
+        .map_err(|e| format!("`rig available --json` returned non-UTF-8 output: {e}"))?;
+    let available = parse_rig_available_json(&json)?;
+    let json = serde_json::to_string_pretty(&available)
+        .map_err(|e| format!("failed to serialize cached rig available JSON: {e}"))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create `{}`: {e}", parent.display()))?;
+    }
+    fs::write(&path, json).map_err(|e| format!("failed to write `{}`: {e}", path.display()))?;
+    Ok(available)
+}
+
+fn parse_rig_available_json(json: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    let mut versions: Vec<AvailableR> = serde_json::from_str(json)
+        .map_err(|e| format!("failed to parse `rig available --json` JSON: {e}"))?;
+
+    for version in &mut versions {
+        if let Some(date) = version.date.as_deref() {
+            version.date = Some(
+                iso_date_prefix(date)
+                    .ok_or_else(|| {
+                        format!(
+                            "rig available returned invalid release date `{}` for R {}",
+                            date, version.version
+                        )
+                    })?
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(versions)
+}
+
+fn released_before_or_on(version: &AvailableCandidate<'_>, exclude_newer: Option<&str>) -> bool {
     let Some(exclude_newer) = exclude_newer else {
         return true;
     };
-    let Some(date) = version.date.as_deref().and_then(iso_date_prefix) else {
+    let Some(date) = version.date.and_then(iso_date_prefix) else {
         return false;
     };
     date <= exclude_newer
+}
+
+impl<'a> From<&'a AvailableR> for AvailableCandidate<'a> {
+    fn from(value: &'a AvailableR) -> Self {
+        Self {
+            name: &value.name,
+            version: &value.version,
+            date: value.date.as_deref(),
+        }
+    }
+}
+
+impl From<AvailableCandidate<'_>> for AvailableR {
+    fn from(value: AvailableCandidate<'_>) -> Self {
+        Self {
+            name: value.name.to_string(),
+            version: value.version.to_string(),
+            date: value.date.map(str::to_string),
+        }
+    }
 }
 
 fn iso_date_prefix(value: &str) -> Option<&str> {
@@ -177,10 +322,6 @@ fn parse_version_requirement(req: &str) -> Result<VersionRequirement, Box<dyn Er
 }
 
 impl VersionRequirement {
-    fn matches_available(&self, available: &AvailableR) -> bool {
-        self.matches_candidate(&available.name, &available.version, &[])
-    }
-
     fn matches_installed(&self, installed: &InstalledR) -> bool {
         self.matches_candidate(&installed.name, &installed.version, &installed.aliases)
     }

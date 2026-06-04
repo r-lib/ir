@@ -387,6 +387,134 @@ cat('unused by fake Rscript\n')
 
 #[cfg(unix)]
 #[test]
+fn run_uses_embedded_available_versions_for_old_exclude_newer() {
+    let bin_dir = unique_path("ir-fake-bin", "dir");
+    let fake_rig = bin_dir.join("rig");
+    let script = unique_path("ir-script", "R");
+
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    write_executable(
+        &fake_rig,
+        r#"#!/bin/sh
+set -eu
+case "$*" in
+  "list --json")
+    printf '%s\n' '[]'
+    ;;
+  "available --json")
+    echo "rig available should not run" >&2
+    exit 55
+    ;;
+  *)
+    echo "unexpected rig args: $*" >&2
+    exit 56
+    ;;
+esac
+"#,
+    );
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| r-version: ">= 4.0"
+#| exclude-newer: "2024-01-15"
+
+cat('unused by fake Rscript\n')
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("PATH", &bin_dir)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_file(&script);
+
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("R 4.2.3 is required but is not installed. Run `rig install 4.2.3`."),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("rig available should not run"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_reads_cached_rig_available_json_for_newer_exclude_newer() {
+    let bin_dir = unique_path("ir-fake-bin", "dir");
+    let cache_dir = unique_path("ir-cache", "dir");
+    let fake_rig = bin_dir.join("rig");
+    let script = unique_path("ir-script", "R");
+    let available_cache = cache_dir.join("rig").join("available.json");
+
+    fs::create_dir_all(available_cache.parent().unwrap()).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(
+        &available_cache,
+        r#"[
+  {"name":"4.6.0","date":"2026-04-24","version":"4.6.0"},
+  {"name":"4.7.0","date":"2026-09-01","version":"4.7.0"}
+]
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &fake_rig,
+        r#"#!/bin/sh
+set -eu
+case "$*" in
+  "list --json")
+    printf '%s\n' '[]'
+    ;;
+  "available --json")
+    echo "rig available should not run" >&2
+    exit 55
+    ;;
+  *)
+    echo "unexpected rig args: $*" >&2
+    exit 56
+    ;;
+esac
+"#,
+    );
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| r-version: ">= 4.7"
+#| exclude-newer: "2026-12-31"
+
+cat('unused by fake Rscript\n')
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("PATH", &bin_dir)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_file(&script);
+
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("R 4.7.0 is required but is not installed. Run `rig install 4.7.0`."),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("rig available should not run"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
 fn run_errors_on_malformed_frontmatter_before_resolver() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let script = unique_path("ir-script", "R");
@@ -860,7 +988,7 @@ esac
         &script,
         r#"#!/usr/bin/env -S ir run
 #| r-version: ">= 4.5"
-#| exclude-newer: "2025-12-31"
+#| exclude-newer: "2026-03-12"
 
 cat('unused by fake Rscript\n')
 "#,
@@ -883,7 +1011,7 @@ cat('unused by fake Rscript\n')
         stderr.contains("R 4.5.3 is required but is not installed"),
         "{stderr}"
     );
-    assert!(stderr.contains("rig install 4.5"), "{stderr}");
+    assert!(stderr.contains("rig install 4.5.3"), "{stderr}");
     assert!(!stderr.contains("rig install 4.6"), "{stderr}");
 }
 

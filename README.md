@@ -41,6 +41,15 @@ $ ir run --r-version 4.5 script.R            # select R with rig
 
 1. **Resolve + materialise** (a private, throw-away R session).
    - The YAML frontmatter is parsed by Rust with **saphyr**.
+   - If the YAML frontmatter has `r-version: "VERSION-SPEC"` or `ir run` is
+     called with `--r-version VERSION-SPEC`, the requested R version is selected
+     from installed versions reported by `rig list --json`. If no installed R
+     satisfies the request, `ir` selects the newest available matching R version
+     to suggest a concrete `rig install` command. With `exclude-newer`, dates
+     covered by the embedded available-version table do not parse JSON, consult
+     the filesystem, or call `rig available`; newer dates use a cached
+     `<cache>/rig/available.json`, fetching it with `rig available --json` only
+     when the cache is absent.
    - A *resolution cache* short-circuits this whole phase: the declared
      dependencies plus the resolution source (and R version / platform) are
      hashed, and if that exact request was already resolved, its library is
@@ -54,12 +63,6 @@ $ ir run --r-version 4.5 script.R            # select R with rig
    - If the YAML frontmatter has `exclude-newer: "YYYY-MM-DD"`, CRAN is
      resolved from the Posit Package Manager snapshot for that date:
      `https://packagemanager.posit.co/cran/YYYY-MM-DD`.
-   - If the YAML frontmatter has `r-version: "VERSION-SPEC"` or `ir run` is
-     called with `--r-version VERSION-SPEC`, the requested R version is selected
-     from installed versions reported by `rig list --json`. If no installed R
-     satisfies the request, `ir` consults `rig available --json` to suggest a
-     concrete `rig install` command. If `exclude-newer` is present, that install
-     suggestion ignores R versions released after the date.
    - The resolved set is hashed (together with the R version and platform) into
      a content-addressed library path under the cache directory.
    - **renv** (`renv::use`) installs the packages into renv's package cache and
@@ -210,7 +213,7 @@ $ Rscript -e 'testthat::test_file("tests/test-resolve.R", stop_on_failure = TRUE
 | Variable       | Default                                          |
 | -------------- | ------------------------------------------------ |
 | `IR_CACHE_DIR` | `tools::R_user_dir("ir", "cache")`               |
-| `IR_RSCRIPT`   | `Rscript` (resolved via `PATH`)                  |
+| `IR_RSCRIPT`   | path to the Rscript executable when `r-version` is not set (default: Rscript on PATH) |
 
 The default cache directory follows R's per-package convention (e.g.
 `~/Library/Caches/org.R-project.R/R/ir` on macOS), and also honours R's own
@@ -218,6 +221,8 @@ The default cache directory follows R's per-package convention (e.g.
 
 ## Limitations (prototype)
 
+- `r-version` selects installed rig-managed R versions. `ir` does not install
+  missing R versions; it reports the `rig install` command to run.
 - Dependency specs support bare names, `>=`, `==`, and pak package refs.
   Upper-bound syntax such as `pkg<=1.2` is not resolved by `ir`.
 - Repositories default to CRAN (`https://cran.r-project.org`).
