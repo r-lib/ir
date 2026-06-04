@@ -1,0 +1,81 @@
+name: docs
+
+# Publish the website after CI completes on main. Runs as a separate workflow
+# (rather than a `needs:`-gated job in ci.yml) so it can publish even while the
+# Windows test leg is expected to fail (#32): a single matrix leg failing turns
+# the whole CI run red, but docs only requires the non-Windows jobs to pass.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    name: docs
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require non-Windows CI jobs to have succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Publish only when every CI job except the (known-broken, #32) Windows
+          # test leg succeeded. Inspect the triggering run's jobs directly; the
+          # overall run conclusion is red whenever Windows fails, so it cannot be
+          # the gate.
+          failed=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${{ github.event.workflow_run.id }}/jobs" \
+            --paginate \
+            --jq '.jobs[]
+              | select((.name | test("windows"; "i")) | not)
+              | select(.conclusion != "success")
+              | .name')
+          if [ -n "$failed" ]; then
+            echo "Not publishing: these non-Windows CI jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All non-Windows CI jobs succeeded; proceeding to publish."
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::knitr
+            any::rmarkdown
+
+      - name: Install released ir
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bin
+          gh release download \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "ir-x86_64-unknown-linux-gnu.tar.gz" \
+            --dir dist
+          tar -xzf dist/ir-x86_64-unknown-linux-gnu.tar.gz -C dist/bin --strip-components=1
+          test -x dist/bin/ir
+          ./dist/bin/ir --help
+          echo "$PWD/dist/bin" >> "$GITHUB_PATH"
+
+      - uses: quarto-dev/quarto-actions/publish@v2
+        with:
+          target: gh-pages
+          path: docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
