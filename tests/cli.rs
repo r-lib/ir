@@ -122,6 +122,10 @@ fn help_outputs_match_snapshots() {
         ("help", &[]),
         ("run-help", &["run", "--help"]),
         ("run-help", &["run", "-h"]),
+        ("tool-help", &["tool", "--help"]),
+        ("tool-help", &["tool", "-h"]),
+        ("tool-run-help", &["tool", "run", "--help"]),
+        ("tool-run-help", &["tool", "run", "-h"]),
         ("cache-help", &["cache", "--help"]),
         ("cache-help", &["cache", "-h"]),
         ("cache-clean-help", &["cache", "clean", "--help"]),
@@ -157,8 +161,8 @@ fn help_is_shown_for_help_flag_and_no_args() {
             stdout.contains(concat!(
                 "\n    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
                 "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
-                "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
-                "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
+                "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
+                "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
                 "    ir cache <command>\n"
             )),
             "args {args:?}: {stdout}"
@@ -193,12 +197,6 @@ fn run_help_flag_shows_help() {
         ),
         "{stdout}"
     );
-    assert!(
-        stdout.contains(
-            "ir run [--isolated] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]"
-        ),
-        "{stdout}"
-    );
     assert!(out.stderr.is_empty());
 }
 
@@ -210,11 +208,26 @@ fn run_with_missing_script_errors() {
 }
 
 #[test]
-fn run_package_exec_rejects_leading_rscript_args() {
-    let out = ir().args(["run", "--vanilla", "btw"]).output().unwrap();
+fn run_from_option_points_to_tool_run() {
+    let out = ir().args(["run", "--from", "btw", "btw"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr)
-        .contains("Rscript options are only supported for script and -e targets"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("ir tool run"));
+}
+
+#[test]
+fn tool_run_help_flag_shows_help() {
+    let out = ir().args(["tool", "run", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Run a package executable"), "{stdout}");
+    assert!(stdout.contains("USAGE"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]"
+        ),
+        "{stdout}"
+    );
+    assert!(out.stderr.is_empty());
 }
 
 #[test]
@@ -444,7 +457,7 @@ cat('unused by fake Rscript\n')
 
 #[cfg(unix)]
 #[test]
-fn run_package_exec_resolves_provider_and_forwards_with_dependencies() {
+fn tool_run_resolves_provider_and_forwards_with_dependencies_and_rscript_args() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let library = unique_path("ir-library", "dir");
     let exec_dir = library.join("btw").join("exec");
@@ -453,16 +466,8 @@ fn run_package_exec_resolves_provider_and_forwards_with_dependencies() {
 
     write_executable(
         &app,
-        &format!(
-            r#"#!/bin/sh
-set -eu
-test "${{R_LIBS:-}}" = "{}"
-test "$1" = "--flag"
-test "$2" = "value"
-echo "package exec ran"
+        r#"#!/usr/bin/env Rscript
 "#,
-            library.display()
-        ),
     );
 
     write_executable(
@@ -484,17 +489,33 @@ if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
   printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
-echo "resolver should have run first" >&2
-exit 9
+test "${{R_LIBS:-}}" = "{}"
+test "${{R_LIBS_USER:-}}" = "NULL"
+test "$1" = "--vanilla"
+test "$2" = "{}"
+test "$3" = "--flag"
+test "$4" = "value"
+echo "package exec ran"
 "#,
-            library.display()
+            library.display(),
+            library.display(),
+            app.display()
         ),
     );
 
     let out = ir()
         .env("IR_RSCRIPT", &fake_rscript)
         .args([
-            "run", "--with", "cli>=3.0", "--from", "btw", "btw", "--flag", "value",
+            "tool",
+            "run",
+            "--vanilla",
+            "--with",
+            "cli>=3.0",
+            "--from",
+            "btw",
+            "btw",
+            "--flag",
+            "value",
         ])
         .output()
         .unwrap();
@@ -511,7 +532,7 @@ exit 9
 
 #[cfg(unix)]
 #[test]
-fn run_package_exec_accepts_self_named_shortcut_and_dot_r_entrypoint() {
+fn tool_run_accepts_self_named_shortcut_and_dot_r_entrypoint() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let library = unique_path("ir-library", "dir");
     let exec_dir = library.join("btw").join("exec");
@@ -520,15 +541,8 @@ fn run_package_exec_accepts_self_named_shortcut_and_dot_r_entrypoint() {
 
     write_executable(
         &app,
-        &format!(
-            r#"#!/bin/sh
-set -eu
-test "${{R_LIBS:-}}" = "{}"
-test "$1" = "arg"
-echo "package exec dot r ran"
+        r#"#!/usr/bin/env Rscript
 "#,
-            library.display()
-        ),
     );
 
     write_executable(
@@ -550,16 +564,21 @@ if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
   printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
-echo "resolver should have run first" >&2
-exit 9
+test "${{R_LIBS:-}}" = "{}"
+test "${{R_LIBS_USER:-}}" = "NULL"
+test "$1" = "{}"
+test "$2" = "arg"
+echo "package exec dot r ran"
 "#,
-            library.display()
+            library.display(),
+            library.display(),
+            app.display()
         ),
     );
 
     let out = ir()
         .env("IR_RSCRIPT", &fake_rscript)
-        .args(["run", "btw", "arg"])
+        .args(["tool", "run", "btw", "arg"])
         .output()
         .unwrap();
 
@@ -575,7 +594,7 @@ exit 9
 
 #[cfg(unix)]
 #[test]
-fn run_package_exec_uses_resolved_package_exec_dirs_for_env_shebangs() {
+fn tool_run_uses_rapp_shebang() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let library = unique_path("ir-library", "dir");
     let app_dir = library.join("btw").join("exec");
@@ -624,16 +643,23 @@ if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
   printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
-echo "resolver should have run first" >&2
-exit 9
+test "${{R_LIBS:-}}" = "{}"
+test "${{R_LIBS_USER:-}}" = "NULL"
+test "$1" = "-e"
+test "$2" = "Rapp::run()"
+test "$3" = "{}"
+test "$4" = "arg"
+echo "Rapp shebang ran"
 "#,
-            library.display()
+            library.display(),
+            library.display(),
+            app.display()
         ),
     );
 
     let out = ir()
         .env("IR_RSCRIPT", &fake_rscript)
-        .args(["run", "--from", "btw", "btw", "arg"])
+        .args(["tool", "run", "--from", "btw", "btw", "arg"])
         .output()
         .unwrap();
 
@@ -649,7 +675,7 @@ exit 9
 
 #[cfg(unix)]
 #[test]
-fn run_package_exec_accepts_remote_from_package() {
+fn tool_run_accepts_remote_from_package() {
     let fake_rscript = unique_path("ir-fake-rscript", "sh");
     let library = unique_path("ir-library", "dir");
     let exec_dir = library.join("Rapp").join("exec");
@@ -658,14 +684,8 @@ fn run_package_exec_accepts_remote_from_package() {
 
     write_executable(
         &app,
-        &format!(
-            r#"#!/bin/sh
-set -eu
-test "${{R_LIBS:-}}" = "{}"
-echo "remote package exec ran"
+        r#"#!/usr/bin/env Rscript
 "#,
-            library.display()
-        ),
     );
 
     write_executable(
@@ -687,16 +707,20 @@ if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
   printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
   exit 0
 fi
-echo "resolver should have run first" >&2
-exit 9
+test "${{R_LIBS:-}}" = "{}"
+test "${{R_LIBS_USER:-}}" = "NULL"
+test "$1" = "{}"
+echo "remote package exec ran"
 "#,
-            library.display()
+            library.display(),
+            library.display(),
+            app.display()
         ),
     );
 
     let out = ir()
         .env("IR_RSCRIPT", &fake_rscript)
-        .args(["run", "--from", "github::r-lib/Rapp", "Rapp"])
+        .args(["tool", "run", "--from", "github::r-lib/Rapp", "Rapp"])
         .output()
         .unwrap();
 
@@ -712,72 +736,24 @@ exit 9
 
 #[cfg(unix)]
 #[test]
-fn run_package_exec_honors_isolated_env() {
-    let fake_rscript = unique_path("ir-fake-rscript", "sh");
-    let library = unique_path("ir-library", "dir");
-    let exec_dir = library.join("btw").join("exec");
-    fs::create_dir_all(&exec_dir).unwrap();
-    let app = exec_dir.join("btw");
-
-    write_executable(
-        &app,
-        r#"#!/bin/sh
-set -eu
-test "${R_LIBS_USER:-}" = "NULL"
-echo "package exec isolated"
-"#,
-    );
-
-    write_executable(
-        &fake_rscript,
-        &format!(
-            r#"#!/bin/sh
-set -eu
-if [ "${{IR_RESOLVE_RESULT_FILE:-}}" != "" ]; then
-  cat > /dev/null
-  printf '%s\n' "{}" > "$IR_RESOLVE_RESULT_FILE"
-  exit 0
-fi
-echo "resolver should have run first" >&2
-exit 9
-"#,
-            library.display()
-        ),
-    );
-
+fn tool_run_requires_from_command() {
     let out = ir()
-        .env("IR_RSCRIPT", &fake_rscript)
-        .args(["run", "--isolated", "btw"])
+        .args(["tool", "run", "--from", "btw"])
         .output()
         .unwrap();
-
-    let _ = fs::remove_file(&fake_rscript);
-    let _ = fs::remove_dir_all(&library);
-
-    assert!(out.status.success(), "{out:?}");
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("package exec isolated"),
-        "{out:?}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn run_package_exec_rejects_from_with_e() {
-    let out = ir()
-        .args(["run", "--from", "btw", "-e", "1 + 1"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with `-e`"));
-}
-
-#[cfg(unix)]
-#[test]
-fn run_package_exec_requires_from_command() {
-    let out = ir().args(["run", "--from", "btw"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("requires a command"));
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_rejects_path_tool_name() {
+    let out = ir()
+        .args(["tool", "run", "--from", "btw", "path/to/tool"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("command name"));
 }
 
 #[cfg(unix)]

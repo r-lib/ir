@@ -78,6 +78,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 run.isolated,
             )
         }
+        Some("tool") => cmd_tool(args.collect()),
         Some("cache") => cmd_cache(args.collect()),
         Some("--version" | "-V") => {
             println!("ir {}", env!("CARGO_PKG_VERSION"));
@@ -91,13 +92,11 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-/// Where the user's program comes from: a script file, one or more inline `-e`
-/// expressions, or an executable shipped in an installed package's `exec/`
-/// directory.
+/// Where the user's program comes from: a script file, or one or more inline
+/// `-e` expressions evaluated in its place (mirroring `Rscript -e`).
 enum RunSource {
     Script(String),
     Expressions(Vec<String>),
-    PackageExec(PackageExecTarget),
 }
 
 struct PackageExecTarget {
@@ -115,23 +114,29 @@ struct RunArgs {
     isolated: bool,
 }
 
+struct ToolRunArgs {
+    rscript_args: Vec<String>,
+    with_deps: Vec<String>,
+    r_requirement: Option<String>,
+    target: PackageExecTarget,
+    tool_args: Vec<String>,
+}
+
 /// Split the leading region of `ir run`'s arguments into Rscript options,
-/// `--with` dependency specs, an optional `--r-version` spec, package
-/// executable provider (`--from`), and the program source, with everything after
-/// the source treated as program args.
+/// `--with` dependency specs, an optional `--r-version` spec, and the program
+/// source, with everything after the source treated as program args.
 ///
-/// `-e <expr>`, `--from <pkg-ref>`, `--with <spec>`, `--r-version <spec>` and
-/// `--isolated` are `ir`-level flags handled here. Any other `-...` argument is
-/// an Rscript option, forwarded verbatim to the user-code phase. Scanning stops
-/// at the first non-option, which is the script path, package executable
-/// command, or first program arg for `-e`.
+/// `-e <expr>`, `--with <spec>`, `--r-version <spec>` and `--isolated` are
+/// `ir`-level flags handled here. Any other `-...` argument is an Rscript
+/// option, forwarded verbatim to the user-code phase. Scanning stops at the
+/// first non-option, which is the script path unless `-e` was given (in which
+/// case it, and everything after, are program args, as with Rscript).
 fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
-    let mut from = None;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -142,15 +147,9 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
                 .ok_or("`-e` requires an expression (try `ir run -e '1 + 1'`)")?;
             expressions.push(expr);
         } else if arg == "--from" {
-            let value = iter
-                .next()
-                .ok_or("`--from` requires a package ref (try `ir run --from cli cli`)")?;
-            from = Some(value);
-        } else if let Some(value) = arg.strip_prefix("--from=") {
-            if value.is_empty() {
-                return Err("`--from` requires a package ref".into());
-            }
-            from = Some(value.to_string());
+            return Err("`--from` is only supported by `ir tool run`".into());
+        } else if arg.starts_with("--from=") {
+            return Err("`--from` is only supported by `ir tool run`".into());
         } else if arg == "--with" {
             let value = iter
                 .next()
@@ -178,29 +177,10 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let script_args: Vec<String> = iter.collect();
 
     let (source, script_args) = if expressions.is_empty() {
-        if let Some(package_ref) = from {
-            let executable = positional.ok_or("`--from` requires a command to run")?;
-            if !is_package_executable_name(&executable) {
-                return Err("`--from` requires a command name, not a path".into());
-            }
-            (
-                RunSource::PackageExec(PackageExecTarget {
-                    package_name: infer_self_named_executable(&package_ref),
-                    package_ref,
-                    executable,
-                }),
-                script_args,
-            )
-        } else {
-            let target = positional.ok_or(
-                "`ir run` requires a script path, -e expression, or package executable (try `ir run script.R`)",
-            )?;
-            (parse_positional_source(&target), script_args)
-        }
+        let script = positional
+            .ok_or("`ir run` requires a script path or -e expression (try `ir run script.R`)")?;
+        (RunSource::Script(script), script_args)
     } else {
-        if from.is_some() {
-            return Err("`--from` cannot be used with `-e`".into());
-        }
         // With `-e`, there is no script file; the first non-option and anything
         // after it are program args (commandArgs), matching Rscript.
         let mut program_args = Vec::new();
@@ -217,23 +197,6 @@ fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
         script_args,
         isolated,
     })
-}
-
-fn parse_positional_source(target: &str) -> RunSource {
-    let path = Path::new(target);
-    if path.exists() || target.ends_with(".R") || target.contains('/') || target.contains('\\') {
-        return RunSource::Script(target.to_string());
-    }
-
-    if let Some(executable) = infer_self_named_executable(target) {
-        return RunSource::PackageExec(PackageExecTarget {
-            package_ref: target.to_string(),
-            package_name: Some(executable.clone()),
-            executable,
-        });
-    }
-
-    RunSource::Script(target.to_string())
 }
 
 fn infer_self_named_executable(package_ref: &str) -> Option<String> {
@@ -259,7 +222,93 @@ fn is_r_package_name(name: &str) -> bool {
 }
 
 fn is_package_executable_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains(':')
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
+        && !name.chars().any(char::is_whitespace)
+}
+
+/// Parse `ir tool run`, which resolves a provider package and runs a command
+/// from that package's `exec/` directory. This is intentionally separate from
+/// `ir run`: script and expression runs are source-oriented, tool runs are
+/// package-oriented and isolated by default.
+fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>> {
+    let mut rscript_args = Vec::new();
+    let mut with_deps = Vec::new();
+    let mut r_requirement = None;
+    let mut from = None;
+    let mut iter = args.into_iter();
+    let mut positional = None;
+
+    while let Some(arg) = iter.next() {
+        if arg == "--from" {
+            let value = iter
+                .next()
+                .ok_or("`--from` requires a package ref (try `ir tool run --from cli cli`)")?;
+            from = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--from=") {
+            if value.is_empty() {
+                return Err("`--from` requires a package ref".into());
+            }
+            from = Some(value.to_string());
+        } else if arg == "--with" {
+            let value = iter
+                .next()
+                .ok_or("`--with` requires a package (try `ir tool run --with dplyr btw`)")?;
+            push_with_deps(&mut with_deps, &value);
+        } else if let Some(value) = arg.strip_prefix("--with=") {
+            push_with_deps(&mut with_deps, value);
+        } else if arg == "--r-version" {
+            let value = iter.next().ok_or(
+                "`--r-version` requires a version spec (try `ir tool run --r-version 4.5 btw`)",
+            )?;
+            r_requirement = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--r-version=") {
+            r_requirement = Some(value.to_string());
+        } else if arg == "--isolated" {
+            // `ir tool run` is always isolated; accept this for symmetry with
+            // `ir run` without changing behavior.
+        } else if arg == "-e" {
+            return Err("`-e` is not supported by `ir tool run`".into());
+        } else if arg.starts_with('-') {
+            rscript_args.push(arg);
+        } else {
+            positional = Some(arg);
+            break;
+        }
+    }
+
+    let tool_args: Vec<String> = iter.collect();
+    let target = if let Some(package_ref) = from {
+        let executable = positional.ok_or("`--from` requires a command to run")?;
+        if !is_package_executable_name(&executable) {
+            return Err("`--from` requires a command name, not a path".into());
+        }
+        PackageExecTarget {
+            package_name: infer_self_named_executable(&package_ref),
+            package_ref,
+            executable,
+        }
+    } else {
+        let package_ref = positional
+            .ok_or("`ir tool run` requires a package ref or `--from <pkg-ref> <command>`")?;
+        let executable = infer_self_named_executable(&package_ref)
+            .ok_or("self-named package tools require an inferable package name; use `--from <pkg-ref> <command>`")?;
+        PackageExecTarget {
+            package_ref,
+            package_name: Some(executable.clone()),
+            executable,
+        }
+    };
+
+    Ok(ToolRunArgs {
+        rscript_args,
+        with_deps,
+        r_requirement,
+        target,
+        tool_args,
+    })
 }
 
 /// Append the dependency specs in a `--with` value, which may be a single spec
@@ -270,6 +319,29 @@ fn push_with_deps(with_deps: &mut Vec<String>, value: &str) {
         if !dep.is_empty() {
             with_deps.push(dep.to_string());
         }
+    }
+}
+
+fn cmd_tool(args: Vec<String>) -> Result<(), Box<dyn Error>> {
+    match args.first().map(String::as_str) {
+        Some("run") => {
+            let run_args = args[1..].to_vec();
+            if matches!(run_args.as_slice(), [arg] if arg == "--help" || arg == "-h") {
+                print_tool_run_help();
+                return Ok(());
+            }
+            let run = parse_tool_run_args(run_args)?;
+            cmd_tool_run(&run)
+        }
+        Some("--help" | "-h") => {
+            print_tool_help();
+            Ok(())
+        }
+        None => {
+            print_tool_help();
+            Err("`ir tool` requires a subcommand".into())
+        }
+        Some(other) => Err(format!("unrecognized tool subcommand `{other}`").into()),
     }
 }
 
@@ -340,18 +412,18 @@ fn print_help() {
             "USAGE:\n",
             "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
             "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]\n",
-            "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
-            "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
+            "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
+            "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
             "    ir cache <command>\n",
             "\n",
             "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
             "dependencies, builds a dedicated package library, and runs the script\n",
             "against it. With -e it evaluates inline R expressions instead of a file.\n",
-            "It can also resolve a package ref and run an executable from that package's\n",
-            "exec directory. --with adds dependencies on the command line, and\n",
-            "--r-version selects the R version with rig. Leading Rscript options are\n",
-            "passed to Rscript for script targets; trailing args are passed through to\n",
-            "the program.\n",
+            "`ir tool run` resolves a package ref and runs an executable from that\n",
+            "package's exec directory. --with adds dependencies on the command line,\n",
+            "and --r-version selects the R version with rig. Leading Rscript options\n",
+            "are passed to Rscript for script and tool targets; trailing args are\n",
+            "passed through to the program.\n",
             "`ir cache` manages the dependency resolution and materialised library cache.\n",
             "\n",
             "ENVIRONMENT:\n",
@@ -369,26 +441,18 @@ fn print_run_help() {
         "USAGE:\n",
         "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]\n",
         "    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]\n",
-        "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
-        "    ir run [--isolated] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
         "\n",
         "`ir run` reads the YAML frontmatter from <script.R>, resolves its\n",
         "dependencies, builds a dedicated package library, and runs the script\n",
         "against it. With -e it instead evaluates inline R expressions (mirroring\n",
-        "Rscript) against the same isolated library. It can also resolve <pkg-ref>,\n",
-        "find <library>/<package>/exec/<command> or <command>.R, and launch it\n",
-        "through its shebang. A bare package ref such as `btw` is treated as\n",
-        "`--from btw btw` when it is not an existing path. --r-version selects the\n",
-        "R version with rig and overrides script frontmatter. Leading Rscript\n",
-        "options are passed to Rscript for script targets; trailing args are passed\n",
+        "Rscript) against the same isolated library. --r-version selects the R\n",
+        "version with rig and overrides script frontmatter. Leading Rscript options\n",
+        "are passed to Rscript for the user-code phase; trailing args are passed\n",
         "through to the program.\n",
         "\n",
         "OPTIONS:\n",
         "    -e <expr>     Evaluate an inline R expression instead of a script file.\n",
         "                  May be repeated; runs in place of <script.R>.\n",
-        "    --from <pkg-ref>\n",
-        "                  Resolve a package ref and run <command> from its exec/\n",
-        "                  directory. Omit for self-named commands such as `btw`.\n",
         "    --with <pkg>  Add a dependency for this run, merged with any declared\n",
         "                  in the script frontmatter. May be repeated and accepts a\n",
         "                  comma-separated list (e.g. --with dplyr,tidyr). Uses the\n",
@@ -398,6 +462,53 @@ fn print_run_help() {
         "                  `r-version:` in script frontmatter.\n",
         "    --isolated    Disable the user library (R_LIBS_USER) so the run cannot\n",
         "                  borrow undeclared packages from it.\n",
+        "\n",
+        "ENVIRONMENT:\n",
+        "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
+        "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)"
+    ));
+}
+
+fn print_tool_help() {
+    println!(concat!(
+        "Run package executables\n",
+        "\n",
+        "USAGE:\n",
+        "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
+        "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
+        "\n",
+        "COMMANDS:\n",
+        "    run  Resolve a package and run an executable from its exec directory\n",
+        "\n",
+        "ENVIRONMENT:\n",
+        "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
+        "    IR_RSCRIPT     path to the Rscript executable (default: Rscript on PATH)"
+    ));
+}
+
+fn print_tool_run_help() {
+    println!(concat!(
+        "Run a package executable\n",
+        "\n",
+        "USAGE:\n",
+        "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]\n",
+        "    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]\n",
+        "\n",
+        "`ir tool run` resolves <pkg-ref>, finds <library>/<package>/exec/<command>\n",
+        "or <command>.R, and launches it with the selected Rscript. A bare package\n",
+        "ref such as `btw` is treated as `--from btw btw`. Tool runs are isolated:\n",
+        "R_LIBS_USER is set to NULL so undeclared user-library packages are not\n",
+        "borrowed.\n",
+        "\n",
+        "OPTIONS:\n",
+        "    --from <pkg-ref>\n",
+        "                  Resolve a package ref and run <command> from its exec/\n",
+        "                  directory. Omit for self-named commands such as `btw`.\n",
+        "    --with <pkg>  Add a dependency for this run, resolved alongside the\n",
+        "                  provider package. May be repeated and accepts a\n",
+        "                  comma-separated list (e.g. --with cli,jsonlite).\n",
+        "    --r-version <spec>\n",
+        "                  Select the R version for this tool run with rig.\n",
         "\n",
         "ENVIRONMENT:\n",
         "    IR_CACHE_DIR   override the cache dir (default: tools::R_user_dir(\"ir\", \"cache\"))\n",
@@ -452,34 +563,6 @@ fn cmd_run(
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
-    match source {
-        RunSource::Script(_) | RunSource::Expressions(_) => cmd_run_script_or_expressions(
-            source,
-            rscript_args,
-            with_deps,
-            r_requirement,
-            script_args,
-            isolated,
-        ),
-        RunSource::PackageExec(target) => cmd_run_package_exec(
-            target,
-            rscript_args,
-            with_deps,
-            r_requirement,
-            script_args,
-            isolated,
-        ),
-    }
-}
-
-fn cmd_run_script_or_expressions(
-    source: &RunSource,
-    rscript_args: &[String],
-    with_deps: &[String],
-    r_requirement: Option<&str>,
-    script_args: &[String],
-    isolated: bool,
-) -> Result<(), Box<dyn Error>> {
     // A script file declares its dependencies, `exclude-newer`, and `r-version`
     // in YAML frontmatter and is canonicalised so the run is independent of the
     // working directory. An inline `-e` expression has no frontmatter; its deps
@@ -492,7 +575,6 @@ fn cmd_run_script_or_expressions(
             (Some(path), spec)
         }
         RunSource::Expressions(_) => (None, ScriptSpec::default()),
-        RunSource::PackageExec(_) => unreachable!("package exec is handled separately"),
     };
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
@@ -508,7 +590,6 @@ fn cmd_run_script_or_expressions(
     let expressions: &[String] = match source {
         RunSource::Expressions(exprs) => exprs,
         RunSource::Script(_) => &[],
-        RunSource::PackageExec(_) => unreachable!("package exec is handled separately"),
     };
     let code = run_script(
         &rscript,
@@ -522,33 +603,32 @@ fn cmd_run_script_or_expressions(
     std::process::exit(code);
 }
 
-fn cmd_run_package_exec(
-    target: &PackageExecTarget,
-    rscript_args: &[String],
-    with_deps: &[String],
-    r_requirement: Option<&str>,
-    target_args: &[String],
-    isolated: bool,
-) -> Result<(), Box<dyn Error>> {
-    if !rscript_args.is_empty() {
-        return Err("Rscript options are only supported for script and -e targets".into());
-    }
-
+fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
     let mut spec = ScriptSpec {
-        dependencies: vec![target.package_ref.clone()],
+        dependencies: vec![run.target.package_ref.clone()],
         ..ScriptSpec::default()
     };
-    spec.dependencies.extend(with_deps.iter().cloned());
-    if let Some(req) = r_requirement {
-        spec.r_requirement = Some(req.to_string());
+    spec.dependencies.extend(run.with_deps.iter().cloned());
+    if let Some(req) = &run.r_requirement {
+        spec.r_requirement = Some(req.clone());
     }
 
     let rscript = rscript_for_spec(&spec)?;
     let library = resolve_library(&rscript, &spec)?
         .ok_or("dependency resolver did not return a library path")?;
-    let executable =
-        find_package_executable(&library, target.package_name.as_deref(), &target.executable)?;
-    let code = run_package_executable(&rscript, &library, &executable, target_args, isolated)?;
+    let executable = find_package_executable(
+        &library,
+        run.target.package_name.as_deref(),
+        &run.target.executable,
+    )?;
+    let code = run_package_executable(
+        &rscript,
+        &library,
+        &executable,
+        &run.rscript_args,
+        &run.tool_args,
+        &run.target.executable,
+    )?;
     std::process::exit(code);
 }
 
@@ -695,38 +775,77 @@ fn run_package_executable(
     rscript: &OsStr,
     library: &Path,
     executable: &Path,
+    rscript_args: &[String],
     args: &[String],
-    isolated: bool,
+    launcher_name: &str,
 ) -> Result<i32, Box<dyn Error>> {
-    let mut cmd = Command::new(executable);
+    let launcher = package_executable_launcher(executable)?;
+    let mut cmd = Command::new(rscript);
+    cmd.args(rscript_args);
+    match launcher {
+        PackageLauncher::Rscript => {
+            cmd.arg(executable);
+        }
+        PackageLauncher::Rapp => {
+            cmd.arg("-e").arg("Rapp::run()").arg(executable);
+        }
+    }
     cmd.args(args)
         .env("R_LIBS", library)
+        .env("R_LIBS_USER", "NULL")
+        .env("RAPP_LAUNCHER_NAME", launcher_name)
         .env("PATH", resolved_runtime_path(library, rscript)?);
-    if isolated {
-        cmd.env("R_LIBS_USER", "NULL");
-    }
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        Err(program_spawn_error(executable.as_os_str(), cmd.exec()).into())
+        Err(spawn_error(rscript, cmd.exec()).into())
     }
 
     #[cfg(not(unix))]
     {
-        let status = cmd
-            .status()
-            .map_err(|e| program_spawn_error(executable.as_os_str(), e))?;
+        let status = cmd.status().map_err(|e| spawn_error(rscript, e))?;
         Ok(status.code().unwrap_or(1))
     }
 }
 
-fn program_spawn_error(program: &OsStr, err: io::Error) -> String {
-    if err.kind() == io::ErrorKind::NotFound {
-        format!("could not find `{}`", program.to_string_lossy())
-    } else {
-        format!("failed to launch `{}`: {err}", program.to_string_lossy())
+enum PackageLauncher {
+    Rscript,
+    Rapp,
+}
+
+fn package_executable_launcher(executable: &Path) -> Result<PackageLauncher, Box<dyn Error>> {
+    let file = File::open(executable)
+        .map_err(|e| format!("cannot read executable `{}`: {e}", executable.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut shebang = String::new();
+    reader.read_line(&mut shebang)?;
+
+    if !shebang.starts_with("#!") {
+        return Err(format!(
+            "package executable `{}` must start with a Rscript or Rapp shebang",
+            executable.display()
+        )
+        .into());
     }
+
+    if shebang_mentions(&shebang, "Rapp") {
+        Ok(PackageLauncher::Rapp)
+    } else if shebang_mentions(&shebang, "Rscript") {
+        Ok(PackageLauncher::Rscript)
+    } else {
+        Err(format!(
+            "package executable `{}` must use a Rscript or Rapp shebang",
+            executable.display()
+        )
+        .into())
+    }
+}
+
+fn shebang_mentions(shebang: &str, name: &str) -> bool {
+    shebang
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .any(|word| word == name)
 }
 
 fn read_script_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
