@@ -113,20 +113,24 @@ jobs:
       - name: Diagnose co-load segfault (single process)
         shell: bash
         run: |
-          # Progress goes to stderr: R block-buffers stdout to a pipe and a
-          # flush() does not reliably push it through on Windows, so a segfault
-          # loses the buffered lines. stderr is unbuffered and survives the crash.
+          # R buffers both stdout and stderr to a pipe on Windows, so a segfault
+          # discards all in-flight output. Append progress to a file instead:
+          # cat() with a filename opens, writes and closes per call, flushing to
+          # disk each line, so the trace survives the crash. The last package
+          # logged without a matching " OK" is the one that faults.
+          rm -f coload-progress.txt
           Rscript -e '
             pkgs <- c("pak", "renv", "secretbase", "cli", "glue", "jsonlite",
                       "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
                       "btw", "Rapp", "docopt", "pkgsearch", "prettyunits")
             for (p in pkgs) {
-              cat("loading ", p, "\n", sep = "", file = stderr())
+              cat(p, "\n", sep = "", file = "coload-progress.txt", append = TRUE)
               requireNamespace(p, quietly = TRUE)
-              cat("  ok ", p, " ", as.character(packageVersion(p)), "\n", sep = "", file = stderr())
+              cat(p, " OK\n", sep = "", file = "coload-progress.txt", append = TRUE)
             }
-            cat("ALL LOADED\n", file = stderr())
-          ' && echo "no crash" || echo "CRASHED (exit $?)"
+          ' || echo "CRASHED (exit $?)"
+          echo "=== load progress (last line without OK = culprit) ==="
+          cat coload-progress.txt || echo "(no progress file written)"
 
       # DEBUG (#54): run only the crashing tests for a fast loop.
       - run: cargo test --verbose -- ci_dependencies_are_available run_inline_expression_resolves_with_dependencies
