@@ -113,16 +113,19 @@ jobs:
       - name: Diagnose co-load segfault (single process)
         shell: bash
         run: |
+          # Progress goes to stderr: R block-buffers stdout to a pipe and a
+          # flush() does not reliably push it through on Windows, so a segfault
+          # loses the buffered lines. stderr is unbuffered and survives the crash.
           Rscript -e '
             pkgs <- c("pak", "renv", "secretbase", "cli", "glue", "jsonlite",
                       "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown",
                       "btw", "Rapp", "docopt", "pkgsearch", "prettyunits")
             for (p in pkgs) {
-              cat("loading", p, "...\n"); flush(stdout())
+              cat("loading ", p, "\n", sep = "", file = stderr())
               requireNamespace(p, quietly = TRUE)
-              cat("  ok", p, as.character(packageVersion(p)), "\n"); flush(stdout())
+              cat("  ok ", p, " ", as.character(packageVersion(p)), "\n", sep = "", file = stderr())
             }
-            cat("ALL LOADED\n")
+            cat("ALL LOADED\n", file = stderr())
           ' && echo "no crash" || echo "CRASHED (exit $?)"
 
       # DEBUG (#54): run only the crashing tests for a fast loop.
