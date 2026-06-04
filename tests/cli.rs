@@ -534,27 +534,27 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
 #[test]
 fn run_quarto_fixture_renders_html_with_resolved_packages() {
     let _guard = e2e_lock();
-    let output_dir = unique_dir("ir-e2e-qmd-output");
-    let doc = fixture("run/report.qmd");
+    let fixture_dir = fixture("run");
 
     let out = ir()
+        .current_dir(&fixture_dir)
         .args(["run", "--isolated"])
-        .arg(&doc)
-        .args(["--to", "html", "--output-dir"])
-        .arg(&output_dir)
+        .arg("report.qmd")
+        .args(["--to", "html"])
         .output()
         .unwrap();
 
     assert_success(&out);
 
-    let html = fs::read_to_string(output_dir.join("report.html"))
+    let html = fs::read_to_string(fixture_dir.join("report.html"))
         .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
     assert!(html.contains("ir.fixture=qmd"), "{html}");
     assert!(html.contains("qmd.lib_in_cache=true"), "{html}");
     assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
     assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
 
-    let _ = fs::remove_dir_all(&output_dir);
+    let _ = fs::remove_file(fixture_dir.join("report.html"));
+    let _ = fs::remove_dir_all(fixture_dir.join("report_files"));
 }
 
 #[test]
@@ -579,10 +579,10 @@ fn run_quarto_selects_requested_r_version() {
         return;
     }
 
-    let output_dir = unique_dir("ir-e2e-rversion-output");
-    let doc = fixture("run/r-version-select.qmd");
+    let fixture_dir = fixture("run");
 
     let out = ir()
+        .current_dir(&fixture_dir)
         // The resolver inherits the environment, so an ambient R_LIBS_USER (CI's
         // setup-r-dependencies exports one) would point the selected R at a
         // library built for the *default* R, loading an ABI-mismatched
@@ -591,15 +591,14 @@ fn run_quarto_selects_requested_r_version() {
         .env_remove("R_LIBS_USER")
         .args(["run", "--isolated", "--r-version"])
         .arg(&target)
-        .arg(&doc)
-        .args(["--to", "html", "--output-dir"])
-        .arg(&output_dir)
+        .arg("r-version-select.qmd")
+        .args(["--to", "html"])
         .output()
         .unwrap();
 
     assert_success(&out);
 
-    let html = fs::read_to_string(output_dir.join("r-version-select.html"))
+    let html = fs::read_to_string(fixture_dir.join("r-version-select.html"))
         .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
     assert!(html.contains("ir.fixture=r-version"), "{html}");
     assert!(
@@ -609,7 +608,8 @@ fn run_quarto_selects_requested_r_version() {
     assert!(html.contains("version.lib_in_cache=true"), "{html}");
     assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
 
-    let _ = fs::remove_dir_all(&output_dir);
+    let _ = fs::remove_file(fixture_dir.join("r-version-select.html"));
+    let _ = fs::remove_dir_all(fixture_dir.join("r-version-select_files"));
 }
 
 #[test]
