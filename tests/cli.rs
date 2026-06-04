@@ -19,6 +19,14 @@ fn ir() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ir"))
 }
 
+fn ir_bin_name() -> String {
+    Path::new(env!("CARGO_BIN_EXE_ir"))
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -110,40 +118,61 @@ fn version_flag_reports_version() {
 
 #[test]
 fn help_is_generated_by_clap() {
+    let bin = ir_bin_name();
     let cases = [
         (
             vec!["--help"],
             true,
-            ["Usage: ir [COMMAND]", "Commands:", "run"],
+            vec![
+                format!("Usage: {bin} [COMMAND]"),
+                "Commands:".to_string(),
+                "run".to_string(),
+            ],
         ),
-        (vec![], false, ["Usage: ir [COMMAND]", "Commands:", "cache"]),
+        (
+            vec![],
+            false,
+            vec![
+                format!("Usage: {bin} [COMMAND]"),
+                "Commands:".to_string(),
+                "cache".to_string(),
+            ],
+        ),
         (
             vec!["run", "--help"],
             true,
-            [
-                "Usage: ir run [OPTIONS] [ARGS]...",
-                "-e, --expr <EXPR>",
-                "--with <PKG>",
+            vec![
+                format!("Usage: {bin} run [OPTIONS] [ARGS]..."),
+                "-e, --expr <EXPR>".to_string(),
+                "--with <PKG>".to_string(),
             ],
         ),
         (
             vec!["tool", "run", "--help"],
             true,
-            [
-                "Usage: ir tool run [OPTIONS] [ARGS]...",
-                "--from <PKG_REF>",
-                "--with <PKG>",
+            vec![
+                format!("Usage: {bin} tool run [OPTIONS] [ARGS]..."),
+                "--from <PKG_REF>".to_string(),
+                "--with <PKG>".to_string(),
             ],
         ),
         (
             vec!["cache", "--help"],
             true,
-            ["Usage: ir cache [COMMAND]", "clean", "dir"],
+            vec![
+                format!("Usage: {bin} cache [COMMAND]"),
+                "clean".to_string(),
+                "dir".to_string(),
+            ],
         ),
         (
             vec!["cache", "clean", "--help"],
             true,
-            ["Usage: ir cache clean [OPTIONS]", "--force", "--help"],
+            vec![
+                format!("Usage: {bin} cache clean [OPTIONS]"),
+                "--force".to_string(),
+                "--help".to_string(),
+            ],
         ),
     ];
 
@@ -169,7 +198,7 @@ fn help_is_generated_by_clap() {
         };
         assert!(!help.contains("Rscript-options"), "args {args:?}: {help}");
         for needle in expected {
-            assert!(help.contains(needle), "args {args:?}: {help}");
+            assert!(help.contains(&needle), "args {args:?}: {help}");
         }
     }
 }
@@ -183,7 +212,10 @@ fn unknown_command_errors() {
         stderr.contains("unrecognized subcommand 'frobnicate'"),
         "{stderr}"
     );
-    assert!(stderr.contains("Usage: ir [COMMAND]"), "{stderr}");
+    assert!(
+        stderr.contains(&format!("Usage: {} [COMMAND]", ir_bin_name())),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -193,7 +225,7 @@ fn cache_clean_unknown_flag_reports_usage() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unexpected argument '--bogus'"), "{stderr}");
     assert!(
-        stderr.contains("Usage: ir cache clean [OPTIONS]"),
+        stderr.contains(&format!("Usage: {} cache clean [OPTIONS]", ir_bin_name())),
         "{stderr}"
     );
 }
@@ -216,7 +248,7 @@ fn run_help_flag_shows_help() {
     );
     assert!(stdout.contains("Usage:"), "{stdout}");
     assert!(
-        stdout.contains("Usage: ir run [OPTIONS] [ARGS]..."),
+        stdout.contains(&format!("Usage: {} run [OPTIONS] [ARGS]...", ir_bin_name())),
         "{stdout}"
     );
     assert!(out.stderr.is_empty());
@@ -247,7 +279,10 @@ fn tool_run_help_flag_shows_help() {
     );
     assert!(stdout.contains("Usage:"), "{stdout}");
     assert!(
-        stdout.contains("Usage: ir tool run [OPTIONS] [ARGS]..."),
+        stdout.contains(&format!(
+            "Usage: {} tool run [OPTIONS] [ARGS]...",
+            ir_bin_name()
+        )),
         "{stdout}"
     );
     assert!(out.stderr.is_empty());
