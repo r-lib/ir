@@ -11,6 +11,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 saphyr = { git = "https://github.com/t-kalinowski/saphyr", rev = "73f6994fd5dbfa7350adb3fe2f01653bb03befaf", default-features = false }
 
+[dev-dependencies]
+serde_json = "1"
+
 [[bin]]
 name = "ir"
 path = "src/main.rs"
