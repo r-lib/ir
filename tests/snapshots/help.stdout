@@ -1,0 +1,13 @@
+Run self-describing R scripts
+
+Usage: ir [COMMAND]
+
+Commands:
+  run    Run a script or inline R expression
+  tool   Run package executables
+  cache  Manage ir's cache
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version

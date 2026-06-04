@@ -1,0 +1,13 @@
+Run a script or inline R expression
+
+Usage: ir run [OPTIONS] [ARGS]...
+
+Arguments:
+  [ARGS]...  Rscript options, script path, and script arguments
+
+Options:
+  -e, --expr <EXPR>       Evaluate an inline R expression instead of a script file
+      --with <PKG>        Add a dependency for this run; may be repeated
+      --r-version <SPEC>  Select the R version for this run with rig
+      --isolated          Disable the user library for this run
+  -h, --help              Print help

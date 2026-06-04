@@ -1,0 +1,7 @@
+Clear the cache, removing all entries
+
+Usage: ir cache clean [OPTIONS]
+
+Options:
+      --force  Force removal of the cache
+  -h, --help   Print help

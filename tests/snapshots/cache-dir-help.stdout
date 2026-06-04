@@ -1,0 +1,6 @@
+Show the cache directory
+
+Usage: ir cache dir
+
+Options:
+  -h, --help  Print help

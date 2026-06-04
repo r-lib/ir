@@ -27,6 +27,27 @@ fn ir_bin_name() -> String {
         .into_owned()
 }
 
+fn normalize_cli_output(output: &[u8]) -> String {
+    String::from_utf8_lossy(output)
+        .replace("\r\n", "\n")
+        .replace(&ir_bin_name(), "ir")
+}
+
+fn assert_help_snapshot(name: &str, args: &[&str]) {
+    let out = ir().args(args).output().unwrap();
+    assert!(out.status.success(), "{args:?} should exit 0");
+    assert!(out.stderr.is_empty(), "{args:?} should not write stderr");
+
+    let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("snapshots")
+        .join(format!("{name}.stdout"));
+    let expected = fs::read_to_string(&snapshot)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", snapshot.display()));
+    let actual = normalize_cli_output(&out.stdout);
+    assert_eq!(actual, expected, "{args:?} changed {}", snapshot.display());
+}
+
 fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -114,6 +135,28 @@ fn version_flag_reports_version() {
     let out = ir().arg("--version").output().unwrap();
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).starts_with("ir 0."));
+}
+
+#[test]
+fn help_outputs_match_snapshots() {
+    for (name, args) in [
+        ("help", &["--help"][..]),
+        ("help", &["-h"]),
+        ("run-help", &["run", "--help"]),
+        ("run-help", &["run", "-h"]),
+        ("tool-help", &["tool", "--help"]),
+        ("tool-help", &["tool", "-h"]),
+        ("tool-run-help", &["tool", "run", "--help"]),
+        ("tool-run-help", &["tool", "run", "-h"]),
+        ("cache-help", &["cache", "--help"]),
+        ("cache-help", &["cache", "-h"]),
+        ("cache-clean-help", &["cache", "clean", "--help"]),
+        ("cache-clean-help", &["cache", "clean", "-h"]),
+        ("cache-dir-help", &["cache", "dir", "--help"]),
+        ("cache-dir-help", &["cache", "dir", "-h"]),
+    ] {
+        assert_help_snapshot(name, args);
+    }
 }
 
 #[test]
