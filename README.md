@@ -279,11 +279,11 @@ $ Rscript -e 'testthat::test_file("tests/test-resolve.R", stop_on_failure = TRUE
 
 The end-to-end CLI tests use real R package resolution. Local runs reuse a
 shared cache in `target/ir-e2e-cache`, so repeat runs with a warm cache skip the
-download and materialisation path. Local reticulate coverage uses system Python;
-cold-cache mode additionally exercises reticulate's managed ephemeral Python
-path. CI sets `IR_TEST_COLD_CACHE=1`, and you can set the same variable locally
-when you want each end-to-end test to use a fresh cache and exercise the slow
-cold-cache path:
+download and materialisation path. CI uses a per-job shared cache outside
+`target`, so a fresh job still downloads and materialises packages when pak is
+called. Set `IR_TEST_COLD_CACHE=1` locally when you want each end-to-end test to
+use a fresh cache and additionally exercise reticulate's managed ephemeral
+Python path:
 
 ```console
 $ IR_TEST_COLD_CACHE=1 cargo test --test cli

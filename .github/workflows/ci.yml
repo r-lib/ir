@@ -50,8 +50,6 @@ jobs:
             any::prettyunits
       - run: cargo build --verbose
       - run: cargo test --verbose
-        env:
-          IR_TEST_COLD_CACHE: "1"
 
   lint:
     name: rustfmt + clippy

@@ -108,6 +108,16 @@ fn persistent_test_dir(name: &str) -> PathBuf {
     path
 }
 
+fn shared_e2e_dir(name: &str) -> PathBuf {
+    let path = if std::env::var_os("CI").is_some() {
+        std::env::temp_dir().join(format!("{name}-{}", std::process::id()))
+    } else {
+        persistent_test_dir(name)
+    };
+    fs::create_dir_all(&path).unwrap();
+    path
+}
+
 fn e2e_cache_dir(prefix: &str) -> TestDir {
     if cold_cache() {
         TestDir {
@@ -116,7 +126,7 @@ fn e2e_cache_dir(prefix: &str) -> TestDir {
         }
     } else {
         TestDir {
-            path: persistent_test_dir("ir-e2e-cache"),
+            path: shared_e2e_dir("ir-e2e-cache"),
             cleanup: false,
         }
     }
@@ -130,7 +140,7 @@ fn e2e_reticulate_dir(prefix: &str, warm_name: &str) -> TestDir {
         }
     } else {
         TestDir {
-            path: persistent_test_dir(warm_name),
+            path: shared_e2e_dir(warm_name),
             cleanup: false,
         }
     }
