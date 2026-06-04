@@ -1,1 +1,36 @@
-/* css styles */
+:root {
+  --ir-accent: #2f6f5e;
+  --ir-ink: #1f2933;
+  --ir-muted: #52616b;
+  --ir-panel: #f6f8f7;
+}
+
+body {
+  color: var(--ir-ink);
+}
+
+a {
+  color: var(--ir-accent);
+}
+
+.navbar-title {
+  font-weight: 700;
+}
+
+.quarto-title-block .subtitle {
+  color: var(--ir-muted);
+  font-size: 1.15rem;
+  max-width: 48rem;
+}
+
+pre {
+  border-radius: 6px;
+}
+
+code {
+  color: inherit;
+}
+
+.callout {
+  border-radius: 6px;
+}
