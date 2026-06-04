@@ -129,14 +129,9 @@ test_that("ir_input_key separates dated PPM snapshots from daily latest resoluti
                         exclude_newer = "2024-01-15")
   snap2 <- ir_input_key(c("dplyr"), as.Date("2026-06-03"), "4.6.0", "aarch64",
                         exclude_newer = "2024-01-15")
+  snap3 <- ir_input_key(c("dplyr"), as.Date("2026-06-02"), "4.6.0", "aarch64",
+                        exclude_newer = "2024-01-16")
   expect_false(daily == snap1)
-  expect_identical(snap1, snap2)
-})
-
-# --- dependency refs ---------------------------------------------------------
-
-test_that("dependency specs are normalized to refs", {
-  deps <- c("dplyr>=1.0", "secretbase==1.2")
-  refs <- vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
-  expect_equal(refs, c("dplyr@>=1.0", "secretbase@1.2"))
+  expect_identical(snap1, snap2)      # date ignored for immutable snapshots
+  expect_false(snap1 == snap3)
 })

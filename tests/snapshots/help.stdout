@@ -1,16 +1,20 @@
 ir 0.1.0 — self-describing R scripts
 
 USAGE:
-    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]
-    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]
+    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]
+    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [args...]
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] --from <pkg-ref> <command> [args...]
+    ir tool run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <pkg-ref> [args...]
     ir cache <command>
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its
 dependencies, builds a dedicated package library, and runs the script
-against it. With -e it evaluates inline R expressions instead of a file,
---with adds dependencies on the command line, and --r-version selects
-the R version with rig. Leading Rscript options are passed to Rscript for
-the user-code phase; trailing args are passed through to the program.
+against it. With -e it evaluates inline R expressions instead of a file.
+`ir tool run` resolves a package ref and runs an executable from that
+package's exec directory. --with adds dependencies on the command line,
+and --r-version selects the R version with rig. Leading Rscript options
+are passed to Rscript for script and tool targets; trailing args are
+passed through to the program.
 `ir cache` manages the dependency resolution and materialised library cache.
 
 Quarto documents (.qmd, .Rmd) are also supported: declare

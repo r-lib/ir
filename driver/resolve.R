@@ -118,7 +118,7 @@ ir_input_key <- function(deps,
 
 ir_resolve_main <- function() {
 
-  deps        <- readLines(stdin(), warn = FALSE)
+  deps        <- readLines(file("stdin"), warn = FALSE)
   result_file <- ir_env_optional("IR_RESOLVE_RESULT_FILE")
   stopifnot(!is.null(result_file))
   cache_dir   <- ir_cache_dir()

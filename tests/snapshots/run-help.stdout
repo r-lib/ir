@@ -1,8 +1,8 @@
 Run an R script
 
 USAGE:
-    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]
-    ir run [Rscript-options...] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]
+    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] <script.R> [args...]
+    ir run [Rscript-options...] [--isolated] [--with <pkg>]... [--r-version <spec>] -e <expr> [-e <expr>]... [args...]
 
 `ir run` reads the YAML frontmatter from <script.R>, resolves its
 dependencies, builds a dedicated package library, and runs the script
@@ -22,6 +22,8 @@ OPTIONS:
     --r-version <spec>
                   Select the R version for this run with rig. Overrides
                   `r-version:` in script frontmatter.
+    --isolated    Disable the user library (R_LIBS_USER) so the run cannot
+                  borrow undeclared packages from it.
 
 Quarto documents (.qmd, .Rmd) are also supported: declare
 dependencies under an `ir:` key in the document's YAML frontmatter
