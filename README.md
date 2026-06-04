@@ -367,9 +367,7 @@ default destination for `ir tool install`; `--bin-dir <dir>` overrides them.
 - The self-named package executable shortcut is for package refs whose package
   name can be inferred locally, such as `btw` or `btw>=0.1.0`. Use
   `ir tool run --from <pkg-ref> <command>` for remotes and other refs.
-- Duplicate dependencies are collapsed by package name, the last ref winning
-  (so an explicit `rmarkdown` overrides the auto-injected one). This applies to
-  parseable refs (`pkg`, `pkg@ver`, `pkg>=ver`, `pkg==ver`); exotic refs such as
-  `github::user/repo` and URL refs cannot be name-matched and are passed through
-  unchanged — declaring `rmarkdown` via such a ref will not suppress the injected
-  seed.
+- The auto-injected `rmarkdown` for Quarto is added only when the resolved
+  dependency set does not already contain it. Declaring `rmarkdown` yourself —
+  directly, transitively (e.g. via `quarto`), or through any ref pak resolves to
+  the `rmarkdown` package — suppresses the injected seed and its advisory.
