@@ -15,7 +15,7 @@
 # The resulting library path is written to the temp result file named by
 # IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
 # This session then exits; the Rust process launches the user's script in a
-# fresh, isolated R session pointed at the library.
+# fresh R session with the resolved library prepended to `.libPaths()`.
 #
 # The helpers below are pure and side-effect free. The pipeline runs only when
 # this file is executed as a script -- `sys.nframe() == 0L` is false when the
@@ -213,10 +213,10 @@ ir_resolve_main <- function() {
   }
 
   ## 2. Resolve with pak
-  # A script may legitimately declare no dependencies; a non-Quarto run then
-  # gets an empty but still isolated library (base R only), so undeclared
-  # library() calls fail loudly instead of silently borrowing the user's
-  # packages. A Quarto render still resolves rmarkdown (injected below).
+  # A script may legitimately declare no dependencies; a non-Quarto run then gets
+  # an empty resolved library. If the user requested `--isolated`, undeclared
+  # library() calls fail loudly instead of borrowing from the user library. A
+  # Quarto render still resolves rmarkdown (injected below).
   primary_package <- NULL
   refs_in <- deps
   res <- if (length(refs_in)) ir_resolve_refs(refs_in) else NULL
@@ -235,15 +235,12 @@ ir_resolve_main <- function() {
   ## 2b. Quarto's knitr engine needs rmarkdown. Inject it (latest) only when the
   ## resolved set does not already provide it -- whether the user declared it
   ## directly or it arrived as a transitive dependency of a declared package.
-  ## A dated `exclude-newer` snapshot already pins the injected version, so the
-  ## reproducibility advisory fires only for unpinned (latest) resolution.
-  have_rmarkdown <- !is.null(res) && "rmarkdown" %in% res$package
-  if (quarto && !have_rmarkdown) {
-    refs_in <- c(refs_in, "rmarkdown")
-    res <- ir_resolve_refs(refs_in)
-    if (is.null(exclude_newer))
-      message("ir: using latest rmarkdown; pin a version under ir.dependencies ",
-              "for reproducibility.")
+  if (quarto) {
+    have_rmarkdown <- !is.null(res) && "rmarkdown" %in% res$package
+    if (!have_rmarkdown) {
+      refs_in <- c(refs_in, "rmarkdown")
+      res <- ir_resolve_refs(refs_in)
+    }
   }
 
   if (is.null(res)) {

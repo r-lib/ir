@@ -8,11 +8,11 @@ ir:
 ---
 
 ```{r}
-# The document declares rmarkdown directly, so the resolver leaves it alone (no
-# injected seed, no advisory). Attach rmarkdown and confirm it loads from ir's
-# resolved run library: the normalised path.package location (renv symlink
-# resolved) must equal the normalised run library entry. Read the version from
-# that library's DESCRIPTION.
+# The document declares rmarkdown directly, so the resolver leaves it alone.
+# Attach rmarkdown and confirm it loads from ir's resolved run library: the
+# normalised path.package location (renv symlink resolved) must equal the
+# normalised run library entry. Read the version from that library's
+# DESCRIPTION.
 suppressPackageStartupMessages(library("rmarkdown", character.only = TRUE))
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, "rmarkdown"), mustWork = TRUE)

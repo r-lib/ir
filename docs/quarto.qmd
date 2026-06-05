@@ -34,4 +34,4 @@ Set `IR_QUARTO` to use a specific Quarto executable. Rscript options containing 
 
 A Quarto render needs the `rmarkdown` package for the knitr engine. `ir` appends `rmarkdown` to the resolved dependencies automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
 
-When the injected `rmarkdown` is used, `ir` prints a one-line advisory recommending you pin a version. Declaring `rmarkdown` yourself under `ir.dependencies` — directly (e.g. `rmarkdown@2.29`) or transitively, such as through `quarto` — overrides the injected seed and silences the advisory.
+Declare `rmarkdown` yourself under `ir.dependencies` — directly (e.g. `rmarkdown@2.29`) or transitively, such as through `quarto` — to override the injected seed.
