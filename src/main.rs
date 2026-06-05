@@ -18,7 +18,7 @@
 //! The pipeline has two phases:
 //!
 //!   1. Rust extracts and parses the leading `#| ` YAML frontmatter block. A
-//!      private R session (`driver/resolve.R`) receives the dependency specs on
+//!      private R session (`driver/resolve.R`) receives the normalized pak refs on
 //!      stdin, resolves them with pak, hashes the resolved set into a
 //!      content-addressed library path under the cache directory, and
 //!      materialises that path as a light-weight library of symlinks into renv's
@@ -711,7 +711,7 @@ fn cmd_run(
     source.reject_unsupported_rscript_args(rscript_args)?;
 
     // Phase 1: private R session resolves deps and materialises the library.
-    // Rust parses the frontmatter and sends the dependency specs on stdin.
+    // Rust parses the frontmatter and sends normalized pak refs on stdin.
     let library = resolve_library(&rscript, &spec)?;
 
     // Phase 2: render the document, or run the user's program, in an isolated
@@ -825,7 +825,8 @@ fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
 
 /// Phase 1 — run the embedded driver in a private R session and return the
 /// path to the materialised library. The dependency specs in `spec` (the
-/// script's frontmatter plus any `--with` packages) are streamed on stdin.
+/// script's frontmatter plus any `--with` packages) are normalized into pak refs
+/// and streamed on stdin.
 fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>, Box<dyn Error>> {
     Ok(resolve_library_inner(rscript, spec, false)?.library)
 }
@@ -884,7 +885,7 @@ fn resolve_library_inner(
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
     {
         let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
-        for dependency in &spec.dependencies {
+        for dependency in normalized_dependencies(&spec.dependencies) {
             writeln!(stdin, "{dependency}")?;
         }
     }
@@ -1310,6 +1311,87 @@ fn frontmatter_optional_string(
     } else {
         Some(value.to_owned())
     })
+}
+
+fn normalized_dependencies(dependencies: &[String]) -> Vec<String> {
+    dependencies
+        .iter()
+        .map(|dependency| dependency_to_ref(dependency))
+        .collect()
+}
+
+fn dependency_to_ref(dependency: &str) -> String {
+    let dependency = dependency.trim();
+    let Some((package, operator, version)) = parse_simple_version_ref(dependency) else {
+        return dependency.to_string();
+    };
+
+    match operator {
+        ">=" => format!("{package}@>={version}"),
+        "==" => format!("{package}@{version}"),
+        _ => unreachable!("parse_simple_version_ref only returns supported operators"),
+    }
+}
+
+fn parse_simple_version_ref(dependency: &str) -> Option<(&str, &str, &str)> {
+    let mut name_chars = dependency.char_indices();
+    let (_, first) = name_chars.next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+
+    let mut name_len = 1;
+    let mut name_end = first.len_utf8();
+    let mut last_name_char = first;
+    for (index, ch) in name_chars {
+        if !(ch.is_ascii_alphanumeric() || ch == '.') {
+            break;
+        }
+
+        name_len += 1;
+        name_end = index + ch.len_utf8();
+        last_name_char = ch;
+    }
+    if name_len < 2 || !last_name_char.is_ascii_alphanumeric() {
+        return None;
+    }
+
+    let rest = &dependency[name_end..];
+    let operator_start = name_end + rest.len() - rest.trim_start().len();
+
+    let operator = if dependency[operator_start..].starts_with(">=") {
+        ">="
+    } else if dependency[operator_start..].starts_with("==") {
+        "=="
+    } else {
+        return None;
+    };
+
+    let version_rest = &dependency[(operator_start + operator.len())..];
+    let version_start =
+        operator_start + operator.len() + version_rest.len() - version_rest.trim_start().len();
+
+    let version = &dependency[version_start..];
+    let mut version_chars = version.char_indices();
+    let (_, first_version_char) = version_chars.next()?;
+    if !first_version_char.is_ascii_digit() {
+        return None;
+    }
+
+    let mut version_end = version_start + first_version_char.len_utf8();
+    for (index, ch) in version_chars {
+        if !(ch.is_ascii_digit() || ch == '.' || ch == '-') {
+            return None;
+        }
+
+        version_end = version_start + index + ch.len_utf8();
+    }
+
+    Some((
+        &dependency[..name_end],
+        operator,
+        &dependency[version_start..version_end],
+    ))
 }
 
 /// Phase 2 — run the user's program in an ordinary R session pointed at

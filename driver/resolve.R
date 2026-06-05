@@ -5,7 +5,7 @@
 #   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
 # Responsibilities (steps 1-4 of the `ir` pipeline):
-#   1. Consume package dependency specs from stdin, one dependency per line.
+#   1. Consume pak package refs from stdin, one ref per line.
 #   2. Resolve the declared dependencies into concrete versions with pak.
 #   3. Hash the resolved set to derive a content-addressed library path
 #      under <cache_dir>.
@@ -42,26 +42,6 @@ ir_exclude_newer <- function(value) {
          call. = FALSE)
 
   value
-}
-
-## --- pak ref normalisation --------------------------------------------------
-
-# Translate one dependency spec into a pak package reference:
-#   `pkg`         -> `pkg`         (latest)
-#   `pkg>=1.0`    -> `pkg@>=1.0`   (lower bound; solver picks)
-#   `pkg==1.0`    -> `pkg@1.0`     (exact version)
-# Native pak refs, GitHub refs, and URL refs are passed through untouched.
-# Unsupported version operators such as `pkg<=1.2` are also passed to pak
-# unchanged, so pak remains the source of truth for supported refs.
-ir_to_ref <- function(d) {
-  d <- trimws(d)
-  m <- regmatches(d, regexec(
-    "^([A-Za-z][A-Za-z0-9.]*[A-Za-z0-9])[[:space:]]*(>=|==)[[:space:]]*([0-9][0-9.-]*)$",
-    d
-  ))[[1L]]
-  if (length(m) != 4L) return(d)
-  if (m[[3L]] == ">=") sprintf("%s@>=%s", m[[2L]], m[[4L]])
-  else sprintf("%s@%s", m[[2L]], m[[4L]])
 }
 
 # Resolve dependency refs with pak, stopping if any ref fails to resolve.
@@ -203,7 +183,7 @@ ir_resolve_main <- function() {
   ## library still exists, reuse it and skip pak entirely. The marker is written
   ## only after a successful materialise (below), so its presence implies a
   ## complete library.
-  primary_ref <- if (length(deps)) ir_to_ref(deps[[1L]]) else NULL
+  primary_ref <- if (length(deps)) deps[[1L]] else NULL
   marker <- file.path(cache_dir, "resolutions",
                       ir_input_key(deps, exclude_newer = exclude_newer,
                                    quarto = quarto))
@@ -237,10 +217,7 @@ ir_resolve_main <- function() {
   # library() calls fail loudly instead of silently borrowing the user's
   # packages. A Quarto render still resolves rmarkdown (injected below).
   primary_package <- NULL
-  refs_in <- if (length(deps))
-    vapply(deps, ir_to_ref, character(1L), USE.NAMES = FALSE)
-  else
-    character()
+  refs_in <- deps
   res <- if (length(refs_in)) ir_resolve_refs(refs_in) else NULL
 
   if (!is.null(package_result_file)) {

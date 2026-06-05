@@ -531,6 +531,35 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
     assert_stdout_contains(&out, "inline.glue=2");
 }
 
+#[test]
+fn run_normalizes_version_specs_before_resolution_cache_keying() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-ref-normalized-cache");
+    let expr = r#"
+library(cli)
+cat("ir.fixture=normalized-cache\n")
+"#;
+
+    for dep in ["cli==3.6.6", "cli@3.6.6"] {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .args(["run", "--isolated", "--with", dep, "--vanilla", "-e", expr])
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=normalized-cache");
+    }
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let resolution_count = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .count();
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert_eq!(resolution_count, 1);
+}
+
 // report.qmd deliberately does NOT declare rmarkdown, so the render only
 // succeeds because ir injects it (the knitr engine needs it). The advisory on
 // stderr confirms the injected seed was used.
