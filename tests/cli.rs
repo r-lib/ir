@@ -4,6 +4,7 @@
 //! shims. The end-to-end cases run real fixture scripts/documents through the
 //! compiled binary and assert marker lines printed by those public workflows.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -26,8 +27,34 @@ fn ir_bin_name() -> String {
         .into_owned()
 }
 
-fn rscript() -> String {
-    std::env::var("IR_RSCRIPT").unwrap_or_else(|_| "Rscript".into())
+fn rscript() -> OsString {
+    if let Some(rscript) = std::env::var_os("IR_RSCRIPT").filter(|value| !value.is_empty()) {
+        return rscript;
+    }
+
+    #[cfg(windows)]
+    if let Some(rscript) = rig_default_rscript() {
+        return rscript.into_os_string();
+    }
+
+    "Rscript".into()
+}
+
+#[cfg(windows)]
+fn rig_default_rscript() -> Option<PathBuf> {
+    let output = Command::new("rig").args(["list", "--json"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let versions: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let default = versions
+        .as_array()?
+        .iter()
+        .find(|version| version.get("default").and_then(|value| value.as_bool()) == Some(true))?;
+    let binary = default.get("binary")?.as_str()?;
+    let rscript = Path::new(binary).with_file_name("Rscript.exe");
+    rscript.exists().then_some(rscript)
 }
 
 fn normalize_cli_output(output: &[u8]) -> String {
@@ -155,18 +182,17 @@ fn default_r_version() -> Option<String> {
 
 #[test]
 fn ci_dependencies_are_available() {
-    let r_expr = r#"
-pkgs <- c(
-  "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
-  "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown", "quarto",
-  "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
-)
-missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing)) {
-  stop("missing R packages: ", paste(missing, collapse = ", "), call. = FALSE)
-}
-cat("ir.fixture=ci-deps\n")
-"#;
+    let r_expr = concat!(
+        "pkgs <- c(",
+        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
+        "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
+        "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits'); ",
+        "missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; ",
+        "if (length(missing)) { ",
+        "stop('missing R packages: ', paste(missing, collapse = ', '), call. = FALSE) ",
+        "}; ",
+        "cat('ir.fixture=ci-deps\\n')",
+    );
 
     let mut r = Command::new(rscript());
     r.args(["-e", r_expr]);
@@ -501,7 +527,7 @@ library(cli)
 library(glue)
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, c("cli", "glue")), mustWork = TRUE)
-pkg_in_cache <- path.package(c("cli", "glue")) == expected
+pkg_in_cache <- normalizePath(path.package(c("cli", "glue")), mustWork = TRUE) == expected
 cat("ir.fixture=inline\n")
 cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
 cat("inline.lib_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")

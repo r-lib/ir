@@ -16,7 +16,7 @@ config <- py_config()
 
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, "reticulate"), mustWork = TRUE)
-pkg_in_cache <- path.package("reticulate") == expected
+pkg_in_cache <- normalizePath(path.package("reticulate"), mustWork = TRUE) == expected
 
 cat("ir.fixture=reticulate\n")
 cat("reticulate.lib_in_cache=", tolower(pkg_in_cache), "\n", sep = "")
