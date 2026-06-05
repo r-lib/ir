@@ -567,9 +567,11 @@ cat("ir.fixture=normalized-cache\n")
 fn run_quarto_fixture_injects_rmarkdown_and_renders() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
+    let cache_dir = unique_dir("ir-e2e-qmd-cache");
 
     let out = ir()
         .current_dir(&fixture_dir)
+        .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--isolated"])
         .arg("report.qmd")
         .args(["--to", "html"])
@@ -594,6 +596,7 @@ fn run_quarto_fixture_injects_rmarkdown_and_renders() {
 
     let _ = fs::remove_file(fixture_dir.join("report.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report_files"));
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 // report-pinned.qmd declares rmarkdown itself, so the injected seed is
@@ -897,6 +900,188 @@ fn tool_install_installs_real_package_entrypoint() {
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
 
     let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_and_install_support_package_exec_shebangs() {
+    let _guard = e2e_lock();
+    let fixture = dummy_tool_package();
+    let bin_dir = unique_dir("ir-e2e-tool-shebang-bin");
+
+    for executable in [
+        ("bash-tool", &["run", "bash"][..], "tool.fixture=bash"),
+        ("python-tool", &["run", "python"], "tool.fixture=python"),
+        ("r-tool", &["run", "r"], "tool.fixture=r"),
+        ("rapp-tool", &["--value", "run-rapp"], "tool.fixture=rapp"),
+        ("sh-tool", &["run", "sh"], "tool.fixture=sh"),
+    ] {
+        let out = ir()
+            .env("R_PROFILE_USER", &fixture.r_profile)
+            .env("IR_CACHE_DIR", &fixture.cache_dir)
+            .args([
+                "tool",
+                "run",
+                "--with",
+                "Rapp",
+                "--from",
+                &fixture.package_ref,
+            ])
+            .arg(executable.0)
+            .args(executable.1)
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, executable.2);
+    }
+
+    let out = ir()
+        .env("R_PROFILE_USER", &fixture.r_profile)
+        .env("IR_CACHE_DIR", &fixture.cache_dir)
+        .args(["tool", "install", "--with", "Rapp", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg(&fixture.package_ref)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed 5 executables");
+
+    for executable in [
+        ("bash-tool", &["install", "bash"][..], "tool.fixture=bash"),
+        ("python-tool", &["install", "python"], "tool.fixture=python"),
+        ("r-tool", &["install", "r"], "tool.fixture=r"),
+        (
+            "rapp-tool",
+            &["--value", "install-rapp"],
+            "tool.fixture=rapp",
+        ),
+        ("sh-tool", &["install", "sh"], "tool.fixture=sh"),
+    ] {
+        let out = Command::new(launcher_path(&bin_dir, executable.0))
+            .args(executable.1)
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, executable.2);
+    }
+
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&fixture.root);
+}
+
+#[cfg(unix)]
+struct DummyToolPackage {
+    root: PathBuf,
+    r_profile: PathBuf,
+    cache_dir: PathBuf,
+    package_ref: String,
+}
+
+#[cfg(unix)]
+fn dummy_tool_package() -> DummyToolPackage {
+    let root = unique_dir("ir-e2e-tool-shebang-pkg");
+    let package = root.join("irtoolfixture");
+    let exec = package.join("exec");
+    fs::create_dir_all(&exec).unwrap();
+    fs::create_dir_all(package.join("R")).unwrap();
+    fs::write(
+        package.join("DESCRIPTION"),
+        concat!(
+            "Package: irtoolfixture\n",
+            "Type: Package\n",
+            "Title: ir Tool Fixture\n",
+            "Version: 0.0.1\n",
+            "Authors@R: person(\"Test\", \"Fixture\", role = c(\"aut\", \"cre\"), email = \"test@example.com\")\n",
+            "Description: Exercises package exec launchers.\n",
+            "License: MIT\n",
+            "Encoding: UTF-8\n"
+        ),
+    )
+    .unwrap();
+    fs::write(package.join("NAMESPACE"), "").unwrap();
+    fs::write(package.join("R").join("placeholder.R"), "").unwrap();
+
+    write_executable(
+        &exec.join("bash-tool"),
+        "#!/usr/bin/env bash\nprintf 'tool.fixture=bash\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
+    );
+    write_executable(
+        &exec.join("python-tool"),
+        "#!/usr/bin/env python3\nimport sys\nprint('tool.fixture=python')\nprint('tool.args=' + '|'.join(sys.argv[1:]))\n",
+    );
+    write_executable(
+        &exec.join("r-tool.R"),
+        "#!/usr/bin/env Rscript\ncat('tool.fixture=r\\n')\ncat('tool.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = '')\n",
+    );
+    write_executable(
+        &exec.join("rapp-tool.R"),
+        "#!/usr/bin/env Rapp\n#| name: rapp-tool\n#| description: Exercise Rapp dispatch.\n\n#| description: Value to echo\nvalue <- 'default'\n\ncat('tool.fixture=rapp\\n')\ncat('tool.value=', value, '\\n', sep = '')\n",
+    );
+    write_executable(
+        &exec.join("sh-tool"),
+        "#!/bin/sh\nprintf 'tool.fixture=sh\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
+    );
+
+    let repo = root.join("repo").join("src").join("contrib");
+    fs::create_dir_all(&repo).unwrap();
+    let build_repo = Command::new(rscript())
+        .arg("-e")
+        .arg(
+            r#"
+root <- Sys.getenv("IR_TEST_ROOT")
+package <- file.path(root, "irtoolfixture")
+repo <- Sys.getenv("IR_TEST_REPO")
+old <- setwd(root)
+on.exit(setwd(old), add = TRUE)
+r <- file.path(R.home("bin"), "R")
+output <- system2(r, c("CMD", "build", basename(package), "--no-manual", "--no-build-vignettes"),
+                  stdout = TRUE, stderr = TRUE)
+status <- attr(output, "status")
+if (!is.null(status) && status != 0L) {
+  writeLines(output)
+  quit(status = status)
+}
+tarball <- file.path(root, "irtoolfixture_0.0.1.tar.gz")
+stopifnot(file.exists(tarball))
+stopifnot(file.copy(tarball, repo, overwrite = TRUE))
+tools::write_PACKAGES(repo, type = "source")
+"#,
+        )
+        .env("IR_TEST_ROOT", &root)
+        .env("IR_TEST_REPO", &repo)
+        .output()
+        .unwrap();
+    assert_success(&build_repo);
+
+    let r_profile = root.join("repos.R");
+    fs::write(
+        &r_profile,
+        format!(
+            "options(repos = c(IR_TEST = 'file://{}', CRAN = 'https://cran.r-project.org'))\n",
+            root.join("repo").display()
+        ),
+    )
+    .unwrap();
+
+    DummyToolPackage {
+        cache_dir: root.join("cache"),
+        root,
+        r_profile,
+        package_ref: "irtoolfixture".to_string(),
+    }
+}
+
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, contents).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {

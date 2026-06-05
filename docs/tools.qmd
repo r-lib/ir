@@ -10,7 +10,7 @@ $ ir tool run btw --help
 $ ir tool run --from github::r-lib/Rapp Rapp
 ```
 
-For `ir tool run --from pkg tool`, `ir` installs `pkg`, finds `exec/tool` or `exec/tool.R`, and launches it with the selected Rscript. The executable must use a shebang that names `Rscript` or `Rapp`. A bare self-named package ref such as `ir tool run btw` is shorthand for `ir tool run --from btw btw`.
+For `ir tool run --from pkg tool`, `ir` installs `pkg`, finds `exec/tool` or `exec/tool.R`, and launches it. Rscript and Rapp entries use the selected Rscript; other directly executable entries run as ordinary executables. A bare self-named package ref such as `ir tool run btw` is shorthand for `ir tool run --from btw btw`.
 
 Tool runs support the same dependency and R selection flags as script runs:
 
@@ -24,7 +24,7 @@ Package refs use pak syntax. Quote refs when the shell would otherwise interpret
 
 ## Install launchers
 
-`ir tool install` resolves a package, scans that package's `exec/` directory, and writes launchers for the executables it finds.
+`ir tool install` resolves a package, scans that package's `exec/` directory, and writes launchers for the supported executables it finds.
 
 ```console
 $ ir tool install btw

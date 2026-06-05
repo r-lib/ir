@@ -43,16 +43,18 @@ $ ir tool install github::r-lib/Rapp
 ```
 
 For `ir tool run --from pkg tool`, `ir` resolves `pkg`, finds `exec/tool` or
-`exec/tool.R` in the installed package, and launches that file with the selected
-Rscript. The package ref can be a pak package ref or supported version spec. Use
-quotes when the shell would otherwise interpret characters such as `>`.
+`exec/tool.R` in the installed package, and launches it. Rscript and Rapp
+entries use the selected Rscript; other directly executable entries run as
+ordinary executables. The package ref can be a pak package ref or supported
+version spec. Use quotes when the shell would otherwise interpret characters
+such as `>`.
 
 For `ir tool install pkg-ref`, `ir` resolves `pkg-ref`, scans that package's
-`exec/` directory for files whose shebang names `Rscript` or `Rapp`, and writes
-launchers into `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`,
-`XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix. Use `--bin-dir <dir>` for an
-explicit destination and `--force` to overwrite existing launcher paths. On
-Windows, the default launcher directory is
+`exec/` directory for supported executables, and writes launchers into
+`IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or
+`~/.local/bin` on Unix. Use `--bin-dir <dir>` for an explicit destination and
+`--force` to overwrite existing launcher paths. On Windows, the default
+launcher directory is
 `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to
 `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`. `--with` and `--r-version`
 are recorded in the launcher recovery command. The launchers pin `R_LIBS` to
@@ -102,13 +104,13 @@ the resolved `ir` cache library and set `R_LIBS_USER=NULL`; if
      other libraries remain available as a fallback. With `--isolated`, the user
      library is dropped (`R_LIBS_USER=NULL`); the system library stays on the
      path. See [Isolated runs](#isolated-runs).
-   - Package executables use their shebang to choose Rscript or Rapp execution.
-     `R_LIBS` points to the resolved library, `R_LIBS_USER` is set to `NULL`,
-     and `PATH` is prepended with the resolved package `exec/` directories plus
-     the directory that contains the selected Rscript when it is path-like.
-   - Installed tool launchers use the same Rscript/Rapp dispatch, but keep the
-     resolved library path in the launcher so the tool can be run directly from
-     `PATH`.
+   - Package executables with Rscript or Rapp shebangs use the selected Rscript;
+     other directly executable entries run directly. `R_LIBS` points to the
+     resolved library, `R_LIBS_USER` is set to `NULL`, and `PATH` is prepended
+     with the resolved package `exec/` directories plus the directory that
+     contains the selected Rscript when it is path-like.
+   - Installed tool launchers use the same dispatch, but keep the resolved
+     library path in the launcher so the tool can be run directly from `PATH`.
 
 Libraries are content-addressed: two scripts that resolve to the same set of
 package versions share one materialised library, and the individual packages
@@ -220,10 +222,10 @@ and `pkg!=1.2`, are not resolved by `ir`.
   ref such as `ir tool run btw` is treated as `ir tool run --from btw btw`.
 
 - **`ir tool install <pkg-ref>`** resolves a package ref and installs launchers
-  for every supported `Rscript` or `Rapp` executable in that package's `exec/`
-  directory. Remote refs work directly, for example `ir tool install
-  github::r-lib/Rapp`. `--with` and `--r-version` are resolved at install time
-  and recorded in the launchers' recovery command.
+  for supported executables in that package's `exec/` directory. Remote refs
+  work directly, for example `ir tool install github::r-lib/Rapp`. `--with` and
+  `--r-version` are resolved at install time and recorded in the launchers'
+  recovery command.
 
 - **`--with <pkg>`** adds a dependency for this run. It can be repeated and
   accepts a comma-separated list (`--with dplyr,tidyr`), and uses the same spec

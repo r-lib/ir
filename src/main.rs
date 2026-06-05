@@ -31,7 +31,7 @@ use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -771,7 +771,7 @@ fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
     let executables = discover_package_executables(&library, &package_name)?;
     if executables.is_empty() {
         return Err(format!(
-            "package `{}` does not expose Rscript or Rapp executables in `{}`",
+            "package `{}` does not expose supported executables in `{}`",
             package_name,
             library.join(&package_name).join("exec").display()
         )
@@ -1105,13 +1105,29 @@ fn run_package_executable(
     launcher_name: &str,
 ) -> Result<i32, Box<dyn Error>> {
     let launcher = package_executable_launcher(executable)?;
-    let mut cmd = Command::new(rscript);
-    cmd.args(rscript_args);
+    let launch_program: &OsStr;
+    let mut cmd;
     match launcher {
+        PackageLauncher::Direct => {
+            if !rscript_args.is_empty() {
+                return Err(
+                    "Rscript options are only supported for Rscript and Rapp package executables"
+                        .into(),
+                );
+            }
+            launch_program = executable.as_os_str();
+            cmd = Command::new(executable);
+        }
         PackageLauncher::Rscript => {
+            launch_program = rscript;
+            cmd = Command::new(rscript);
+            cmd.args(rscript_args);
             cmd.arg(executable);
         }
         PackageLauncher::Rapp => {
+            launch_program = rscript;
+            cmd = Command::new(rscript);
+            cmd.args(rscript_args);
             cmd.arg("-e").arg("Rapp::run()").arg(executable);
         }
     }
@@ -1124,18 +1140,27 @@ fn run_package_executable(
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        Err(spawn_error(rscript, cmd.exec()).into())
+        let err = cmd.exec();
+        let message = match launcher {
+            PackageLauncher::Direct => executable_spawn_error(launch_program, err),
+            PackageLauncher::Rscript | PackageLauncher::Rapp => spawn_error(rscript, err),
+        };
+        Err(message.into())
     }
 
     #[cfg(not(unix))]
     {
-        let status = cmd.status().map_err(|e| spawn_error(rscript, e))?;
+        let status = cmd.status().map_err(|e| match launcher {
+            PackageLauncher::Direct => executable_spawn_error(launch_program, e),
+            PackageLauncher::Rscript | PackageLauncher::Rapp => spawn_error(rscript, e),
+        })?;
         Ok(status.code().unwrap_or(1))
     }
 }
 
 #[derive(Clone, Copy)]
 enum PackageLauncher {
+    Direct,
     Rscript,
     Rapp,
 }
@@ -1143,7 +1168,7 @@ enum PackageLauncher {
 fn package_executable_launcher(executable: &Path) -> Result<PackageLauncher, Box<dyn Error>> {
     package_executable_launcher_kind(executable)?.ok_or_else(|| {
         format!(
-            "package executable `{}` must use a Rscript or Rapp shebang",
+            "package executable `{}` must use a Rscript/Rapp shebang or be directly executable",
             executable.display()
         )
         .into()
@@ -1153,29 +1178,65 @@ fn package_executable_launcher(executable: &Path) -> Result<PackageLauncher, Box
 fn package_executable_launcher_kind(
     executable: &Path,
 ) -> Result<Option<PackageLauncher>, Box<dyn Error>> {
-    let file = File::open(executable)
-        .map_err(|e| format!("cannot read executable `{}`: {e}", executable.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut shebang = String::new();
-    reader.read_line(&mut shebang)?;
-
-    if !shebang.starts_with("#!") {
-        return Ok(None);
-    }
+    let Some(shebang) = package_executable_shebang(executable)? else {
+        return if is_directly_executable(executable)? {
+            Ok(Some(PackageLauncher::Direct))
+        } else {
+            Ok(None)
+        };
+    };
 
     if shebang_mentions(&shebang, "Rapp") {
         Ok(Some(PackageLauncher::Rapp))
     } else if shebang_mentions(&shebang, "Rscript") {
         Ok(Some(PackageLauncher::Rscript))
+    } else if is_directly_executable(executable)? {
+        Ok(Some(PackageLauncher::Direct))
     } else {
         Ok(None)
     }
 }
 
-fn shebang_mentions(shebang: &str, name: &str) -> bool {
+fn package_executable_shebang(executable: &Path) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    let mut file = File::open(executable)
+        .map_err(|e| format!("cannot read executable `{}`: {e}", executable.display()))?;
+    let mut buffer = [0; 1024];
+    let len = file.read(&mut buffer)?;
+
+    if !buffer[..len].starts_with(b"#!") {
+        return Ok(None);
+    }
+
+    let line_end = buffer[..len]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .unwrap_or(len);
+    Ok(Some(buffer[..line_end].to_vec()))
+}
+
+fn shebang_mentions(shebang: &[u8], name: &str) -> bool {
+    let name = name.as_bytes();
     shebang
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .split(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
         .any(|word| word == name)
+}
+
+#[cfg(unix)]
+fn is_directly_executable(path: &Path) -> Result<bool, Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    Ok(fs::metadata(path)?.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_directly_executable(path: &Path) -> Result<bool, Box<dyn Error>> {
+    let Some(ext) = path.extension().and_then(OsStr::to_str) else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "bat" | "cmd" | "com" | "exe"
+    ))
 }
 
 fn read_script_spec(script: &Path, quarto: bool) -> Result<ScriptSpec, Box<dyn Error>> {
@@ -1668,12 +1729,17 @@ fn installed_launcher_contents(
         lines.push(format!("export PATH={prefix}${{PATH:+:$PATH}}"));
     }
 
-    let mut cmd = vec!["exec".to_string(), sh_quote_os(rscript)];
+    let mut cmd = vec!["exec".to_string()];
     match executable.launcher {
+        PackageLauncher::Direct => {
+            cmd.push(sh_quote_path(&executable.path));
+        }
         PackageLauncher::Rscript => {
+            cmd.push(sh_quote_os(rscript));
             cmd.push(sh_quote_path(&executable.path));
         }
         PackageLauncher::Rapp => {
+            cmd.push(sh_quote_os(rscript));
             cmd.push("-e".to_string());
             cmd.push(sh_quote_str("Rapp::run()"));
             cmd.push(sh_quote_path(&executable.path));
@@ -1693,12 +1759,17 @@ fn installed_launcher_contents(
     _path_prefix: &[PathBuf],
     recovery_command: &str,
 ) -> Result<String, Box<dyn Error>> {
-    let mut cmd = vec![cmd_quote_os(rscript)];
+    let mut cmd = Vec::new();
     match executable.launcher {
+        PackageLauncher::Direct => {
+            cmd.push(cmd_quote_path(&executable.path));
+        }
         PackageLauncher::Rscript => {
+            cmd.push(cmd_quote_os(rscript));
             cmd.push(cmd_quote_path(&executable.path));
         }
         PackageLauncher::Rapp => {
+            cmd.push(cmd_quote_os(rscript));
             cmd.push("-e".to_string());
             cmd.push("Rapp::run()".to_string());
             cmd.push(cmd_quote_path(&executable.path));
@@ -1807,5 +1878,16 @@ fn spawn_error(rscript: &OsStr, err: io::Error) -> String {
         )
     } else {
         format!("failed to launch `{}`: {err}", rscript.to_string_lossy())
+    }
+}
+
+fn executable_spawn_error(program: &OsStr, err: io::Error) -> String {
+    if err.kind() == io::ErrorKind::NotFound {
+        format!("could not find executable `{}`", program.to_string_lossy())
+    } else {
+        format!(
+            "failed to launch executable `{}`: {err}",
+            program.to_string_lossy()
+        )
     }
 }
