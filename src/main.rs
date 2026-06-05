@@ -24,8 +24,9 @@
 //!      materialises that path as a light-weight library of symlinks into renv's
 //!      package cache. The path is reported back to us.
 //!
-//!   2. We launch the user's script in a fresh, isolated R session whose
-//!      library path is exactly that library plus base R.
+//!   2. We launch the user's script in a fresh R session with that library
+//!      prepended to `.libPaths()`. With `--isolated`, the user library is
+//!      dropped.
 
 use std::env;
 use std::error::Error;
