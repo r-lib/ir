@@ -962,8 +962,8 @@ fn tool_run_and_install_support_package_exec_shebangs() {
         ("sh-tool", &["run", "sh"], "tool.fixture=sh"),
     ] {
         let out = ir()
-            .env("R_PROFILE_USER", &fixture.r_profile)
             .env("IR_CACHE_DIR", &fixture.cache_dir)
+            .env("RENV_PATHS_CACHE", &fixture.renv_cache_dir)
             .args([
                 "tool",
                 "run",
@@ -982,8 +982,8 @@ fn tool_run_and_install_support_package_exec_shebangs() {
     }
 
     let out = ir()
-        .env("R_PROFILE_USER", &fixture.r_profile)
         .env("IR_CACHE_DIR", &fixture.cache_dir)
+        .env("RENV_PATHS_CACHE", &fixture.renv_cache_dir)
         .args(["tool", "install", "--with", "Rapp", "--bin-dir"])
         .arg(&bin_dir)
         .arg(&fixture.package_ref)
@@ -1020,8 +1020,8 @@ fn tool_run_and_install_support_package_exec_shebangs() {
 #[cfg(unix)]
 struct DummyToolPackage {
     root: PathBuf,
-    r_profile: PathBuf,
     cache_dir: PathBuf,
+    renv_cache_dir: PathBuf,
     package_ref: String,
 }
 
@@ -1070,52 +1070,11 @@ fn dummy_tool_package() -> DummyToolPackage {
         "#!/bin/sh\nprintf 'tool.fixture=sh\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
     );
 
-    let repo = root.join("repo").join("src").join("contrib");
-    fs::create_dir_all(&repo).unwrap();
-    let build_repo = Command::new(rscript())
-        .arg("-e")
-        .arg(
-            r#"
-root <- Sys.getenv("IR_TEST_ROOT")
-package <- file.path(root, "irtoolfixture")
-repo <- Sys.getenv("IR_TEST_REPO")
-old <- setwd(root)
-on.exit(setwd(old), add = TRUE)
-r <- file.path(R.home("bin"), "R")
-output <- system2(r, c("CMD", "build", basename(package), "--no-manual", "--no-build-vignettes"),
-                  stdout = TRUE, stderr = TRUE)
-status <- attr(output, "status")
-if (!is.null(status) && status != 0L) {
-  writeLines(output)
-  quit(status = status)
-}
-tarball <- file.path(root, "irtoolfixture_0.0.1.tar.gz")
-stopifnot(file.exists(tarball))
-stopifnot(file.copy(tarball, repo, overwrite = TRUE))
-tools::write_PACKAGES(repo, type = "source")
-"#,
-        )
-        .env("IR_TEST_ROOT", &root)
-        .env("IR_TEST_REPO", &repo)
-        .output()
-        .unwrap();
-    assert_success(&build_repo);
-
-    let r_profile = root.join("repos.R");
-    fs::write(
-        &r_profile,
-        format!(
-            "options(repos = c(IR_TEST = 'file://{}', CRAN = 'https://cran.r-project.org'))\n",
-            root.join("repo").display()
-        ),
-    )
-    .unwrap();
-
     DummyToolPackage {
         cache_dir: root.join("cache"),
+        renv_cache_dir: root.join("renv-cache"),
         root,
-        r_profile,
-        package_ref: "irtoolfixture".to_string(),
+        package_ref: format!("local::{}", package.display()),
     }
 }
 

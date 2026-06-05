@@ -54,6 +54,25 @@ ir_resolve_refs <- function(refs) {
   res
 }
 
+ir_materialize_refs <- function(res) {
+  stopifnot(is.data.frame(res))
+
+  refs <- sprintf("%s@%s", res$package, res$version)
+  if (!"remote" %in% names(res)) return(refs)
+
+  local <- vapply(res$remote, function(remote) {
+    is.list(remote) &&
+      identical(remote$type, "local") &&
+      is.character(remote$ref) &&
+      length(remote$ref) == 1L &&
+      nzchar(remote$ref)
+  }, logical(1))
+  refs[local] <- vapply(res$remote[local], function(remote) {
+    remote$ref
+  }, character(1))
+  refs
+}
+
 ## --- cache location ---------------------------------------------------------
 
 # The cache root: the standard per-package user cache directory, overridable
@@ -254,7 +273,7 @@ ir_resolve_main <- function() {
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
-    resolved <- sort(unique(sprintf("%s@%s", res$package, res$version)))
+    resolved <- sort(unique(ir_materialize_refs(res)))
   }
 
   ## 3. Hash the resolved set -> content-addressed library path
