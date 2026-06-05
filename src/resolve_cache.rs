@@ -109,7 +109,6 @@ fn resolution_cache_key(
     if quarto {
         parts.push("quarto".to_string());
     }
-    parts.push("ir-resolution-v2".to_string());
     parts.push(format!("rscript: {rscript_identity}"));
 
     sha256_fields(&parts)
