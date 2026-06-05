@@ -957,12 +957,36 @@ fn dummy_tool_package() -> DummyToolPackage {
         &exec.join("sh-tool"),
         "#!/bin/sh\nprintf 'tool.fixture=sh\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
     );
+    let build_package = Command::new(rscript())
+        .arg("-e")
+        .arg(
+            r#"
+root <- Sys.getenv("IR_TEST_ROOT")
+old <- setwd(root)
+on.exit(setwd(old), add = TRUE)
+output <- system2(file.path(R.home("bin"), "R"),
+                  c("CMD", "build", "irtoolfixture", "--no-manual", "--no-build-vignettes"),
+                  stdout = TRUE, stderr = TRUE)
+status <- attr(output, "status")
+if (!is.null(status) && status != 0L) {
+  writeLines(output)
+  quit(status = status)
+}
+"#,
+        )
+        .env("IR_TEST_ROOT", &root)
+        .output()
+        .unwrap();
+    assert_success(&build_package);
 
     DummyToolPackage {
         cache_dir: root.join("cache"),
         renv_cache_dir: root.join("renv-cache"),
+        package_ref: format!(
+            "url::file://{}",
+            root.join("irtoolfixture_0.0.1.tar.gz").display()
+        ),
         root,
-        package_ref: format!("local::{}", package.display()),
     }
 }
 

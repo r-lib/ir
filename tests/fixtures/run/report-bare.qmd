@@ -8,7 +8,7 @@ format: html
 # the advisory) so the knitr engine has what it needs to render. Attach
 # rmarkdown so path.package can report where it loaded from, then confirm that
 # is ir's resolved run library (the first R_LIBS entry ir prepends). Both paths
-# are normalised so the renv symlink resolves to the same target on either side.
+# are normalised before comparison.
 suppressPackageStartupMessages(library("rmarkdown", character.only = TRUE))
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, "rmarkdown"), mustWork = TRUE)

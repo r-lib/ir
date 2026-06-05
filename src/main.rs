@@ -21,8 +21,8 @@
 //!      private R session (`driver/resolve.R`) receives the normalized pak refs on
 //!      stdin, resolves them with pak, hashes the resolved set into a
 //!      content-addressed library path under the cache directory, and
-//!      materialises that path as a light-weight library of symlinks into renv's
-//!      package cache. The path is reported back to us.
+//!      materialises that path as an isolated package library. The path is
+//!      reported back to us.
 //!
 //!   2. We launch the user's script in a fresh, isolated R session whose
 //!      library path is exactly that library plus base R.

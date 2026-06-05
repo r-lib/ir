@@ -10,8 +10,8 @@ ir:
 # The `quarto` package Imports rmarkdown, so the resolver finds rmarkdown
 # already in the resolved set and does not inject its own seed. Attach both and
 # confirm each loads from ir's resolved run library: the normalised
-# path.package location (renv symlink resolved) must equal the normalised run
-# library entry, proving the loaded package is that copy, not a system one.
+# path.package location must equal the normalised run library entry, proving the
+# loaded package is that copy, not a system one.
 pkgs <- c("quarto", "rmarkdown")
 suppressPackageStartupMessages(invisible(lapply(pkgs, library, character.only = TRUE)))
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]

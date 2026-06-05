@@ -9,8 +9,8 @@
 #   2. Resolve the declared dependencies into concrete versions with pak.
 #   3. Hash the resolved set to derive a content-addressed library path
 #      under <cache_dir>.
-#   4. Materialise that path as a light-weight library of symlinks into
-#      renv's package cache via renv::use().
+#   4. Materialise that path as an isolated library with renv configured to
+#      install through pak.
 #
 # The resulting library path is written to the temp result file named by
 # IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
@@ -54,23 +54,11 @@ ir_resolve_refs <- function(refs) {
   res
 }
 
-ir_materialize_refs <- function(res) {
+ir_cache_refs <- function(res) {
   stopifnot(is.data.frame(res))
 
-  refs <- sprintf("%s@%s", res$package, res$version)
-  if (!"remote" %in% names(res)) return(refs)
-
-  local <- vapply(res$remote, function(remote) {
-    is.list(remote) &&
-      identical(remote$type, "local") &&
-      is.character(remote$ref) &&
-      length(remote$ref) == 1L &&
-      nzchar(remote$ref)
-  }, logical(1))
-  refs[local] <- vapply(res$remote[local], function(remote) {
-    remote$ref
-  }, character(1))
-  refs
+  ref <- if ("ref" %in% names(res)) res$ref else rep("", nrow(res))
+  sprintf("%s@%s %s", res$package, res$version, ref)
 }
 
 ## --- cache location ---------------------------------------------------------
@@ -267,44 +255,44 @@ ir_resolve_main <- function() {
 
   if (is.null(res)) {
     pkgs     <- character()
-    resolved <- character()
+    cache_refs <- character()
   } else {
     # Drop base / recommended packages: those are supplied by R itself.
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
-    resolved <- sort(unique(ir_materialize_refs(res)))
+    cache_refs <- sort(unique(ir_cache_refs(res)))
   }
 
   ## 3. Hash the resolved set -> content-addressed library path
-  # Bind the hash to the R version and platform: the symlinks point into the
-  # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(resolved,
+  # Bind the hash to the R version and platform: installed package contents are
+  # only reusable within a compatible R version and platform.
+  key <- paste(c(cache_refs,
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
   library_path <- file.path(cache_dir, "libraries", secretbase::sha256(key))
 
-  ## 4. Materialise the symlinked library via renv::use()
+  ## 4. Materialise the library with renv using pak for installation
   # Skip when the library already holds every resolved package: repeat runs of
   # an unchanged script then cost nothing beyond resolution.
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
   have <- list.files(library_path)
   if (length(pkgs) && !all(pkgs %in% have)) {
-    # renv::use() installs into the renv cache and links the packages into
-    # `library` as symlinks. Because `library` lives in our cache (not the R
-    # temp dir), renv leaves it in place when the session ends.
-    do.call(renv::use, c(
-      as.list(resolved),
-      list(
-        library = library_path,
-        repos   = repos,
-        attach  = FALSE,
-        sandbox = FALSE,
-        isolate = TRUE,
-        verbose = TRUE
-      )
-    ))
+    # Keep install refs as close as possible to the user's refs. renv delegates
+    # installation to pak, which understands package sources such as local and
+    # URL refs without ir reconstructing those refs from pak's result table.
+    old_options <- options(renv.config.pak.enabled = TRUE)
+    on.exit(options(old_options), add = TRUE)
+    renv::install(
+      packages     = refs_in,
+      library      = library_path,
+      repos        = repos,
+      prompt       = FALSE,
+      dependencies = NA,
+      rebuild      = character(),
+      verbose      = TRUE
+    )
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
