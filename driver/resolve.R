@@ -93,12 +93,13 @@ ir_tooling_lib <- function(cache_dir = ir_cache_dir())
 # into the tooling library, which is then put first on the search path.
 ir_ensure_tooling <- function(cache_dir = ir_cache_dir(),
                               repos = ir_tooling_repos()) {
-  missing <- ir_missing_tooling()
-  if (!length(missing)) return(invisible())
-
   lib <- ir_tooling_lib(cache_dir)
   dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   .libPaths(c(lib, .libPaths()))
+
+  missing <- ir_missing_tooling()
+  if (!length(missing)) return(invisible())
+
   utils::install.packages(missing, lib = lib, repos = repos)
 
   still_missing <- ir_missing_tooling()

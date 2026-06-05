@@ -7,7 +7,7 @@
 library(jsonlite)
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, "jsonlite"), mustWork = TRUE)
-jsonlite_in_cache <- path.package("jsonlite") == expected
+jsonlite_in_cache <- normalizePath(path.package("jsonlite"), mustWork = TRUE) == expected
 
 cat("ir.fixture=r-version-frontmatter\n")
 cat("version.r_version=[", as.character(getRversion()), "]\n", sep = "")

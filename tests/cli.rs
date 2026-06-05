@@ -4,6 +4,7 @@
 //! shims. The end-to-end cases run real fixture scripts/documents through the
 //! compiled binary and assert marker lines printed by those public workflows.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -26,8 +27,40 @@ fn ir_bin_name() -> String {
         .into_owned()
 }
 
-fn rscript() -> String {
-    std::env::var("IR_RSCRIPT").unwrap_or_else(|_| "Rscript".into())
+fn rscript() -> OsString {
+    if let Some(rscript) = std::env::var_os("IR_RSCRIPT").filter(|value| !value.is_empty()) {
+        return rscript;
+    }
+
+    if let Some(rscript) = rig_default_rscript() {
+        return rscript.into_os_string();
+    }
+
+    "Rscript".into()
+}
+
+fn rig_default_rscript() -> Option<PathBuf> {
+    let output = Command::new("rig").args(["list", "--json"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let versions: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let default = versions
+        .as_array()?
+        .iter()
+        .find(|version| version.get("default").and_then(|value| value.as_bool()) == Some(true))?;
+    let rscript = rscript_from_r_binary(Path::new(default.get("binary")?.as_str()?));
+    rscript.exists().then_some(rscript)
+}
+
+fn rscript_from_r_binary(binary: &Path) -> PathBuf {
+    let mut name = OsString::from("Rscript");
+    if let Some(ext) = binary.extension() {
+        name.push(".");
+        name.push(ext);
+    }
+    binary.with_file_name(name)
 }
 
 fn normalize_cli_output(output: &[u8]) -> String {
@@ -121,22 +154,34 @@ fn assert_command_success(mut command: Command, label: &str) {
     );
 }
 
-fn python_minor_version() -> String {
+fn python_executable() -> PathBuf {
     for command in ["python3", "python"] {
         let output = Command::new(command)
-            .args([
-                "-c",
-                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
-            ])
+            .args(["-c", "import sys; print(sys.executable)"])
             .output();
         if let Ok(output) = output {
             if output.status.success() {
-                return String::from_utf8(output.stdout).unwrap().trim().to_string();
+                let executable = String::from_utf8(output.stdout).unwrap().trim().to_string();
+                if !executable.is_empty() {
+                    return PathBuf::from(executable);
+                }
             }
         }
     }
 
     panic!("python3 or python is required for the reticulate fixture");
+}
+
+fn python_minor_version() -> String {
+    let output = Command::new(python_executable())
+        .args([
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ])
+        .output()
+        .expect("failed to run python version probe");
+    assert_success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
 /// Version of the default R on `PATH` — the one `ir` uses without `--r-version`.
@@ -155,18 +200,17 @@ fn default_r_version() -> Option<String> {
 
 #[test]
 fn ci_dependencies_are_available() {
-    let r_expr = r#"
-pkgs <- c(
-  "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
-  "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown", "quarto",
-  "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
-)
-missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing)) {
-  stop("missing R packages: ", paste(missing, collapse = ", "), call. = FALSE)
-}
-cat("ir.fixture=ci-deps\n")
-"#;
+    let r_expr = concat!(
+        "pkgs <- c(",
+        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
+        "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
+        "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits'); ",
+        "missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; ",
+        "if (length(missing)) { ",
+        "stop('missing R packages: ', paste(missing, collapse = ', '), call. = FALSE) ",
+        "}; ",
+        "cat('ir.fixture=ci-deps\\n')",
+    );
 
     let mut r = Command::new(rscript());
     r.args(["-e", r_expr]);
@@ -496,18 +540,20 @@ fn run_script_uses_only_the_first_yaml_document() {
 #[test]
 fn run_inline_expression_resolves_with_dependencies() {
     let _guard = e2e_lock();
-    let expr = r#"
-library(cli)
-library(glue)
-lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
-expected <- normalizePath(file.path(lib, c("cli", "glue")), mustWork = TRUE)
-pkg_in_cache <- path.package(c("cli", "glue")) == expected
-cat("ir.fixture=inline\n")
-cat("inline.args=", paste(commandArgs(TRUE), collapse = "|"), "\n", sep = "")
-cat("inline.lib_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
-cat("inline.pkgs_in_cache=", tolower(all(pkg_in_cache)), "\n", sep = "")
-cat(glue::glue("inline.glue={1 + 1}\n"))
-"#;
+    let expr = concat!(
+        "{",
+        "library(cli); ",
+        "library(glue); ",
+        "lib <- strsplit(Sys.getenv('R_LIBS'), .Platform$path.sep, fixed = TRUE)[[1]][[1]]; ",
+        "expected <- normalizePath(file.path(lib, c('cli', 'glue')), mustWork = TRUE); ",
+        "pkg_in_cache <- normalizePath(path.package(c('cli', 'glue')), mustWork = TRUE) == expected; ",
+        "cat('ir.fixture=inline\\n'); ",
+        "cat('inline.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = ''); ",
+        "cat('inline.lib_in_cache=', tolower(all(pkg_in_cache)), '\\n', sep = ''); ",
+        "cat('inline.pkgs_in_cache=', tolower(all(pkg_in_cache)), '\\n', sep = ''); ",
+        "cat(glue::glue('inline.glue={1 + 1}\\n'))",
+        "}",
+    );
 
     let out = ir()
         .args([
@@ -535,10 +581,7 @@ cat(glue::glue("inline.glue={1 + 1}\n"))
 fn run_normalizes_version_specs_before_resolution_cache_keying() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-ref-normalized-cache");
-    let expr = r#"
-library(cli)
-cat("ir.fixture=normalized-cache\n")
-"#;
+    let expr = "{ library(cli); cat('ir.fixture=normalized-cache\\n') }";
 
     for dep in ["cli==3.6.6", "cli@3.6.6"] {
         let out = ir()
@@ -829,6 +872,8 @@ fn run_reticulate_fixture_imports_python_module() {
         cmd.env("IR_TEST_RETICULATE_MANAGED", "1")
             .env("IR_TEST_PYTHON_VERSION", python_minor_version())
             .env("RETICULATE_PYTHON", "managed");
+    } else {
+        cmd.env("RETICULATE_PYTHON", python_executable());
     }
 
     let out = cmd

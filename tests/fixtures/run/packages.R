@@ -9,7 +9,7 @@ pkgs <- c("dplyr", "tidyr", "glue", "jsonlite")
 suppressPackageStartupMessages(invisible(lapply(pkgs, library, character.only = TRUE)))
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
 expected <- normalizePath(file.path(lib, pkgs), mustWork = TRUE)
-pkg_in_cache <- setNames(path.package(pkgs) == expected, pkgs)
+pkg_in_cache <- setNames(normalizePath(path.package(pkgs), mustWork = TRUE) == expected, pkgs)
 
 data <- dplyr::tibble(group = c("a", "b", "a"), value = c(1L, 2L, 3L)) |>
   dplyr::group_by(group) |>
