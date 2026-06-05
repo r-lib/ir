@@ -10,7 +10,7 @@ use std::time::UNIX_EPOCH;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-pub(crate) struct Entry {
+pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
     pub(crate) package_marker: Option<PathBuf>,
     pub(crate) advisory_marker: PathBuf,
@@ -21,12 +21,12 @@ pub(crate) struct CachedResolution {
     pub(crate) primary_package: Option<String>,
 }
 
-pub(crate) fn entry(
+pub(crate) fn paths(
     rscript: &OsStr,
     dependencies: &[String],
     exclude_newer: Option<&str>,
     quarto: bool,
-) -> Result<Option<Entry>, Box<dyn Error>> {
+) -> Result<Option<Paths>, Box<dyn Error>> {
     let Some(rscript_identity) = rscript_identity(rscript) else {
         return Ok(None);
     };
@@ -47,7 +47,7 @@ pub(crate) fn entry(
     });
     let advisory_marker = marker.with_file_name(format!("{marker_name}-advisory"));
 
-    Ok(Some(Entry {
+    Ok(Some(Paths {
         marker,
         package_marker,
         advisory_marker,
@@ -55,7 +55,7 @@ pub(crate) fn entry(
 }
 
 pub(crate) fn read(
-    cache: Option<&Entry>,
+    cache: Option<&Paths>,
     primary_package: bool,
 ) -> Result<Option<CachedResolution>, Box<dyn Error>> {
     let Some(cache) = cache else {
@@ -98,7 +98,7 @@ pub(crate) fn read(
     }))
 }
 
-fn replay_advisory(cache: &Entry) -> Result<(), Box<dyn Error>> {
+fn replay_advisory(cache: &Paths) -> Result<(), Box<dyn Error>> {
     if !cache.advisory_marker.exists() {
         return Ok(());
     }
