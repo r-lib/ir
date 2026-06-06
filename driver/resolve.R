@@ -203,10 +203,9 @@ ir_resolve_main <- function() {
 
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
   if (is.null(package_marker) && !is.null(primary_ref)) {
-    file.path(cache_dir, "resolutions",
-              paste0(basename(marker), "-primary-", secretbase::sha256(primary_ref)))
-  } else {
-    package_marker
+    package_marker <- file.path(cache_dir, "resolutions",
+                                paste0(basename(marker), "-primary-",
+                                       secretbase::sha256(primary_ref)))
   }
   if (file.exists(marker)) {
     cached <- readLines(marker, n = 2L, warn = FALSE)

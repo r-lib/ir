@@ -1020,6 +1020,48 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn tool_install_with_rscript_wrapper_records_primary_package_marker() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-wrapper-tool-install-cache");
+    let bin_dir = unique_dir("ir-wrapper-tool-install-bin");
+    let wrapper = unique_path("ir-rscript-wrapper", "sh");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\nexec \"$IR_TEST_RSCRIPT_TARGET\" \"$@\"\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&wrapper, permissions).unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &wrapper)
+        .env("IR_TEST_RSCRIPT_TARGET", rscript())
+        .args([
+            "tool",
+            "install",
+            "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--bin-dir",
+        ])
+        .arg(&bin_dir)
+        .arg("cli")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed");
+
+    let _ = fs::remove_file(&wrapper);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {
     #[cfg(unix)]
     {
