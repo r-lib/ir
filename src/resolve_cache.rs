@@ -22,6 +22,7 @@ pub(crate) struct CachedResolution {
 }
 
 pub(crate) fn paths(
+    cache_dir: &Path,
     rscript: &OsStr,
     dependencies: &[String],
     exclude_newer: Option<&str>,
@@ -31,7 +32,6 @@ pub(crate) fn paths(
         return Ok(None);
     };
 
-    let cache_dir = crate::ir_cache_dir()?;
     let source = resolution_cache_source(exclude_newer);
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,

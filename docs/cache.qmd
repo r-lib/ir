@@ -4,6 +4,8 @@ title: "Cache"
 
 `ir` caches both dependency resolution and materialised package libraries.
 
+Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DIR`. This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
+
 Resolution requests are keyed by declared dependencies, resolution source, and selected R executable. If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again. Latest resolution records the current UTC date inside the cache marker; stale latest markers are refreshed in place, so newly published versions are picked up at most once per day without accumulating one marker per day. Snapshot resolution uses the `exclude-newer` date in the key because that repository state is immutable.
 
 Materialised libraries are content-addressed by the resolved package set, R version, and platform. Scripts or tools that resolve to the same set share one library.

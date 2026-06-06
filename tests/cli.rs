@@ -340,7 +340,7 @@ fn malformed_frontmatter_errors_before_resolution() {
 }
 
 #[test]
-fn cache_dir_reports_override_and_real_r_default() {
+fn cache_dir_reports_override_and_process_env_defaults() {
     let cache_dir = unique_dir("ir-cache-override");
 
     let out = ir()
@@ -351,47 +351,68 @@ fn cache_dir_reports_override_and_real_r_default() {
     assert_success(&out);
     assert_eq!(stdout(&out), format!("{}\n", cache_dir.display()));
 
-    let expected = Command::new(rscript())
-        .args(["-e", "writeLines(tools::R_user_dir(\"ir\", \"cache\"))"])
-        .output()
-        .expect("failed to run Rscript");
-    assert_success(&expected);
-
+    let r_user_cache_dir = unique_dir("ir-cache-r-user");
     let out = ir()
         .env_remove("IR_CACHE_DIR")
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .args(["cache", "dir"])
         .output()
         .unwrap();
     assert_success(&out);
     assert_eq!(
         normalize_path_output(&out),
-        normalize_path_output(&expected)
+        r_user_cache_dir
+            .join("R")
+            .join("ir")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+
+    let xdg_cache_home = unique_dir("ir-cache-xdg-default");
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_eq!(
+        normalize_path_output(&out),
+        xdg_cache_home
+            .join("R")
+            .join("ir")
+            .to_string_lossy()
+            .replace('\\', "/")
     );
 
     let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&r_user_cache_dir);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 #[test]
-fn cache_dir_honors_r_user_cache_dir_from_r_environ_user() {
-    let cache_dir = unique_dir("ir-cache-renviron");
+fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
+    let xdg_cache_home = unique_dir("ir-cache-xdg");
+    let renviron_cache = unique_dir("ir-cache-renviron");
     let renviron = unique_path("ir-cache-renviron", "Renviron");
     fs::write(
         &renviron,
-        format!("R_USER_CACHE_DIR={}\n", cache_dir.display()),
+        format!("R_USER_CACHE_DIR={}\n", renviron_cache.display()),
     )
     .unwrap();
 
     let out = ir()
         .env_remove("IR_CACHE_DIR")
         .env_remove("R_USER_CACHE_DIR")
-        .env_remove("XDG_CACHE_HOME")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
         .env("R_ENVIRON_USER", &renviron)
         .args(["cache", "dir"])
         .output()
         .unwrap();
     assert_success(&out);
 
-    let expected = cache_dir
+    let expected = xdg_cache_home
         .join("R")
         .join("ir")
         .to_string_lossy()
@@ -399,7 +420,8 @@ fn cache_dir_honors_r_user_cache_dir_from_r_environ_user() {
     assert_eq!(normalize_path_output(&out), expected);
 
     let _ = fs::remove_file(&renviron);
-    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&renviron_cache);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 #[test]
@@ -614,6 +636,60 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
     );
 
     let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_passes_rust_owned_cache_dir_to_resolver() {
+    let _guard = e2e_lock();
+    let xdg_cache_home = unique_dir("ir-rust-owned-cache-xdg");
+    let renviron_cache = unique_dir("ir-rust-owned-cache-renviron");
+    let renviron = unique_path("ir-rust-owned-cache", "Renviron");
+    fs::write(
+        &renviron,
+        format!("R_USER_CACHE_DIR={}\n", renviron_cache.display()),
+    )
+    .unwrap();
+    let expr = "{ library(cli); cat('ir.fixture=rust-owned-cache\\n') }";
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .env("R_ENVIRON_USER", &renviron)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=rust-owned-cache");
+    assert!(
+        xdg_cache_home
+            .join("R")
+            .join("ir")
+            .join("resolutions")
+            .is_dir(),
+        "resolver should write markers under the Rust-owned cache root"
+    );
+    assert!(
+        !renviron_cache
+            .join("R")
+            .join("ir")
+            .join("resolutions")
+            .exists(),
+        "R startup files should not redirect the resolver cache"
+    );
+
+    let _ = fs::remove_file(&renviron);
+    let _ = fs::remove_dir_all(&renviron_cache);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 // report.qmd deliberately does NOT declare rmarkdown, so the render only

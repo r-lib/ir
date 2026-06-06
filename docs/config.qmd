@@ -30,7 +30,7 @@ The installers download the latest release archive and install `ir` into `~/.loc
 
 | Variable          | Used by           | Default                                          |
 | ----------------- | ----------------- | ------------------------------------------------ |
-| `IR_CACHE_DIR`    | all commands      | R's `tools::R_user_dir("ir", "cache")` convention |
+| `IR_CACHE_DIR`    | all commands      | Rust-owned per-user cache root                    |
 | `IR_RSCRIPT`      | runs without `r-version` | rig's default R install, then `Rscript` on `PATH` |
 | `IR_QUARTO`       | Quarto rendering  | `quarto` on `PATH`                               |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override                |
@@ -40,6 +40,6 @@ The installers download the latest release archive and install `ir` into `~/.loc
 | `LOCALAPPDATA`    | `ir tool install` on Windows | `%LOCALAPPDATA%\Programs\R\ir\bin`     |
 | `USERPROFILE`     | `ir tool install` on Windows | fallback under `%USERPROFILE%\AppData` |
 
-The default cache directory follows R's per-package convention and honors R's `R_USER_CACHE_DIR`.
+The default cache directory is computed before launching R. `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`. The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
 
 `IR_RSCRIPT` is ignored when `r-version` is set, because version selection is resolved through `rig`. `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.

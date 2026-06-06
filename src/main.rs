@@ -29,7 +29,6 @@
 //!      prepended to `.libPaths()`. With `--isolated`, the user library is
 //!      dropped.
 
-use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
@@ -859,7 +858,9 @@ fn resolve_library_inner(
     primary_package: bool,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let dependencies = normalized_dependencies(&spec.dependencies);
+    let cache_dir = ir_cache_dir()?;
     let resolution_cache_paths = resolve_cache::paths(
+        &cache_dir,
         rscript,
         &dependencies,
         spec.exclude_newer.as_deref(),
@@ -884,6 +885,7 @@ fn resolve_library_inner(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .env("IR_RESOLVE_RESULT_FILE", &result_file)
+        .env("IR_CACHE_DIR", &cache_dir)
         // pak suppresses progress in noninteractive Rscript unless this is set.
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
         .env("R_PKG_SHOW_PROGRESS", "true");
@@ -1535,8 +1537,9 @@ fn rscript_command() -> OsString {
     rig::default_rscript().unwrap_or_else(|| "Rscript".into())
 }
 
-/// The `ir` cache root, matching R's `tools::R_user_dir("ir", "cache")`
-/// convention unless `IR_CACHE_DIR` overrides it.
+/// The Rust-owned `ir` cache root. `IR_CACHE_DIR` overrides it; otherwise it
+/// follows R's per-package cache layout from the process environment and
+/// platform defaults.
 fn ir_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     if let Some(path) = nonempty_env("IR_CACHE_DIR") {
         return Ok(PathBuf::from(path));
@@ -1550,17 +1553,10 @@ fn nonempty_env(name: &str) -> Option<OsString> {
 }
 
 fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
-    let cache_env = r_cache_env()?;
-    if let Some(path) = cache_env
-        .get("R_USER_CACHE_DIR")
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(path) = nonempty_env("R_USER_CACHE_DIR") {
         return Ok(PathBuf::from(path));
     }
-    if let Some(path) = cache_env
-        .get("XDG_CACHE_HOME")
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(path) = nonempty_env("XDG_CACHE_HOME") {
         return Ok(PathBuf::from(path));
     }
 
@@ -1582,145 +1578,6 @@ fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     {
         Ok(home_dir()?.join(".cache"))
     }
-}
-
-fn r_cache_env() -> Result<HashMap<String, String>, Box<dyn Error>> {
-    let mut vars = HashMap::new();
-    for (key, value) in env::vars_os() {
-        let Some(key) = key.to_str() else {
-            continue;
-        };
-        let Some(value) = value.to_str() else {
-            continue;
-        };
-        vars.insert(key.to_string(), value.to_string());
-    }
-
-    if let Some(path) = r_user_renviron_path()? {
-        apply_renviron(&path, &mut vars)?;
-    }
-
-    Ok(vars)
-}
-
-fn r_user_renviron_path() -> Result<Option<PathBuf>, Box<dyn Error>> {
-    if let Some(path) = env::var_os("R_ENVIRON_USER") {
-        if path.is_empty() {
-            return Ok(None);
-        }
-        return Ok(Some(expand_home(path)?));
-    }
-
-    let cwd_renviron = PathBuf::from(".Renviron");
-    if cwd_renviron.is_file() {
-        return Ok(Some(cwd_renviron));
-    }
-
-    let home_renviron = home_dir()?.join(".Renviron");
-    Ok(home_renviron.is_file().then_some(home_renviron))
-}
-
-fn apply_renviron(path: &Path, vars: &mut HashMap<String, String>) -> Result<(), Box<dyn Error>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(format!("failed to read `{}`: {e}", path.display()).into()),
-    };
-
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        let name = name.trim();
-        if name.is_empty() {
-            continue;
-        }
-
-        let value = renviron_value(value.trim(), vars);
-        if !value.is_empty() {
-            vars.insert(name.to_string(), value);
-        }
-    }
-
-    Ok(())
-}
-
-fn renviron_value(value: &str, vars: &HashMap<String, String>) -> String {
-    let value = expand_renviron_vars(value, vars);
-    let value = value.trim();
-    let quoted = (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''));
-    if quoted && value.len() >= 2 {
-        value[1..value.len() - 1].to_string()
-    } else {
-        value.to_string()
-    }
-}
-
-fn expand_renviron_vars(value: &str, vars: &HashMap<String, String>) -> String {
-    let mut expanded = String::new();
-    let mut rest = value;
-
-    while let Some(start) = rest.find("${") {
-        expanded.push_str(&rest[..start]);
-        let term = &rest[start + 2..];
-        let Some(end) = term.find('}') else {
-            expanded.push_str(&rest[start..]);
-            return expanded;
-        };
-        expanded.push_str(&expand_renviron_term(&term[..end], vars));
-        rest = &term[end + 1..];
-    }
-
-    expanded.push_str(rest);
-    expanded
-}
-
-fn expand_renviron_term(term: &str, vars: &HashMap<String, String>) -> String {
-    let term = term.trim();
-    let Some(default_start) = term.find('-') else {
-        return vars.get(term).cloned().unwrap_or_default();
-    };
-
-    let mut name = term[..default_start].trim();
-    let default = &term[default_start + 1..];
-    let require_nonempty = name.ends_with(':');
-    if require_nonempty {
-        name = name[..name.len() - 1].trim_end();
-    }
-
-    if let Some(value) = vars.get(name) {
-        if !require_nonempty || !value.is_empty() {
-            return value.clone();
-        }
-    }
-
-    expand_renviron_vars(default, vars)
-}
-
-fn expand_home(path: OsString) -> Result<PathBuf, Box<dyn Error>> {
-    let Some(path_str) = path.to_str() else {
-        return Ok(PathBuf::from(path));
-    };
-    if path_str == "~" {
-        return home_dir();
-    }
-    if let Some(rest) = path_str.strip_prefix("~/") {
-        return Ok(home_dir()?.join(rest));
-    }
-
-    #[cfg(windows)]
-    {
-        if let Some(rest) = path_str.strip_prefix("~\\") {
-            return Ok(home_dir()?.join(rest));
-        }
-    }
-
-    Ok(PathBuf::from(path))
 }
 
 fn home_dir() -> Result<PathBuf, Box<dyn Error>> {
