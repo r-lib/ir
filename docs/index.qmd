@@ -7,10 +7,11 @@ subtitle: "Self-describing R scripts, cached package libraries, and reproducible
 
 ```r
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - dplyr>=1.0
 #|   - tidyr
 #| r-version: ">= 4.0"
+#| isolated: true
 #| exclude-newer: "2024-01-15"
 
 library(dplyr)
@@ -21,12 +22,12 @@ library(tidyr)
 
 ## Features
 
-- Declare dependencies in script frontmatter and run the file directly with `ir run`.
+- Declare package requirements in script frontmatter and run the file directly with `ir run`.
 - Resolve packages once, then reuse content-addressed cached libraries on later runs.
 - Pin CRAN resolution to a Posit Package Manager snapshot with `exclude-newer`.
 - Select installed R versions with `--r-version` or frontmatter `r-version`.
-- Evaluate inline expressions with `ir run -e` and add command-line dependencies with `--with`.
-- Render Quarto documents through `ir run report.qmd` using the same dependency metadata model, with `rmarkdown` seeded automatically for the knitr engine.
+- Evaluate inline expressions with `ir run -e` and add command-line packages with `--with`.
+- Render Quarto documents through `ir run report.qmd` using the same package metadata model, with `rmarkdown` seeded automatically for the knitr engine.
 - Run package-shipped executables from an installed package's `exec/` directory with `ir tool run`.
 - Install persistent launchers for package executables with `ir tool install`.
 - Inspect and clear the cache with `ir cache dir` and `ir cache clean`.

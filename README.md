@@ -8,10 +8,11 @@ that library ready to use.
 
 ```r
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - dplyr>=1.0
 #|   - tidyr
 #| r-version: ">= 4.0"
+#| isolated: true
 #| exclude-newer: "2024-01-15"
 
 library(dplyr)
@@ -29,7 +30,7 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 
 ## Why use it?
 
-- **The file explains itself.** Dependencies live in the script or document, not
+- **The file explains itself.** Package requirements live in the script or document, not
   in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached
   resolutions and libraries when the same requirements are seen again.

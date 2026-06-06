@@ -1,5 +1,5 @@
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - reticulate
 
 library(reticulate)

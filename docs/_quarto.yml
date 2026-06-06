@@ -11,7 +11,7 @@ project:
 
 website:
   title: "ir"
-  description: "Run standalone R scripts and Quarto documents from embedded dependency metadata."
+  description: "Run standalone R scripts and Quarto documents from embedded package metadata."
   navbar:
     left:
       - href: index.qmd

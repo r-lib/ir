@@ -1,9 +1,10 @@
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - dplyr>=1.0
 #|   - tidyr
 #|   - secretbase==1.2
 #| r-version: ">= 4.0"
+#| isolated: true
 
 library(dplyr)
 library(tidyr)

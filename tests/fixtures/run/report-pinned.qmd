@@ -2,7 +2,7 @@
 title: "ir fixture pinned rmarkdown"
 format: html
 ir:
-  dependencies:
+  packages:
     - glue
     - rmarkdown
 ---

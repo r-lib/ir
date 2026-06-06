@@ -5,10 +5,11 @@
 //!
 //! ```r
 //! #!/usr/bin/env -S ir run
-//! #| dependencies:
+//! #| packages:
 //! #|   - dplyr>=1.0
 //! #|   - tidyr
 //! #| r-version: ">= 4.0"
+//! #| isolated: true
 //! #| exclude-newer: "2024-01-15"
 //!
 //! library(dplyr)
@@ -54,6 +55,7 @@ const RESOLVE_DRIVER: &str = include_str!("../driver/resolve.R");
 struct ScriptSpec {
     dependencies: Vec<String>,
     exclude_newer: Option<String>,
+    isolated: bool,
     r_requirement: Option<String>,
     // A Quarto source: the resolver injects rmarkdown for the knitr engine.
     quarto: bool,
@@ -705,6 +707,7 @@ fn cmd_run(
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
+    let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec)?;
 
     // Reject comma-bearing Rscript options before resolving, so a run that could
@@ -1266,6 +1269,7 @@ fn script_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<ScriptSpec, Box<dyn E
     Ok(ScriptSpec {
         dependencies: frontmatter_dependencies(doc)?,
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
+        isolated: frontmatter_optional_bool(doc, "isolated")?.unwrap_or(false),
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
         // Quarto-ness is a property of the source, not its frontmatter; cmd_run
         // sets it from RunSource::is_quarto after parsing.
@@ -1291,7 +1295,7 @@ fn rscript_for_spec(spec: &ScriptSpec) -> Result<OsString, Box<dyn Error>> {
 }
 
 fn frontmatter_dependencies(doc: &Yaml<'_>) -> Result<Vec<String>, Box<dyn Error>> {
-    let Some(value) = doc.as_mapping_get("dependencies") else {
+    let Some(value) = doc.as_mapping_get("packages") else {
         return Ok(Vec::new());
     };
     if value.is_null() {
@@ -1314,10 +1318,24 @@ fn push_dependency_words(
     value: &Yaml<'_>,
 ) -> Result<(), Box<dyn Error>> {
     let Some(value) = value.as_str() else {
-        return Err("frontmatter `dependencies` entries must be strings".into());
+        return Err("frontmatter `packages` entries must be strings".into());
     };
     dependencies.extend(value.split_whitespace().map(str::to_owned));
     Ok(())
+}
+
+fn frontmatter_optional_bool(doc: &Yaml<'_>, key: &str) -> Result<Option<bool>, Box<dyn Error>> {
+    let Some(value) = doc.as_mapping_get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+
+    value
+        .as_bool()
+        .map(Some)
+        .ok_or_else(|| format!("frontmatter `{key}` must be a boolean").into())
 }
 
 fn frontmatter_optional_string(

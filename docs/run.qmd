@@ -2,14 +2,15 @@
 title: "Scripts"
 ---
 
-`ir run` executes R scripts whose dependency metadata is embedded at the top of the file. The metadata block is YAML, with each line prefixed by `#| ` after an optional shebang.
+`ir run` executes R scripts whose package metadata is embedded at the top of the file. The metadata block is YAML, with each line prefixed by `#| ` after an optional shebang.
 
 ```r
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - dplyr>=1.0
 #|   - tidyr
 #| r-version: ">= 4.0"
+#| isolated: true
 #| exclude-newer: "2024-01-15"
 
 library(dplyr)
@@ -27,15 +28,16 @@ $ echo 'print(commandArgs(TRUE))' | ir run - stdin-arg
 $ ./script.R
 ```
 
-## Dependency metadata
+## Frontmatter Metadata
 
 The script frontmatter supports:
 
-- `dependencies`: package refs resolved with pak.
+- `packages`: package refs resolved with pak.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig.
+- `isolated`: `true` disables the user library for the run.
 - `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date.
 
-Supported version specs include `pkg`, `pkg>=1.0`, and `pkg==1.2`. Other pak refs, including GitHub refs and URL refs, pass through unchanged. `dependencies` is usually a YAML sequence, but a string value is accepted and split on whitespace.
+Supported version specs include `pkg`, `pkg>=1.0`, and `pkg==1.2`. Other pak refs, including GitHub refs and URL refs, pass through unchanged. `packages` is usually a YAML sequence, but a string value is accepted and split on whitespace. Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.
 
 ## Inline runs
 
@@ -47,7 +49,7 @@ $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --with 'dplyr>=1.1' --with tidyr -e 'library(dplyr); library(tidyr); 1'
 ```
 
-`--with` may be repeated and accepts comma-separated packages. With a script, command-line packages are merged with the script metadata; with `-e`, they are the only declared dependencies. Inline expressions and standard-input programs do not have frontmatter. Without `--with`, they run against an empty resolved library while user libraries remain visible unless `--isolated` is supplied.
+`--with` may be repeated and accepts comma-separated packages. With a script, command-line packages are merged with the script metadata; with `-e`, they are the only declared packages. Inline expressions and standard-input programs do not have frontmatter. Without `--with`, they run against an empty resolved library while user libraries remain visible unless `--isolated` is supplied.
 
 ## Isolation
 

@@ -8,10 +8,11 @@ title: "Quarto Documents"
 ---
 title: "My report"
 ir:
-  dependencies:
+  packages:
     - dplyr>=1.0
     - gt@1.0
   r-version: ">= 4.0"
+  isolated: true
   exclude-newer: "2024-01-15"
 ---
 ```
@@ -24,7 +25,7 @@ $ ir run report.qmd --to pdf
 $ ir run --vanilla report.qmd
 ```
 
-`ir` resolves the document dependencies into the same cached library model used for scripts, then launches `quarto render`. Leading Rscript options are forwarded to Quarto's knitr engine. Trailing arguments are passed to `quarto render`.
+`ir` resolves the document packages into the same cached library model used for scripts, then launches `quarto render`. Leading Rscript options are forwarded to Quarto's knitr engine. Trailing arguments are passed to `quarto render`.
 
 When an R version is selected by frontmatter or `--r-version`, `ir` pins Quarto's knitr R to that selection.
 
@@ -32,6 +33,6 @@ Set `IR_QUARTO` to use a specific Quarto executable. Rscript options containing 
 
 ## rmarkdown injection
 
-A Quarto render needs the `rmarkdown` package for the knitr engine. `ir` appends `rmarkdown` to the resolved dependencies automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
+A Quarto render needs the `rmarkdown` package for the knitr engine. `ir` appends `rmarkdown` to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
 
-Declare `rmarkdown` yourself under `ir.dependencies` — directly (e.g. `rmarkdown@2.29`) or transitively, such as through `quarto` — to override the injected seed.
+Declare `rmarkdown` yourself under `ir.packages` - directly (e.g. `rmarkdown@2.29`) or transitively, such as through `quarto` - to override the injected seed.

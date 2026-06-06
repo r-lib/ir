@@ -1,8 +1,8 @@
 #!/usr/bin/env -S ir run
-#| dependencies:
+#| packages:
 #|   - glue
 #| ---
-#| dependencies:
+#| packages:
 #|   - definitelynotapackageir
 
 library(glue)

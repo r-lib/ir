@@ -321,7 +321,7 @@ fn malformed_frontmatter_errors_before_resolution() {
     let script = unique_path("ir-malformed-frontmatter", "R");
     fs::write(
         &script,
-        "#!/usr/bin/env -S ir run\n#| dependencies: [dplyr\n\ncat('not reached')\n",
+        "#!/usr/bin/env -S ir run\n#| packages: [dplyr\n\ncat('not reached')\n",
     )
     .unwrap();
 
@@ -337,6 +337,46 @@ fn malformed_frontmatter_errors_before_resolution() {
         "{}",
         output_text(&out)
     );
+}
+
+#[test]
+fn run_script_frontmatter_accepts_packages_and_isolated() {
+    let _guard = e2e_lock();
+    let script = unique_path("ir-packages-frontmatter", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - glue
+#| isolated: true
+#| sys-reqs:
+#|   - ignored-future-key
+
+suppressPackageStartupMessages(library(glue))
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "glue"), mustWork = TRUE)
+cat("ir.fixture=packages-frontmatter\n")
+cat("frontmatter.glue_in_cache=", tolower(normalizePath(path.package("glue"), mustWork = TRUE) == expected), "\n", sep = "")
+cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "\n", sep = "")
+"#,
+    )
+    .unwrap();
+
+    let user_library = unique_dir("ir-packages-frontmatter-user-library");
+    let out = ir()
+        .env("R_LIBS_USER", &user_library)
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&user_library);
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=packages-frontmatter");
+    assert_stdout_contains(&out, "frontmatter.glue_in_cache=true");
+    assert_stdout_contains(&out, "frontmatter.user_library=NULL");
 }
 
 #[test]

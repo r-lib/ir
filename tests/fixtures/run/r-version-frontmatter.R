@@ -1,6 +1,6 @@
 #!/usr/bin/env -S ir run
 #| r-version: "4.4.3"
-#| dependencies:
+#| packages:
 #|   - jsonlite
 #| exclude-newer: "2026-06-01"
 

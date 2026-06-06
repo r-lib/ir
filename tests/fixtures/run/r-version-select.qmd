@@ -2,7 +2,7 @@
 title: "ir r-version selection fixture"
 format: html
 ir:
-  dependencies:
+  packages:
     - jsonlite
     - knitr
     - rmarkdown

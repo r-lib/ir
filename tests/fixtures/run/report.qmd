@@ -2,7 +2,7 @@
 title: "ir fixture report"
 format: html
 ir:
-  dependencies:
+  packages:
     - dplyr
     - tidyr
     - glue

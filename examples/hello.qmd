@@ -1,10 +1,11 @@
 ---
 title: "ir + Quarto"
 ir:
-  dependencies:
+  packages:
     - dplyr>=1.0
     - glue
   r-version: ">= 4.0"
+  isolated: true
 ---
 
 ```{r}
