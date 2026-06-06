@@ -24,7 +24,7 @@ Install on Windows PowerShell:
 > irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
 ```
 
-The installers download the latest release archive and install `ir` into `~/.local/bin` on Unix or `$HOME\bin` on Windows. Set `IR_INSTALL_DIR` to choose another directory.
+The installers download the latest release archive and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows. Set `IR_INSTALL_DIR` to choose another directory.
 
 ## Environment
 

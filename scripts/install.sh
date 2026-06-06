@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
 #
 # Downloads the archive for this machine's platform from the latest GitHub
-# Release, verifies it runs, and installs `ir` into $IR_INSTALL_DIR
+# Release, verifies it runs, and installs `ir` and `rx` into $IR_INSTALL_DIR
 # (default ~/.local/bin). Override the destination with IR_INSTALL_DIR=/some/dir.
 set -eu
 
@@ -68,6 +68,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 archive="${TMPDIR}/${APP}.tar.gz"
 extracted="${TMPDIR}/${APP}-${TARGET}/${APP}"
+extracted_rx="${TMPDIR}/${APP}-${TARGET}/rx"
 
 echo "downloading ${APP}-${TARGET} ..."
 curl -fsSL "$URL" -o "$archive"
@@ -81,9 +82,20 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 install "$extracted" "${INSTALL_DIR}/${APP}"
-
 echo "installed ${APP} to ${INSTALL_DIR}/${APP}"
+
+commands="${APP}"
+if [ -f "$extracted_rx" ]; then
+  if ! "$extracted_rx" --help >/dev/null 2>&1; then
+    echo "downloaded rx from ${APP}-${TARGET} does not run on this system" >&2
+    exit 1
+  fi
+  install "$extracted_rx" "${INSTALL_DIR}/rx"
+  echo "installed rx to ${INSTALL_DIR}/rx"
+  commands="${APP} and rx"
+fi
+
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
-  *) echo "add ${INSTALL_DIR} to your PATH to run ${APP}" ;;
+  *) echo "add ${INSTALL_DIR} to your PATH to run ${commands}" ;;
 esac

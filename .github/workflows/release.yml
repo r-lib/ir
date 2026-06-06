@@ -70,12 +70,16 @@ jobs:
 
       - name: Smoke test
         if: runner.os != 'Windows'
-        run: ./target/${{ matrix.target }}/release/ir --help
+        run: |
+          ./target/${{ matrix.target }}/release/ir --help
+          ./target/${{ matrix.target }}/release/rx --help
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\target\${{ matrix.target }}\release\ir.exe --help
+        run: |
+          .\target\${{ matrix.target }}\release\ir.exe --help
+          .\target\${{ matrix.target }}\release\rx.exe --help
 
       - name: Package
         if: runner.os != 'Windows'
@@ -85,6 +89,7 @@ jobs:
           pkg="dist/ir-${{ matrix.target }}"
           mkdir -p "$pkg"
           cp "target/${{ matrix.target }}/release/ir" "$pkg/ir"
+          cp "target/${{ matrix.target }}/release/rx" "$pkg/rx"
           cp README.md "$pkg/README.md"
           tar -C dist -czf "dist/${{ matrix.archive }}" "ir-${{ matrix.target }}"
 
@@ -95,6 +100,7 @@ jobs:
           $pkg = "dist/ir-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path $pkg | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/ir.exe" "$pkg/ir.exe"
+          Copy-Item "target/${{ matrix.target }}/release/rx.exe" "$pkg/rx.exe"
           Copy-Item "README.md" "$pkg/README.md"
           Push-Location dist
           Compress-Archive -Path "ir-${{ matrix.target }}" -DestinationPath "${{ matrix.archive }}" -Force

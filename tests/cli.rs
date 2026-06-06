@@ -19,8 +19,20 @@ fn ir() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ir"))
 }
 
+fn rx() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_rx"))
+}
+
 fn ir_bin_name() -> String {
     Path::new(env!("CARGO_BIN_EXE_ir"))
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn rx_bin_name() -> String {
+    Path::new(env!("CARGO_BIN_EXE_rx"))
         .file_name()
         .unwrap()
         .to_string_lossy()
@@ -67,10 +79,26 @@ fn normalize_cli_output(output: &[u8]) -> String {
     String::from_utf8_lossy(output)
         .replace("\r\n", "\n")
         .replace(&ir_bin_name(), "ir")
+        .replace(&rx_bin_name(), "rx")
 }
 
 fn assert_help_snapshot(name: &str, args: &[&str]) {
     let out = ir().args(args).output().unwrap();
+    assert!(out.status.success(), "{args:?} should exit 0");
+    assert!(out.stderr.is_empty(), "{args:?} should not write stderr");
+
+    let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("snapshots")
+        .join(format!("{name}.stdout"));
+    let expected = fs::read_to_string(&snapshot)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", snapshot.display()));
+    let actual = normalize_cli_output(&out.stdout);
+    assert_eq!(actual, expected, "{args:?} changed {}", snapshot.display());
+}
+
+fn assert_rx_help_snapshot(name: &str, args: &[&str]) {
+    let out = rx().args(args).output().unwrap();
     assert!(out.status.success(), "{args:?} should exit 0");
     assert!(out.stderr.is_empty(), "{args:?} should not write stderr");
 
@@ -232,6 +260,19 @@ fn version_flag_reports_version() {
 }
 
 #[test]
+fn rx_version_flag_reports_version() {
+    for flag in ["--version", "-V"] {
+        let out = rx().arg(flag).output().unwrap();
+        assert_success(&out);
+        assert!(
+            String::from_utf8_lossy(&out.stdout).starts_with("rx 0."),
+            "{}",
+            output_text(&out)
+        );
+    }
+}
+
+#[test]
 fn help_outputs_match_snapshots() {
     for (name, args) in [
         ("help", &["--help"][..]),
@@ -252,6 +293,13 @@ fn help_outputs_match_snapshots() {
         ("cache-dir-help", &["cache", "dir", "-h"]),
     ] {
         assert_help_snapshot(name, args);
+    }
+}
+
+#[test]
+fn rx_help_outputs_match_snapshots() {
+    for (name, args) in [("rx-help", &["--help"][..]), ("rx-help", &["-h"])] {
+        assert_rx_help_snapshot(name, args);
     }
 }
 
@@ -290,6 +338,34 @@ fn clap_reports_public_usage_errors() {
 
     for (args, expected) in cases {
         let out = ir().args(args.clone()).output().unwrap();
+        assert!(
+            !out.status.success(),
+            "args {args:?} unexpectedly succeeded\n{}",
+            output_text(&out)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(expected),
+            "args {args:?}\n{}",
+            output_text(&out)
+        );
+    }
+}
+
+#[test]
+fn rx_reports_public_usage_errors() {
+    let cases = [
+        (vec!["--from", "btw"], "`--from` requires a command"),
+        (
+            vec!["--from", "btw", "path/to/tool"],
+            "`--from` requires a command name",
+        ),
+        (vec!["-w"], "a value is required for '--with <PKG>'"),
+        (vec!["-e", "1"], "`-e` is not supported by `rx`"),
+    ];
+
+    for (args, expected) in cases {
+        let out = rx().args(args.clone()).output().unwrap();
         assert!(
             !out.status.success(),
             "args {args:?} unexpectedly succeeded\n{}",
@@ -826,6 +902,27 @@ fn tool_run_executes_real_package_entrypoint() {
             "tool",
             "run",
             "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--from",
+            "cli",
+            "search",
+            "--help",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
+    assert_stdout_contains(&out, "cransearch.R [-h | --help]");
+}
+
+#[test]
+fn rx_executes_real_package_entrypoint() {
+    let _guard = e2e_lock();
+
+    let out = rx()
+        .args([
+            "-w",
             "docopt,pkgsearch,prettyunits",
             "--from",
             "cli",

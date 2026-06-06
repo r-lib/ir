@@ -145,12 +145,31 @@ fn tool_command() -> ClapCommand {
         .about("Run package executables")
         .arg_required_else_help(true)
         .subcommand(tool_run_command())
+        .subcommand(tool_rx_command())
         .subcommand(tool_install_command())
 }
 
 fn tool_run_command() -> ClapCommand {
-    ClapCommand::new("run")
-        .about("Resolve a package and run an executable from its exec directory")
+    tool_run_args(
+        ClapCommand::new("run")
+            .about("Resolve a package and run an executable from its exec directory"),
+    )
+}
+
+fn tool_rx_command() -> ClapCommand {
+    tool_run_args(
+        ClapCommand::new("rx")
+            .hide(true)
+            .display_name("rx")
+            .override_usage("rx [OPTIONS] [ARGS]...")
+            .about("Run a package executable")
+            .version(env!("CARGO_PKG_VERSION"))
+            .after_help("Use `ir tool run` for more details."),
+    )
+}
+
+fn tool_run_args(command: ClapCommand) -> ClapCommand {
+    command
         .arg(
             Arg::new("from")
                 .long("from")
@@ -160,6 +179,7 @@ fn tool_run_command() -> ClapCommand {
         )
         .arg(
             Arg::new("with")
+                .short('w')
                 .long("with")
                 .value_name("PKG")
                 .num_args(1)
@@ -488,11 +508,29 @@ fn is_package_executable_name(name: &str) -> bool {
         && !name.chars().any(char::is_whitespace)
 }
 
+#[derive(Clone, Copy)]
+enum ToolRunInvocation {
+    ToolRun,
+    Rx,
+}
+
+impl ToolRunInvocation {
+    fn command(self) -> &'static str {
+        match self {
+            Self::ToolRun => "ir tool run",
+            Self::Rx => "rx",
+        }
+    }
+}
+
 /// Parse `ir tool run`, which resolves a provider package and runs a command
 /// from that package's `exec/` directory. This is intentionally separate from
 /// `ir run`: script and expression runs are source-oriented, tool runs are
 /// package-oriented and isolated by default.
-fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>> {
+fn parse_tool_run_args(
+    args: Vec<String>,
+    invocation: ToolRunInvocation,
+) -> Result<ToolRunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
@@ -502,26 +540,35 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
 
     while let Some(arg) = iter.next() {
         if arg == "--from" {
-            let value = iter
-                .next()
-                .ok_or("`--from` requires a package ref (try `ir tool run --from cli cli`)")?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--from` requires a package ref (try `{} --from cli cli`)",
+                    invocation.command()
+                )
+            })?;
             from = Some(value);
         } else if let Some(value) = arg.strip_prefix("--from=") {
             if value.is_empty() {
                 return Err("`--from` requires a package ref".into());
             }
             from = Some(value.to_string());
-        } else if arg == "--with" {
-            let value = iter
-                .next()
-                .ok_or("`--with` requires a package (try `ir tool run --with dplyr btw`)")?;
+        } else if arg == "--with" || arg == "-w" {
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`{arg}` requires a package (try `{} {arg} dplyr btw`)",
+                    invocation.command()
+                )
+            })?;
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
         } else if arg == "--r-version" {
-            let value = iter.next().ok_or(
-                "`--r-version` requires a version spec (try `ir tool run --r-version 4.5 btw`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--r-version` requires a version spec (try `{} --r-version 4.5 btw`)",
+                    invocation.command()
+                )
+            })?;
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
@@ -529,7 +576,7 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
             // `ir tool run` is always isolated; accept this for symmetry with
             // `ir run` without changing behavior.
         } else if arg == "-e" {
-            return Err("`-e` is not supported by `ir tool run`".into());
+            return Err(format!("`-e` is not supported by `{}`", invocation.command()).into());
         } else if arg.starts_with('-') {
             rscript_args.push(arg);
         } else {
@@ -550,8 +597,12 @@ fn parse_tool_run_args(args: Vec<String>) -> Result<ToolRunArgs, Box<dyn Error>>
             executable,
         }
     } else {
-        let package_ref = positional
-            .ok_or("`ir tool run` requires a package ref or `--from <pkg-ref> <command>`")?;
+        let package_ref = positional.ok_or_else(|| {
+            format!(
+                "`{}` requires a package ref or `--from <pkg-ref> <command>`",
+                invocation.command()
+            )
+        })?;
         let executable = infer_self_named_executable(&package_ref)
             .ok_or("self-named package tools require an inferable package name; use `--from <pkg-ref> <command>`")?;
         PackageExecTarget {
@@ -646,7 +697,11 @@ fn push_with_deps(with_deps: &mut Vec<String>, value: &str) {
 fn cmd_tool(matches: &ArgMatches, argv: &[String]) -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         Some(("run", _)) => {
-            let run = parse_tool_run_args(argv[3..].to_vec())?;
+            let run = parse_tool_run_args(argv[3..].to_vec(), ToolRunInvocation::ToolRun)?;
+            cmd_tool_run(&run)
+        }
+        Some(("rx", _)) => {
+            let run = parse_tool_run_args(argv[3..].to_vec(), ToolRunInvocation::Rx)?;
             cmd_tool_run(&run)
         }
         Some(("install", _)) => {

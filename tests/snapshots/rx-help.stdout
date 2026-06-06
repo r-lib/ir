@@ -1,6 +1,6 @@
-Resolve a package and run an executable from its exec directory
+Run a package executable
 
-Usage: ir tool run [OPTIONS] [ARGS]...
+Usage: rx [OPTIONS] [ARGS]...
 
 Arguments:
   [ARGS]...  Rscript options, package ref or command, and tool arguments
@@ -10,3 +10,6 @@ Options:
   -w, --with <PKG>        Add a dependency for this tool run; may be repeated
       --r-version <SPEC>  Select the R version for this tool run with rig
   -h, --help              Print help
+  -V, --version           Print version
+
+Use `ir tool run` for more details.

@@ -16,5 +16,9 @@ saphyr-parser = { git = "https://github.com/t-kalinowski/saphyr", rev = "73f6994
 name = "ir"
 path = "src/main.rs"
 
+[[bin]]
+name = "rx"
+path = "src/bin/rx.rs"
+
 [profile.release]
 strip = true
