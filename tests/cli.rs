@@ -372,6 +372,37 @@ fn cache_dir_reports_override_and_real_r_default() {
 }
 
 #[test]
+fn cache_dir_honors_r_user_cache_dir_from_r_environ_user() {
+    let cache_dir = unique_dir("ir-cache-renviron");
+    let renviron = unique_path("ir-cache-renviron", "Renviron");
+    fs::write(
+        &renviron,
+        format!("R_USER_CACHE_DIR={}\n", cache_dir.display()),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("XDG_CACHE_HOME")
+        .env("R_ENVIRON_USER", &renviron)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let expected = cache_dir
+        .join("R")
+        .join("ir")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert_eq!(normalize_path_output(&out), expected);
+
+    let _ = fs::remove_file(&renviron);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn cache_clean_removes_cache_dir() {
     let cache_dir = unique_dir("ir-cache-clean");
     let library = cache_dir.join("libraries").join("library");
