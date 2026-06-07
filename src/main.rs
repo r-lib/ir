@@ -18,12 +18,13 @@
 //!
 //! The pipeline has two phases:
 //!
-//!   1. Rust extracts and parses the leading `#| ` YAML frontmatter block. A
-//!      private R session (`driver/resolve.R`) receives the normalized pak refs on
-//!      stdin, resolves them with pak, hashes the resolved set into a
-//!      content-addressed library path under the cache directory, and
-//!      materialises that path as a light-weight library of symlinks into renv's
-//!      package cache. The path is reported back to us.
+//!   1. Rust extracts and parses the leading `#| ` YAML frontmatter block. If
+//!      the resolution cache is warm, Rust reuses the cached library path
+//!      directly. Otherwise, a private R session (`driver/resolve.R`) receives
+//!      the normalized pak refs on stdin, resolves them with pak, hashes the
+//!      resolved set into a content-addressed library path under the cache
+//!      directory, and materialises that path as a light-weight library of
+//!      symlinks into renv's package cache. The path is reported back to us.
 //!
 //!   2. We launch the user's script in a fresh R session with that library
 //!      prepended to `.libPaths()`. With `--isolated`, the user library is
@@ -43,6 +44,7 @@ use saphyr::{Yaml, YamlLoader};
 use saphyr_parser::Parser;
 
 mod quarto;
+mod resolve_cache;
 mod rig;
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
@@ -764,17 +766,16 @@ fn cmd_run(
     let rscript = rscript_for_spec(&spec)?;
 
     // Reject comma-bearing Rscript options before resolving, so a run that could
-    // never be launched fails fast instead of after phase-1 resolution. quarto
+    // never be launched fails fast instead of after dependency resolution. quarto
     // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
     // escaping.
     source.reject_unsupported_rscript_args(rscript_args)?;
 
-    // Phase 1: private R session resolves deps and materialises the library.
-    // Rust parses the frontmatter and sends normalized pak refs on stdin.
+    // Reuse a warm resolution marker, or launch the private resolver R session
+    // to resolve deps and materialise the library.
     let library = resolve_library(&rscript, &spec)?;
 
-    // Phase 2: render the document, or run the user's program, in an isolated
-    // R session.
+    // Render the document, or run the user's program, in an isolated R session.
     let code = source.run_user_code(
         &rscript,
         library.as_deref(),
@@ -882,10 +883,10 @@ fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Phase 1 — run the embedded driver in a private R session and return the
-/// path to the materialised library. The dependency specs in `spec` (the
-/// script's frontmatter plus any `--with` packages) are normalized into pak refs
-/// and streamed on stdin.
+/// Return a cached materialised library path, or run the embedded driver in a
+/// private R session to resolve and materialise it. The dependency specs in
+/// `spec` (the script's frontmatter plus any `--with` packages) are normalized
+/// into pak refs before cache keying and resolver input.
 fn resolve_library(rscript: &OsStr, spec: &ScriptSpec) -> Result<Option<PathBuf>, Box<dyn Error>> {
     Ok(resolve_library_inner(rscript, spec, false)?.library)
 }
@@ -914,6 +915,22 @@ fn resolve_library_inner(
     spec: &ScriptSpec,
     primary_package: bool,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
+    let dependencies = normalized_dependencies(&spec.dependencies);
+    let cache_dir = ir_cache_dir()?;
+    let resolution_cache_paths = resolve_cache::paths(
+        &cache_dir,
+        rscript,
+        &dependencies,
+        spec.exclude_newer.as_deref(),
+        spec.quarto,
+    )?;
+    if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
+        return Ok(ResolvedLibrary {
+            library: Some(resolved.library),
+            primary_package: resolved.primary_package,
+        });
+    }
+
     let tmp = env::temp_dir();
     let driver = unique_path(&tmp, "ir-resolve", "R");
     let result_file = unique_path(&tmp, "ir-libpath", "txt");
@@ -926,11 +943,22 @@ fn resolve_library_inner(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .env("IR_RESOLVE_RESULT_FILE", &result_file)
+        .env("IR_CACHE_DIR", &cache_dir)
         // pak suppresses progress in noninteractive Rscript unless this is set.
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
         .env("R_PKG_SHOW_PROGRESS", "true");
+    if let Some(paths) = &resolution_cache_paths {
+        cmd.env("IR_RESOLUTION_MARKER", &paths.marker)
+            .env("IR_RESOLUTION_SOURCE", &paths.source);
+    }
     if let Some(package_result_file) = &package_result_file {
         cmd.env("IR_RESOLVE_PACKAGE_RESULT_FILE", package_result_file);
+        if let Some(package_marker) = resolution_cache_paths
+            .as_ref()
+            .and_then(|paths| paths.package_marker.as_ref())
+        {
+            cmd.env("IR_PRIMARY_PACKAGE_MARKER", package_marker);
+        }
     }
     if let Some(exclude_newer) = &spec.exclude_newer {
         cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
@@ -944,7 +972,7 @@ fn resolve_library_inner(
     let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
     {
         let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
-        for dependency in normalized_dependencies(&spec.dependencies) {
+        for dependency in dependencies {
             writeln!(stdin, "{dependency}")?;
         }
     }
@@ -1468,9 +1496,9 @@ fn parse_simple_version_ref(dependency: &str) -> Option<(&str, &str, &str)> {
     ))
 }
 
-/// Phase 2 — run the user's program in an ordinary R session pointed at
-/// `library`. The program is a script file, `-` stdin source, or one or more
-/// inline expressions evaluated via `Rscript -e`.
+/// Run the user's program in an ordinary R session pointed at `library`. The
+/// program is a script file, `-` stdin source, or one or more inline expressions
+/// evaluated via `Rscript -e`.
 ///
 /// It runs as an ordinary `Rscript [Rscript-options...] (script.R | - | -e
 /// expr...)` - its `.Renviron`, `.Rprofile` and site files are read unless the
@@ -1582,37 +1610,66 @@ fn rscript_command() -> OsString {
     rig::default_rscript().unwrap_or_else(|| "Rscript".into())
 }
 
-/// The `ir` cache root, matching `tools::R_user_dir("ir", "cache")` unless
-/// `IR_CACHE_DIR` overrides it.
+/// The Rust-owned `ir` cache root. `IR_CACHE_DIR` overrides it; otherwise it
+/// follows R's per-package cache layout from the process environment and
+/// platform defaults.
 fn ir_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     if let Some(path) = nonempty_env("IR_CACHE_DIR") {
         return Ok(PathBuf::from(path));
     }
 
-    let rscript = rscript_command();
-    let output = Command::new(&rscript)
-        .arg("-e")
-        .arg("writeLines(tools::R_user_dir(\"ir\", \"cache\"))")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| spawn_error(&rscript, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("failed to resolve cache dir with tools::R_user_dir: {stderr}").into());
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
-    let path = stdout.trim();
-    if path.is_empty() {
-        return Err("tools::R_user_dir returned an empty cache dir".into());
-    }
-
-    Ok(PathBuf::from(path))
+    Ok(r_user_cache_dir()?.join("R").join("ir"))
 }
 
 fn nonempty_env(name: &str) -> Option<OsString> {
     env::var_os(name).filter(|value| !value.is_empty())
+}
+
+fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
+    if let Some(path) = nonempty_env("R_USER_CACHE_DIR") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(path) = nonempty_env("XDG_CACHE_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(path) = nonempty_env("LOCALAPPDATA") {
+            return Ok(PathBuf::from(path).join("R").join("cache"));
+        }
+        if let Some(path) = nonempty_env("USERPROFILE") {
+            return Ok(PathBuf::from(path)
+                .join("AppData")
+                .join("Local")
+                .join("R")
+                .join("cache"));
+        }
+        Err(
+            "cannot determine Windows cache directory; set IR_CACHE_DIR, R_USER_CACHE_DIR, XDG_CACHE_HOME, LOCALAPPDATA, or USERPROFILE"
+                .into(),
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(home_dir()?
+            .join("Library")
+            .join("Caches")
+            .join("org.R-project.R"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Ok(home_dir()?.join(".cache"))
+    }
+}
+
+#[cfg(unix)]
+fn home_dir() -> Result<PathBuf, Box<dyn Error>> {
+    let home = nonempty_env("HOME").ok_or("cannot determine home directory")?;
+    let home = PathBuf::from(home);
+    Ok(fs::canonicalize(&home).unwrap_or(home))
 }
 
 fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {

@@ -1,8 +1,9 @@
 //! Integration tests for the public `ir` CLI.
 //!
-//! These tests avoid mocked `Rscript`, `quarto`, `rig`, or package executable
-//! shims. The end-to-end cases run real fixture scripts/documents through the
-//! compiled binary and assert marker lines printed by those public workflows.
+//! These tests mostly avoid mocked `Rscript`, `quarto`, `rig`, or package
+//! executable shims. The end-to-end cases run real fixture scripts/documents
+//! through the compiled binary and assert marker lines printed by those public
+//! workflows.
 
 use std::ffi::OsString;
 use std::fs;
@@ -80,6 +81,14 @@ fn normalize_cli_output(output: &[u8]) -> String {
         .replace("\r\n", "\n")
         .replace(&ir_bin_name(), "ir")
         .replace(&rx_bin_name(), "rx")
+}
+
+fn normalize_path_output(output: &Output) -> String {
+    stdout(output).trim_end().replace('\\', "/")
+}
+
+fn renviron_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn assert_help_snapshot(name: &str, args: &[&str]) {
@@ -451,7 +460,7 @@ cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "
 }
 
 #[test]
-fn cache_dir_reports_override_and_real_r_default() {
+fn cache_dir_reports_override_and_process_env_defaults() {
     let cache_dir = unique_dir("ir-cache-override");
 
     let out = ir()
@@ -462,21 +471,107 @@ fn cache_dir_reports_override_and_real_r_default() {
     assert_success(&out);
     assert_eq!(stdout(&out), format!("{}\n", cache_dir.display()));
 
-    let expected = Command::new(rscript())
-        .args(["-e", "writeLines(tools::R_user_dir(\"ir\", \"cache\"))"])
-        .output()
-        .expect("failed to run Rscript");
-    assert_success(&expected);
-
+    let r_user_cache_dir = unique_dir("ir-cache-r-user");
     let out = ir()
         .env_remove("IR_CACHE_DIR")
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .args(["cache", "dir"])
         .output()
         .unwrap();
     assert_success(&out);
-    assert_eq!(stdout(&out), stdout(&expected));
+    assert_eq!(
+        normalize_path_output(&out),
+        r_user_cache_dir
+            .join("R")
+            .join("ir")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+
+    let xdg_cache_home = unique_dir("ir-cache-xdg-default");
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_eq!(
+        normalize_path_output(&out),
+        xdg_cache_home
+            .join("R")
+            .join("ir")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
 
     let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&r_user_cache_dir);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
+}
+
+#[cfg(windows)]
+#[test]
+fn cache_dir_falls_back_to_userprofile_without_localappdata() {
+    let user_profile = unique_dir("ir-cache-userprofile");
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("LOCALAPPDATA")
+        .env("USERPROFILE", &user_profile)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let expected = user_profile
+        .join("AppData")
+        .join("Local")
+        .join("R")
+        .join("cache")
+        .join("R")
+        .join("ir")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert_eq!(normalize_path_output(&out), expected);
+
+    let _ = fs::remove_dir_all(&user_profile);
+}
+
+#[test]
+fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
+    let xdg_cache_home = unique_dir("ir-cache-xdg");
+    let renviron_cache = unique_dir("ir-cache-renviron");
+    let renviron = unique_path("ir-cache-renviron", "Renviron");
+    fs::write(
+        &renviron,
+        format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .env("R_ENVIRON_USER", &renviron)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let expected = xdg_cache_home
+        .join("R")
+        .join("ir")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert_eq!(normalize_path_output(&out), expected);
+
+    let _ = fs::remove_file(&renviron);
+    let _ = fs::remove_dir_all(&renviron_cache);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 #[test]
@@ -607,39 +702,186 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
     assert_eq!(resolution_count, 1);
 }
 
+#[test]
+fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-latest-cache-refresh");
+    let expr = "{ library(cli); cat('ir.fixture=latest-cache-refresh\\n') }";
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=latest-cache-refresh");
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+
+    let marker = &markers[0];
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let mut lines = marker_text.lines();
+    let today = format!("latest: {}", time::OffsetDateTime::now_utc().date());
+    assert_eq!(lines.next(), Some(today.as_str()));
+    let library = lines
+        .next()
+        .unwrap_or_else(|| panic!("{} should record a library path", marker.display()));
+    assert!(
+        Path::new(library).is_dir(),
+        "{} should record an existing library path",
+        marker.display()
+    );
+
+    fs::write(marker, format!("latest: 1970-01-01\n{library}\n"))
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=latest-cache-refresh");
+
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers, vec![marker.clone()]);
+
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let mut lines = marker_text.lines();
+    let today = format!("latest: {}", time::OffsetDateTime::now_utc().date());
+    assert_eq!(lines.next(), Some(today.as_str()));
+    let refreshed_library = lines
+        .next()
+        .unwrap_or_else(|| panic!("{} should record a library path", marker.display()));
+    assert!(
+        Path::new(refreshed_library).is_dir(),
+        "{} should record an existing library path",
+        marker.display()
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_passes_rust_owned_cache_dir_to_resolver() {
+    let _guard = e2e_lock();
+    let xdg_cache_home = unique_dir("ir-rust-owned-cache-xdg");
+    let renviron_cache = unique_dir("ir-rust-owned-cache-renviron");
+    let renviron = unique_path("ir-rust-owned-cache", "Renviron");
+    fs::write(
+        &renviron,
+        format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
+    )
+    .unwrap();
+    let expr = "{ library(cli); cat('ir.fixture=rust-owned-cache\\n') }";
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .env("R_ENVIRON_USER", &renviron)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=rust-owned-cache");
+    assert!(
+        xdg_cache_home
+            .join("R")
+            .join("ir")
+            .join("resolutions")
+            .is_dir(),
+        "resolver should write markers under the Rust-owned cache root"
+    );
+    assert!(
+        !renviron_cache
+            .join("R")
+            .join("ir")
+            .join("resolutions")
+            .exists(),
+        "R startup files should not redirect the resolver cache"
+    );
+
+    let _ = fs::remove_file(&renviron);
+    let _ = fs::remove_dir_all(&renviron_cache);
+    let _ = fs::remove_dir_all(&xdg_cache_home);
+}
+
 // report.qmd deliberately does NOT declare rmarkdown, so the render only
 // succeeds because ir injects it quietly for the knitr engine.
 #[test]
 fn run_quarto_fixture_injects_rmarkdown_and_renders() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
+    let cache_dir = unique_dir("ir-e2e-qmd-cache");
 
-    let out = ir()
-        .current_dir(&fixture_dir)
-        .args(["run", "--isolated"])
-        .arg("report.qmd")
-        .args(["--to", "html"])
-        .output()
-        .unwrap();
+    for _ in 0..2 {
+        let out = ir()
+            .current_dir(&fixture_dir)
+            .env("IR_CACHE_DIR", &cache_dir)
+            .args(["run", "--isolated"])
+            .arg("report.qmd")
+            .args(["--to", "html"])
+            .output()
+            .unwrap();
 
-    assert_success(&out);
+        assert_success(&out);
 
-    let html = fs::read_to_string(fixture_dir.join("report.html"))
-        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
-    assert!(html.contains("ir.fixture=qmd"), "{html}");
-    assert!(html.contains("qmd.lib_in_cache=true"), "{html}");
-    assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
-    assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
+        let html = fs::read_to_string(fixture_dir.join("report.html")).unwrap_or_else(|e| {
+            panic!("failed to read rendered report: {e}\n{}", output_text(&out))
+        });
+        assert!(html.contains("ir.fixture=qmd"), "{html}");
+        assert!(html.contains("qmd.lib_in_cache=true"), "{html}");
+        assert!(html.contains("qmd.pkgs_in_cache=true"), "{html}");
+        assert!(html.contains("qmd.result=a:4,b:2"), "{html}");
 
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("using latest rmarkdown"),
-        "rmarkdown injection should be quiet\n{}",
-        output_text(&out)
-    );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("using latest rmarkdown"),
+            "rmarkdown injection should be quiet\n{}",
+            output_text(&out)
+        );
 
-    let _ = fs::remove_file(fixture_dir.join("report.html"));
-    let _ = fs::remove_dir_all(fixture_dir.join("report_files"));
+        let _ = fs::remove_file(fixture_dir.join("report.html"));
+        let _ = fs::remove_dir_all(fixture_dir.join("report_files"));
+    }
+
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 // report-pinned.qmd declares rmarkdown itself, so the resolver leaves it alone.
@@ -967,6 +1209,104 @@ fn tool_install_installs_real_package_entrypoint() {
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
 
     let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-warm-tool-install-cache");
+    let bin_dir = unique_dir("ir-warm-tool-install-bin");
+    let rscript = rscript();
+    let profile = unique_path("ir-rprofile-fail", "R");
+    fs::write(
+        &profile,
+        "stop('resolver Rscript should not be launched')\n",
+    )
+    .unwrap();
+
+    let warm = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .env_remove("R_PROFILE_USER")
+        .args([
+            "tool",
+            "install",
+            "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--bin-dir",
+        ])
+        .arg(&bin_dir)
+        .arg("cli")
+        .output()
+        .unwrap();
+    assert_success(&warm);
+
+    let cached = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "tool",
+            "install",
+            "--force",
+            "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--bin-dir",
+        ])
+        .arg(&bin_dir)
+        .arg("cli")
+        .output()
+        .unwrap();
+
+    assert_success(&cached);
+    assert_stdout_contains(&cached, "Installed");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_with_rscript_wrapper_records_primary_package_marker() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-wrapper-tool-install-cache");
+    let bin_dir = unique_dir("ir-wrapper-tool-install-bin");
+    let wrapper = unique_path("ir-rscript-wrapper", "sh");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\nexec \"$IR_TEST_RSCRIPT_TARGET\" \"$@\"\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&wrapper, permissions).unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &wrapper)
+        .env("IR_TEST_RSCRIPT_TARGET", rscript())
+        .args([
+            "tool",
+            "install",
+            "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--bin-dir",
+        ])
+        .arg(&bin_dir)
+        .arg("cli")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed");
+
+    let _ = fs::remove_file(&wrapper);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {
