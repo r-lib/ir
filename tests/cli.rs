@@ -435,6 +435,36 @@ fn cache_dir_reports_override_and_process_env_defaults() {
     let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
+#[cfg(windows)]
+#[test]
+fn cache_dir_falls_back_to_userprofile_without_localappdata() {
+    let user_profile = unique_dir("ir-cache-userprofile");
+
+    let out = ir()
+        .env_remove("IR_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("LOCALAPPDATA")
+        .env("USERPROFILE", &user_profile)
+        .args(["cache", "dir"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let expected = user_profile
+        .join("AppData")
+        .join("Local")
+        .join("R")
+        .join("cache")
+        .join("R")
+        .join("ir")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert_eq!(normalize_path_output(&out), expected);
+
+    let _ = fs::remove_dir_all(&user_profile);
+}
+
 #[test]
 fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
     let xdg_cache_home = unique_dir("ir-cache-xdg");

@@ -1580,8 +1580,20 @@ fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
 
     #[cfg(windows)]
     {
-        let localappdata = env::var_os("LOCALAPPDATA").unwrap_or_default();
-        return Ok(PathBuf::from(localappdata).join("R").join("cache"));
+        if let Some(path) = nonempty_env("LOCALAPPDATA") {
+            return Ok(PathBuf::from(path).join("R").join("cache"));
+        }
+        if let Some(path) = nonempty_env("USERPROFILE") {
+            return Ok(PathBuf::from(path)
+                .join("AppData")
+                .join("Local")
+                .join("R")
+                .join("cache"));
+        }
+        Err(
+            "cannot determine Windows cache directory; set IR_CACHE_DIR, R_USER_CACHE_DIR, XDG_CACHE_HOME, LOCALAPPDATA, or USERPROFILE"
+                .into(),
+        )
     }
 
     #[cfg(target_os = "macos")]
@@ -1598,6 +1610,7 @@ fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     }
 }
 
+#[cfg(unix)]
 fn home_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home = nonempty_env("HOME").ok_or("cannot determine home directory")?;
     let home = PathBuf::from(home);
