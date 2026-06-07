@@ -85,23 +85,6 @@ This builds `target/release/ir` and `target/release/rx`.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
 
-## Local development
-
-To run the test suite locally, install Rust, R, rig, and Quarto. Install rig
-and Quarto manually; the test dependency script only installs R packages.
-
-After installing or upgrading R, run:
-
-```console
-$ Rscript scripts/install-test-deps.R
-```
-
-Then run:
-
-```console
-$ cargo test
-```
-
 ## Learn more
 
 For command details, configuration, and edge cases, see:
