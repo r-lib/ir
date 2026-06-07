@@ -131,7 +131,7 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 # Legacy fallback key identifying a resolution request when Rust does not pass
 # IR_RESOLUTION_MARKER. Normal CLI runs compute the marker path in Rust so warm
 # caches can return before this R resolver is launched. Latest resolution keeps
-# a stable key and stores the current UTC date in the marker value.
+# a stable key and stores the creation time in the marker value.
 ir_input_key <- function(deps,
                          rversion      = getRversion(),
                          platform      = R.version$platform,
@@ -153,12 +153,38 @@ ir_input_key <- function(deps,
                            collapse = "\n"))
 }
 
+ir_current_utc_seconds <- function()
+  as.numeric(Sys.time())
+
+ir_latest_resolution_max_age_seconds <- function() {
+  value <- Sys.getenv("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", unset = NA_character_)
+  if (is.na(value) || !nzchar(value)) return(24 * 60 * 60)
+
+  if (!grepl("^[0-9]+$", value))
+    stop("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS must be an integer",
+         call. = FALSE)
+  as.numeric(value)
+}
+
 ir_marker_source <- function(exclude_newer,
-                             date = as.Date(Sys.time(), tz = "UTC")) {
+                             created_at = ir_current_utc_seconds()) {
   if (is.null(exclude_newer))
-    sprintf("latest: %s", date)
+    sprintf("latest: %.0f", floor(created_at))
   else
     sprintf("exclude-newer: %s", exclude_newer)
+}
+
+ir_marker_source_current <- function(source, exclude_newer) {
+  if (!is.null(exclude_newer))
+    return(identical(source, ir_marker_source(exclude_newer)))
+
+  if (!startsWith(source, "latest: ")) return(FALSE)
+  created_at <- suppressWarnings(as.numeric(sub("^latest: ", "", source)))
+  if (is.na(created_at)) return(FALSE)
+
+  now <- ir_current_utc_seconds()
+  if (created_at > now) return(FALSE)
+  now - created_at <= ir_latest_resolution_max_age_seconds()
 }
 
 ## --- pipeline ---------------------------------------------------------------
@@ -197,10 +223,6 @@ ir_resolve_main <- function() {
                         ir_input_key(deps, exclude_newer = exclude_newer,
                                      quarto = quarto))
   }
-  marker_source <- ir_env_optional("IR_RESOLUTION_SOURCE")
-  if (is.null(marker_source))
-    marker_source <- ir_marker_source(exclude_newer)
-
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
   if (is.null(package_marker) && !is.null(primary_ref)) {
     package_marker <- file.path(cache_dir, "resolutions",
@@ -210,7 +232,7 @@ ir_resolve_main <- function() {
   if (file.exists(marker)) {
     cached <- readLines(marker, n = 2L, warn = FALSE)
     if (length(cached) >= 2L &&
-        identical(cached[[1L]], marker_source) &&
+        ir_marker_source_current(cached[[1L]], exclude_newer) &&
         nzchar(cached[[2L]]) &&
         dir.exists(cached[[2L]])) {
       if (!is.null(package_result_file) &&
@@ -303,7 +325,7 @@ ir_resolve_main <- function() {
 
   ## 4b. Record the resolution so an identical request skips pak.
   dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(marker_source, library_path), marker)
+  writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
   if (!is.null(primary_package)) {
     writeLines(primary_package, package_marker)
   }

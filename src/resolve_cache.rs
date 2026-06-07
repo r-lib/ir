@@ -5,15 +5,18 @@ use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
-use time::OffsetDateTime;
+
+const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
+const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
 
 pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
     pub(crate) package_marker: Option<PathBuf>,
-    pub(crate) source: String,
+    source: String,
+    latest_max_age_seconds: Option<u64>,
 }
 
 pub(crate) struct CachedResolution {
@@ -32,7 +35,12 @@ pub(crate) fn paths(
         return Ok(None);
     };
 
-    let source = resolution_cache_source(exclude_newer);
+    let latest_max_age_seconds = if exclude_newer.is_none() {
+        Some(latest_max_age_seconds()?)
+    } else {
+        None
+    };
+    let source = resolution_cache_source(exclude_newer)?;
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
@@ -51,6 +59,7 @@ pub(crate) fn paths(
         marker,
         package_marker,
         source,
+        latest_max_age_seconds,
     }))
 }
 
@@ -69,7 +78,8 @@ pub(crate) fn read(
     let marker = fs::read_to_string(&cache.marker)
         .map_err(|e| format!("failed to read `{}`: {e}", cache.marker.display()))?;
     let mut lines = marker.lines();
-    if lines.next() != Some(cache.source.as_str()) {
+    let source = lines.next().unwrap_or_default();
+    if !source_is_current(source, cache)? {
         return Ok(None);
     }
     let library = lines.next().unwrap_or_default().trim();
@@ -121,10 +131,30 @@ fn resolution_cache_key(
     sha256_fields(&parts)
 }
 
-fn resolution_cache_source(exclude_newer: Option<&str>) -> String {
-    exclude_newer
-        .map(|date| format!("exclude-newer: {date}"))
-        .unwrap_or_else(|| format!("latest: {}", current_utc_date()))
+fn resolution_cache_source(exclude_newer: Option<&str>) -> Result<String, Box<dyn Error>> {
+    Ok(match exclude_newer {
+        Some(date) => format!("exclude-newer: {date}"),
+        None => format!("latest: {}", current_utc_seconds()?),
+    })
+}
+
+fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>> {
+    let Some(max_age_seconds) = cache.latest_max_age_seconds else {
+        return Ok(source == cache.source.as_str());
+    };
+
+    let Some(created_at) = source.strip_prefix("latest: ") else {
+        return Ok(false);
+    };
+    let Ok(created_at) = created_at.parse::<u64>() else {
+        return Ok(false);
+    };
+    let now = current_utc_seconds()?;
+    if created_at > now {
+        return Ok(false);
+    }
+    let age_seconds = now - created_at;
+    Ok(age_seconds <= max_age_seconds)
 }
 
 fn rscript_identity(rscript: &OsStr) -> Option<String> {
@@ -223,8 +253,25 @@ fn find_on_path(command: &OsStr) -> Option<PathBuf> {
     None
 }
 
-fn current_utc_date() -> String {
-    OffsetDateTime::now_utc().date().to_string()
+fn latest_max_age_seconds() -> Result<u64, Box<dyn Error>> {
+    let Some(value) = env::var_os(LATEST_MAX_AGE_SECONDS_ENV) else {
+        return Ok(DEFAULT_LATEST_MAX_AGE_SECONDS);
+    };
+    let value = value.to_string_lossy();
+    if value.is_empty() {
+        return Ok(DEFAULT_LATEST_MAX_AGE_SECONDS);
+    }
+    let max_age_seconds = value
+        .parse::<u64>()
+        .map_err(|e| format!("{LATEST_MAX_AGE_SECONDS_ENV} must be an integer: {e}"))?;
+    Ok(max_age_seconds)
+}
+
+fn current_utc_seconds() -> Result<u64, Box<dyn Error>> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("system clock is before the Unix epoch: {e}"))?
+        .as_secs())
 }
 
 fn sha256_hex(value: &str) -> String {

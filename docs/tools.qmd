@@ -36,6 +36,6 @@ $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw
 ```
 
-Installed launchers keep the same resolved package ref, dependency additions, and R version selection that were used at install time. They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
+Installed launchers keep the same resolved package ref, `--with` package additions, and R version selection that were used at install time. They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 
 By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix. On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`. `--bin-dir` overrides those defaults.

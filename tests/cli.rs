@@ -141,6 +141,13 @@ fn unique_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+fn current_utc_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 fn e2e_lock() -> MutexGuard<'static, ()> {
     E2E_LOCK
         .lock()
@@ -703,6 +710,46 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
 }
 
 #[test]
+fn run_latest_resolution_cache_marker_truncates_fractional_creation_time() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-latest-cache-fractional-time");
+    let profile = unique_path("ir-fractional-systime", "R");
+    fs::write(
+        &profile,
+        "Sys.time <- function() as.POSIXct(1.9, origin = '1970-01-01', tz = 'UTC')\n",
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=fractional-latest-marker\\n')",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=fractional-latest-marker");
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker_text = fs::read_to_string(&markers[0])
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()));
+    assert_eq!(marker_text.lines().next(), Some("latest: 1"));
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-latest-cache-refresh");
@@ -735,8 +782,13 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
     let marker_text = fs::read_to_string(marker)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
     let mut lines = marker_text.lines();
-    let today = format!("latest: {}", time::OffsetDateTime::now_utc().date());
-    assert_eq!(lines.next(), Some(today.as_str()));
+    let created_at = lines
+        .next()
+        .and_then(|line| line.strip_prefix("latest: "))
+        .and_then(|timestamp| timestamp.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("{} should record a latest timestamp", marker.display()));
+    assert!(created_at <= current_utc_seconds());
+    assert!(current_utc_seconds() - created_at <= 1);
     let library = lines
         .next()
         .unwrap_or_else(|| panic!("{} should record a library path", marker.display()));
@@ -746,7 +798,67 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
         marker.display()
     );
 
-    fs::write(marker, format!("latest: 1970-01-01\n{library}\n"))
+    let still_fresh_created_at = current_utc_seconds() - 2;
+    let still_fresh_marker_text = format!("latest: {still_fresh_created_at}\n{library}\n");
+    fs::write(marker, &still_fresh_marker_text)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", "60")
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=latest-cache-refresh");
+
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    assert_eq!(marker_text, still_fresh_marker_text);
+
+    let future_created_at = current_utc_seconds() + 3600;
+    let future_marker_text = format!("latest: {future_created_at}\n{library}\n");
+    fs::write(marker, &future_marker_text)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            expr,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=latest-cache-refresh");
+
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    assert_ne!(marker_text, future_marker_text);
+    let refreshed_from_future_at = marker_text
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("latest: "))
+        .and_then(|timestamp| timestamp.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("{} should record a latest timestamp", marker.display()));
+    assert!(refreshed_from_future_at < future_created_at);
+    assert!(refreshed_from_future_at <= current_utc_seconds());
+
+    let stale_created_at = current_utc_seconds() - 86_401;
+    fs::write(marker, format!("latest: {stale_created_at}\n{library}\n"))
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
 
     let out = ir()
@@ -774,8 +886,13 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
     let marker_text = fs::read_to_string(marker)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
     let mut lines = marker_text.lines();
-    let today = format!("latest: {}", time::OffsetDateTime::now_utc().date());
-    assert_eq!(lines.next(), Some(today.as_str()));
+    let refreshed_at = lines
+        .next()
+        .and_then(|line| line.strip_prefix("latest: "))
+        .and_then(|timestamp| timestamp.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("{} should record a latest timestamp", marker.display()));
+    assert!(refreshed_at > stale_created_at);
+    assert!(refreshed_at <= current_utc_seconds());
     let refreshed_library = lines
         .next()
         .unwrap_or_else(|| panic!("{} should record a library path", marker.display()));

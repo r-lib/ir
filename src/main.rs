@@ -948,8 +948,7 @@ fn resolve_library_inner(
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
         .env("R_PKG_SHOW_PROGRESS", "true");
     if let Some(paths) = &resolution_cache_paths {
-        cmd.env("IR_RESOLUTION_MARKER", &paths.marker)
-            .env("IR_RESOLUTION_SOURCE", &paths.source);
+        cmd.env("IR_RESOLUTION_MARKER", &paths.marker);
     }
     if let Some(package_result_file) = &package_result_file {
         cmd.env("IR_RESOLVE_PACKAGE_RESULT_FILE", package_result_file);
