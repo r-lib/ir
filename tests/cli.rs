@@ -74,6 +74,10 @@ fn normalize_path_output(output: &Output) -> String {
     stdout(output).trim_end().replace('\\', "/")
 }
 
+fn renviron_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 fn assert_help_snapshot(name: &str, args: &[&str]) {
     let out = ir().args(args).output().unwrap();
     assert!(out.status.success(), "{args:?} should exit 0");
@@ -438,7 +442,7 @@ fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
     let renviron = unique_path("ir-cache-renviron", "Renviron");
     fs::write(
         &renviron,
-        format!("R_USER_CACHE_DIR={}\n", renviron_cache.display()),
+        format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
     )
     .unwrap();
 
@@ -686,7 +690,7 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
     let renviron = unique_path("ir-rust-owned-cache", "Renviron");
     fs::write(
         &renviron,
-        format!("R_USER_CACHE_DIR={}\n", renviron_cache.display()),
+        format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
     )
     .unwrap();
     let expr = "{ library(cli); cat('ir.fixture=rust-owned-cache\\n') }";
