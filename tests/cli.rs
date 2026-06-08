@@ -313,6 +313,32 @@ fn resolver_fallback_treats_windows_root_relative_refs_as_source_refs() {
 }
 
 #[test]
+fn resolver_accepts_single_letter_package_prefixes() {
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("driver")
+        .join("resolve.R");
+    let r_expr = format!(
+        concat!(
+            r#"source("{}"); "#,
+            r#"stopifnot(identical(ir_package_prefix("x=./pkg"), "x=")); "#,
+            r#"stopifnot(identical(ir_strip_package_prefix("x=./pkg"), "./pkg")); "#,
+            r#"stopifnot(identical(ir_normalize_input_ref("x=./pkg"), "x=local::./pkg")); "#,
+            r#"stopifnot(ir_has_source_input_ref("x=./pkg")); "#,
+            r#"cat("ir.fixture=single-letter-prefix\n")"#
+        ),
+        renviron_path(&driver)
+    );
+
+    let out = Command::new(rscript())
+        .args(["-e", &r_expr])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=single-letter-prefix");
+}
+
+#[test]
 fn resolver_github_record_preserves_git_submodule_retrieval() {
     let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("driver")
@@ -341,6 +367,40 @@ fn resolver_github_record_preserves_git_submodule_retrieval() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=github-submodules-record");
+}
+
+#[test]
+fn resolver_github_record_preserves_remote_host() {
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("driver")
+        .join("resolve.R");
+    let sha = "0123456789012345678901234567890123456789";
+    let r_expr = format!(
+        concat!(
+            r#"source("{}"); "#,
+            r#"res <- data.frame(package = "pkg", version = "0.0.1", type = "github"); "#,
+            r#"res$remote <- list(list(host = "github.ubc.ca/api/v3", username = "owner", repo = "repo", subdir = "", commitish = "main", pull = "", release = "")); "#,
+            r#"res$sources <- list("https://github.ubc.ca/api/v3/repos/owner/repo/zipball/{}"); "#,
+            "ir_renv_github_has_submodules <- function(record) FALSE; ",
+            "record <- ir_renv_github_record(res, 1L); ",
+            r#"stopifnot(identical(record$RemoteHost, "github.ubc.ca/api/v3"), identical(record$RemoteSha, "{}")); "#,
+            "ir_renv_github_has_submodules <- function(record) TRUE; ",
+            "record <- ir_renv_github_record(res, 1L); ",
+            r#"stopifnot(identical(record$RemoteHost, "github.ubc.ca/api/v3"), identical(record$RemoteType, "git"), identical(record$RemoteUrl, "https://github.ubc.ca/owner/repo")); "#,
+            r#"cat("ir.fixture=github-remote-host\n")"#
+        ),
+        renviron_path(&driver),
+        sha,
+        sha
+    );
+
+    let out = Command::new(rscript())
+        .args(["-e", &r_expr])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=github-remote-host");
 }
 
 #[test]

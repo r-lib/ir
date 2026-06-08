@@ -188,11 +188,11 @@ ir_marker_source_current <- function(source, exclude_newer) {
 }
 
 ir_strip_package_prefix <- function(ref) {
-  sub("^([[:alpha:]][[:alnum:].]*[[:alnum:]])=", "", ref)
+  sub("^([[:alpha:]]([[:alnum:].]*[[:alnum:]])?)=", "", ref)
 }
 
 ir_package_prefix <- function(ref) {
-  match <- regexpr("^([[:alpha:]][[:alnum:].]*[[:alnum:]])=", ref)
+  match <- regexpr("^([[:alpha:]]([[:alnum:].]*[[:alnum:]])?)=", ref)
   if (match[[1L]] == 1L) regmatches(ref, match) else ""
 }
 
@@ -287,10 +287,29 @@ ir_remote_field <- function(remote, field) {
 }
 
 ir_github_source_sha <- function(sources) {
-  source <- grep("^https://api[.]github[.]com/repos/.+/(zipball|tarball)/",
+  source <- grep("^https?://.+/repos/.+/(zipball|tarball)/",
                  sources, value = TRUE)
   if (!length(source)) return("")
   sub("^.*/(zipball|tarball)/", "", source[[1L]])
+}
+
+ir_github_remote_host <- function(res, i) {
+  remote <- res$remote[[i]]
+  host <- ir_remote_field(remote, "host")
+  if (nzchar(host)) return(sub("^https?://", "", sub("/+$", "", host)))
+
+  if ("metadata" %in% names(res)) {
+    metadata <- res$metadata[[i]]
+    host <- ir_remote_field(metadata, "RemoteHost")
+    if (nzchar(host)) return(sub("^https?://", "", sub("/+$", "", host)))
+  }
+
+  source <- grep("^https?://.+/repos/.+/(zipball|tarball)/",
+                 res$sources[[i]], value = TRUE)
+  if (length(source))
+    return(sub("^https?://(.+)/repos/.*$", "\\1", source[[1L]]))
+
+  "api.github.com"
 }
 
 ir_renv_github_has_submodules <- function(record) {
@@ -307,10 +326,14 @@ ir_renv_github_has_submodules <- function(record) {
 }
 
 ir_renv_github_url <- function(record) {
-  paste("https://github.com",
-        ir_remote_field(record, "RemoteUsername"),
-        ir_remote_field(record, "RemoteRepo"),
-        sep = "/")
+  host <- ir_remote_field(record, "RemoteHost")
+  host <- sub("^https?://", "", sub("/+$", "", host))
+  host <- sub("/api/v3$", "", host)
+  if (identical(host, "api.github.com")) host <- "github.com"
+
+  paste0("https://", host, "/",
+         ir_remote_field(record, "RemoteUsername"), "/",
+         ir_remote_field(record, "RemoteRepo"))
 }
 
 ir_renv_github_record <- function(res, i) {
@@ -325,7 +348,7 @@ ir_renv_github_record <- function(res, i) {
                  Version = res$version[[i]],
                  Source = "GitHub",
                  RemoteType = "github",
-                 RemoteHost = "api.github.com",
+                 RemoteHost = ir_github_remote_host(res, i),
                  RemoteUsername = ir_remote_field(remote, "username"),
                  RemoteRepo = ir_remote_field(remote, "repo"))
   subdir <- ir_remote_field(remote, "subdir")
