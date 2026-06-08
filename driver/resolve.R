@@ -214,6 +214,21 @@ ir_has_local_input_ref <- function(refs) {
   any(vapply(refs, ir_is_local_input_ref, logical(1)))
 }
 
+ir_is_source_input_ref <- function(ref) {
+  stopifnot(length(ref) == 1L)
+
+  ref <- trimws(ir_strip_package_prefix(ref))
+  source_prefixes <- c("github::", "gitlab::", "bitbucket::", "git::",
+                       "url::", "http://", "https://", "ssh://", "git@")
+  ir_is_local_input_ref(ref) ||
+    any(startsWith(tolower(ref), source_prefixes)) ||
+    grepl("/", ref, fixed = TRUE)
+}
+
+ir_has_source_input_ref <- function(refs) {
+  any(vapply(refs, ir_is_source_input_ref, logical(1)))
+}
+
 ir_normalize_input_ref <- function(ref) {
   stopifnot(length(ref) == 1L)
 
@@ -321,7 +336,7 @@ ir_resolve_main <- function() {
   ## written only after a successful materialise (below), so its presence implies
   ## a complete library.
   primary_ref <- if (length(deps)) deps[[1L]] else NULL
-  cache_resolution <- !ir_has_local_input_ref(deps)
+  cache_resolution <- !ir_has_source_input_ref(deps)
   marker <- ir_env_optional("IR_RESOLUTION_MARKER")
   if (is.null(marker) && cache_resolution) {
     marker <- file.path(cache_dir, "resolutions",

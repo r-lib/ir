@@ -33,7 +33,7 @@ pub(crate) fn paths(
 ) -> Result<Option<Paths>, Box<dyn Error>> {
     if dependencies
         .iter()
-        .any(|dependency| is_local_ref(dependency))
+        .any(|dependency| is_uncacheable_ref(dependency))
     {
         return Ok(None);
     }
@@ -138,13 +138,21 @@ fn resolution_cache_key(
     sha256_fields(&parts)
 }
 
-fn is_local_ref(dependency: &str) -> bool {
+fn is_uncacheable_ref(dependency: &str) -> bool {
+    is_local_ref(dependency) || is_source_ref(dependency)
+}
+
+fn strip_package_prefix(dependency: &str) -> &str {
     let dependency = dependency.trim();
-    let dependency = dependency
+    dependency
         .split_once('=')
         .filter(|(package, _)| is_package_name(package))
         .map(|(_, dependency)| dependency)
-        .unwrap_or(dependency);
+        .unwrap_or(dependency)
+}
+
+fn is_local_ref(dependency: &str) -> bool {
+    let dependency = strip_package_prefix(dependency);
 
     dependency.starts_with("local::")
         || dependency.starts_with("~/")
@@ -155,6 +163,27 @@ fn is_local_ref(dependency: &str) -> bool {
         || dependency.starts_with("../")
         || dependency.starts_with("..\\")
         || Path::new(dependency).is_absolute()
+}
+
+fn is_source_ref(dependency: &str) -> bool {
+    let dependency = strip_package_prefix(dependency);
+    let lower = dependency.to_ascii_lowercase();
+    let source_prefixes = [
+        "github::",
+        "gitlab::",
+        "bitbucket::",
+        "git::",
+        "url::",
+        "http://",
+        "https://",
+        "ssh://",
+        "git@",
+    ];
+
+    source_prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+        || dependency.contains('/')
 }
 
 fn is_package_name(name: &str) -> bool {
@@ -421,6 +450,37 @@ mod tests {
 
         assert_ne!(x64_marker, i386_marker);
         assert_ne!(x64_marker, r_home_marker);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn source_refs_skip_resolution_markers() {
+        let dir = unique_dir("ir-source-ref-cache-unit");
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let rscript = dummy_rscript(&dir);
+
+        for dependency in [
+            "github::owner/repo@branch",
+            "pkg=owner/repo/subdir@main",
+            "gitlab::group/project",
+            "https://example.com/pkg.tar.gz",
+        ] {
+            let dependencies = vec![dependency.to_string()];
+            assert!(
+                paths(
+                    &cache_dir,
+                    rscript.as_os_str(),
+                    &dependencies,
+                    Some("2026-06-01"),
+                    false
+                )
+                .unwrap()
+                .is_none(),
+                "{dependency} should not use a warm resolution marker"
+            );
+        }
 
         let _ = fs::remove_dir_all(&dir);
     }
