@@ -713,78 +713,7 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
 fn run_frontmatter_github_ref_installs_github_package() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-github-ref-cache");
-    let profile = unique_path("ir-github-ref-profile", "R");
     let script = unique_path("ir-github-ref", "R");
-    fs::write(
-        &profile,
-        r#"
-install_fixture_package <- function(pkg, version, lib, fields = character()) {
-  src <- tempfile(pkg)
-  dir.create(file.path(src, "R"), recursive = TRUE)
-  writeLines(c(
-    paste0("Package: ", pkg),
-    paste0("Version: ", version),
-    paste0("Title: ", pkg, " fixture"),
-    paste0("Description: ", pkg, " fixture."),
-    "License: MIT",
-    "Encoding: UTF-8",
-    fields
-  ), file.path(src, "DESCRIPTION"))
-  writeLines('exportPattern("^[[:alpha:]]+")', file.path(src, "NAMESPACE"))
-  writeLines("ok <- function() TRUE", file.path(src, "R", "ok.R"))
-  utils::install.packages(src, lib = lib, repos = NULL,
-                          type = "source", quiet = TRUE)
-}
-
-`::` <- function(pkg, name) {
-  pkg <- as.character(substitute(pkg))
-  name <- as.character(substitute(name))
-  if (identical(pkg, "pak") && identical(name, "pkg_deps")) {
-    return(function(refs, dependencies = NA, upgrade = TRUE) {
-      stopifnot(identical(refs, "github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap"))
-      data.frame(
-        ref = c(refs, "cli"),
-        type = c("github", "standard"),
-        status = "OK",
-        package = c("reticulate", "cli"),
-        direct = c(TRUE, FALSE),
-        priority = NA_character_,
-        version = c("1.46.0.9000", "3.6.5"),
-        stringsAsFactors = FALSE
-      )
-    })
-  }
-  if (identical(pkg, "renv") && identical(name, "use")) {
-    return(function(..., library = NULL, repos = getOption("repos"),
-                    attach = FALSE, sandbox = TRUE, isolate = TRUE,
-                    verbose = TRUE) {
-      refs <- unlist(list(...), use.names = FALSE)
-      stopifnot("github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap" %in% refs)
-      dir.create(library, recursive = TRUE, showWarnings = FALSE)
-      install_fixture_package("reticulate", "1.46.0.9000", library, c(
-        "RemoteType: github",
-        "RemoteHost: api.github.com",
-        "RemoteUsername: rstudio",
-        "RemoteRepo: reticulate",
-        "RemoteRef: fix-windows-pwsh-uv-bootstrap",
-        "RemoteSha: 476a9e2aa9284afaf4be023a0a8d1be3dbab13d4"
-      ))
-      install_fixture_package("cli", "3.6.5", library, c(
-        "RemoteType: standard",
-        "RemoteRef: cli",
-        "RemoteSha: 3.6.5"
-      ))
-      invisible()
-    })
-  }
-  if (identical(pkg, "secretbase") && identical(name, "sha256")) {
-    return(function(x) paste0("fake-", nchar(paste(x, collapse = "\n"))))
-  }
-  getExportedValue(pkg, name)
-}
-"#,
-    )
-    .unwrap();
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -792,9 +721,13 @@ install_fixture_package <- function(pkg, version, lib, fields = character()) {
 #|   - github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap
 
 library(reticulate)
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "reticulate"), mustWork = TRUE)
+loaded <- normalizePath(path.package("reticulate"), mustWork = TRUE)
 desc_file <- system.file("DESCRIPTION", package = "reticulate")
 desc <- as.list(read.dcf(desc_file)[1, ])
 stopifnot(
+  identical(loaded, expected),
   identical(desc$RemoteType, "github"),
   identical(desc$RemoteUsername, "rstudio"),
   identical(desc$RemoteRepo, "reticulate"),
@@ -815,7 +748,7 @@ cat("github.remote=", paste(
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_PROFILE_USER", &profile)
+        .env_remove("R_PROFILE_USER")
         .args(["run", "--isolated", "--vanilla"])
         .arg(&script)
         .output()
@@ -828,7 +761,6 @@ cat("github.remote=", paste(
         "github.remote=github/rstudio/reticulate/fix-windows-pwsh-uv-bootstrap",
     );
 
-    let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&script);
     let _ = fs::remove_dir_all(&cache_dir);
 }
