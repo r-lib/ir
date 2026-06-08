@@ -225,7 +225,7 @@ ir_renv_source_refs <- function(ref, type) {
 }
 
 ir_local_ref_paths <- function(ref) {
-  sub("^(([[:alpha:]][[:alnum:].]*[[:alnum:]])=)?local::", "", ref)
+  sub("^local::", "", ir_strip_package_prefix(ref))
 }
 
 ir_local_ref_fingerprint <- function(path) {

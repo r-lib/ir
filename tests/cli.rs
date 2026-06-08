@@ -964,6 +964,44 @@ cat("irlocal.version=", as.character(packageVersion("irlocal")), "\n", sep = "")
 }
 
 #[test]
+fn run_frontmatter_named_bare_local_ref_installs_local_package() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-named-bare-local-ref-cache");
+    let package_dir = unique_dir("ir-named-bare-local-ref-packages");
+    let package = write_r_source_package(&package_dir, "irlocal", &[]);
+    let script = unique_path("ir-named-bare-local-ref", "R");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - irlocal={}
+
+library(irlocal)
+cat("ir.fixture=named-bare-local-ref\n")
+"#,
+            renviron_path(&package)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=named-bare-local-ref");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&package_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn run_latest_resolution_cache_marker_truncates_fractional_creation_time() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-latest-cache-fractional-time");
