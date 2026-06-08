@@ -1374,8 +1374,21 @@ fn push_dependency_entry(
     let Some(value) = value.as_str() else {
         return Err("frontmatter `packages` entries must be strings".into());
     };
-    dependencies.push(value.to_owned());
+    push_dependency_entry_value(dependencies, value);
     Ok(())
+}
+
+fn push_dependency_entry_value(dependencies: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if value.is_empty() {
+        return;
+    }
+
+    if value.split_whitespace().nth(1).is_some() && !is_source_like_dependency(value) {
+        dependencies.extend(value.split_whitespace().map(str::to_owned));
+    } else {
+        dependencies.push(value.to_owned());
+    }
 }
 
 fn push_dependency_words(
@@ -1387,6 +1400,77 @@ fn push_dependency_words(
     };
     dependencies.extend(value.split_whitespace().map(str::to_owned));
     Ok(())
+}
+
+fn is_source_like_dependency(dependency: &str) -> bool {
+    let source = strip_package_prefix(dependency.trim());
+    let lower = source.to_ascii_lowercase();
+    let source_prefixes = [
+        "local::",
+        "github::",
+        "gitlab::",
+        "bitbucket::",
+        "git::",
+        "url::",
+        "http://",
+        "https://",
+        "ssh://",
+        "git@",
+    ];
+    source_prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+        || is_bare_local_ref(source)
+        || source.contains('/')
+}
+
+fn strip_package_prefix(dependency: &str) -> &str {
+    let Some((package, source)) = dependency.split_once('=') else {
+        return dependency;
+    };
+
+    if is_package_prefix(package) {
+        source
+    } else {
+        dependency
+    }
+}
+
+fn is_package_prefix(package: &str) -> bool {
+    let mut chars = package.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+
+    let mut last = first;
+    for ch in chars {
+        if !(ch.is_ascii_alphanumeric() || ch == '.') {
+            return false;
+        }
+        last = ch;
+    }
+
+    last.is_ascii_alphanumeric()
+}
+
+fn is_bare_local_ref(source: &str) -> bool {
+    let local_prefixes = ["/", "\\", "~/", "./", ".\\", "../", "..\\"];
+    local_prefixes
+        .iter()
+        .any(|prefix| source.starts_with(prefix))
+        || matches!(source, "~" | ".")
+        || has_windows_drive_prefix(source)
+}
+
+fn has_windows_drive_prefix(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
 }
 
 fn frontmatter_optional_bool(doc: &Yaml<'_>, key: &str) -> Result<Option<bool>, Box<dyn Error>> {
@@ -1961,5 +2045,29 @@ fn spawn_error(rscript: &OsStr, err: io::Error) -> String {
         )
     } else {
         format!("failed to launch `{}`: {err}", rscript.to_string_lossy())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dependency_sequence_entries_split_words_but_keep_source_refs() {
+        let mut dependencies = Vec::new();
+
+        push_dependency_entry_value(&mut dependencies, "dplyr tidyr");
+        push_dependency_entry_value(&mut dependencies, "./local package");
+        push_dependency_entry_value(&mut dependencies, "x=./named local package");
+
+        assert_eq!(
+            dependencies,
+            vec![
+                "dplyr",
+                "tidyr",
+                "./local package",
+                "x=./named local package"
+            ]
+        );
     }
 }

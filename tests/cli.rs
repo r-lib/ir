@@ -352,10 +352,11 @@ fn resolver_github_record_preserves_git_submodule_retrieval() {
             r#"res$remote <- list(list(username = "owner", repo = "repo", subdir = "", commitish = "main", pull = "", release = "")); "#,
             r#"res$sources <- list("https://api.github.com/repos/owner/repo/zipball/{}"); "#,
             "record <- ir_renv_github_record(res, 1L); ",
-            r#"stopifnot(identical(record$Source, "git"), identical(record$RemoteType, "git"), identical(record$RemoteUrl, "https://github.com/owner/repo"), identical(record$RemoteSha, "{}")); "#,
+            r#"stopifnot(identical(record$Source, "git"), identical(record$RemoteType, "git"), identical(record$RemoteUrl, "https://github.com/owner/repo"), identical(record$RemoteSha, "{}"), identical(record$RemoteRef, "{}")); "#,
             r#"cat("ir.fixture=github-submodules-record\n")"#
         ),
         renviron_path(&driver),
+        sha,
         sha,
         sha
     );
@@ -401,6 +402,31 @@ fn resolver_github_record_preserves_remote_host() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=github-remote-host");
+}
+
+#[test]
+fn resolver_translates_gitlab_subdir_refs_for_renv() {
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("driver")
+        .join("resolve.R");
+    let r_expr = format!(
+        concat!(
+            r#"source("{}"); "#,
+            r#"res <- data.frame(package = "pkg", version = "0.0.1", type = "gitlab", ref = "gitlab::group/project/-/R-package@main"); "#,
+            "install_ref <- ir_install_spec(res, 1L); ",
+            r#"stopifnot(identical(install_ref, "gitlab::group/project:R-package@main")); "#,
+            r#"cat("ir.fixture=gitlab-subdir-ref\n")"#
+        ),
+        renviron_path(&driver)
+    );
+
+    let out = Command::new(rscript())
+        .args(["-e", &r_expr])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=gitlab-subdir-ref");
 }
 
 #[test]

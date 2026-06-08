@@ -253,6 +253,29 @@ ir_is_source_ref <- function(res) {
   tolower(res$type) %in% source_types
 }
 
+ir_renv_hosted_subdir_ref <- function(ref, type) {
+  source <- ir_strip_package_prefix(ref)
+  prefix <- paste0(type, "::")
+  if (!startsWith(tolower(source), prefix)) return(ref)
+
+  package_prefix <- ir_package_prefix(ref)
+  source <- substring(source, nchar(prefix) + 1L)
+  at <- regexpr("@[^@]*$", source)
+  ref_suffix <- ""
+  if (at[[1L]] > 0L) {
+    ref_suffix <- substring(source, at[[1L]])
+    source <- substring(source, 1L, at[[1L]] - 1L)
+  }
+
+  if (identical(type, "gitlab")) {
+    source <- sub("/-/(.+)$", ":\\1", source)
+  } else {
+    source <- sub("^([^/]+/[^/]+)/(.+)$", "\\1:\\2", source)
+  }
+
+  paste0(package_prefix, prefix, source, ref_suffix)
+}
+
 ir_github_url_subdir_match <- function(ref) {
   stopifnot(length(ref) == 1L)
 
@@ -360,6 +383,7 @@ ir_renv_github_record <- function(res, i) {
     record$Source <- "git"
     record$RemoteType <- "git"
     record$RemoteUrl <- ir_renv_github_url(record)
+    record$RemoteRef <- sha
   }
   record
 }
@@ -379,6 +403,8 @@ ir_install_spec <- function(res, i) {
   type <- tolower(res$type[[i]])
   if (identical(type, "github")) return(ir_renv_github_record(res, i))
   if (identical(type, "local")) return(ir_renv_local_record(res, i))
+  if (type %in% c("gitlab", "bitbucket"))
+    return(ir_renv_hosted_subdir_ref(res$ref[[i]], type))
   if (ir_is_source_ref(res[i, , drop = FALSE])) return(res$ref[[i]])
   sprintf("%s@%s", res$package[[i]], res$version[[i]])
 }
