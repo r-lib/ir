@@ -191,18 +191,43 @@ ir_strip_package_prefix <- function(ref) {
   sub("^([[:alpha:]][[:alnum:].]*[[:alnum:]])=", "", ref)
 }
 
-ir_is_local_input_ref <- function(ref) {
-  stopifnot(length(ref) == 1L)
+ir_package_prefix <- function(ref) {
+  match <- regexpr("^([[:alpha:]][[:alnum:].]*[[:alnum:]])=", ref)
+  if (match[[1L]] == 1L) regmatches(ref, match) else ""
+}
 
-  ref <- trimws(ir_strip_package_prefix(ref))
-  local_prefixes <- c("local::", "/", "~/", "./", ".\\", "../", "..\\")
+ir_is_bare_local_ref <- function(ref) {
+  local_prefixes <- c("/", "~/", "./", ".\\", "../", "..\\")
   any(startsWith(ref, local_prefixes)) |
     ref %in% c("~", ".") |
     grepl("^[A-Za-z]:[\\\\/]", ref)
 }
 
+ir_is_local_input_ref <- function(ref) {
+  stopifnot(length(ref) == 1L)
+
+  ref <- trimws(ir_strip_package_prefix(ref))
+  startsWith(ref, "local::") || ir_is_bare_local_ref(ref)
+}
+
 ir_has_local_input_ref <- function(refs) {
   any(vapply(refs, ir_is_local_input_ref, logical(1)))
+}
+
+ir_normalize_input_ref <- function(ref) {
+  stopifnot(length(ref) == 1L)
+
+  ref <- trimws(ref)
+  package_prefix <- ir_package_prefix(ref)
+  source <- ir_strip_package_prefix(ref)
+  if (startsWith(source, "local::") || !ir_is_bare_local_ref(source))
+    return(ref)
+
+  paste0(package_prefix, "local::", source)
+}
+
+ir_normalize_input_refs <- function(refs) {
+  vapply(refs, ir_normalize_input_ref, character(1), USE.NAMES = FALSE)
 }
 
 ir_is_source_ref <- function(res) {
@@ -336,7 +361,7 @@ ir_resolve_main <- function() {
   # library() calls fail loudly instead of borrowing from the user library. A
   # Quarto render still resolves rmarkdown (injected below).
   primary_package <- NULL
-  refs_in <- deps
+  refs_in <- ir_normalize_input_refs(deps)
   res <- if (length(refs_in)) ir_resolve_refs(refs_in) else NULL
 
   if (!is.null(package_result_file)) {
