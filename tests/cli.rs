@@ -710,6 +710,92 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
 }
 
 #[test]
+fn run_frontmatter_github_ref_reaches_renv_use_unchanged() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-github-ref-cache");
+    let profile = unique_path("ir-github-ref-profile", "R");
+    let script = unique_path("ir-github-ref", "R");
+    let renv_use_args = unique_path("ir-renv-use-args", "txt");
+    fs::write(
+        &profile,
+        format!(
+            r#"
+`::` <- function(pkg, name) {{
+  pkg <- as.character(substitute(pkg))
+  name <- as.character(substitute(name))
+  if (identical(pkg, "pak") && identical(name, "pkg_deps")) {{
+    return(function(refs, dependencies = NA, upgrade = TRUE) {{
+      stopifnot(identical(refs, "github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap"))
+      data.frame(
+        ref = c(refs, "cli"),
+        type = c("github", "standard"),
+        status = "OK",
+        package = c("reticulate", "cli"),
+        direct = c(TRUE, FALSE),
+        priority = NA_character_,
+        version = c("1.46.0.9000", "3.6.5"),
+        stringsAsFactors = FALSE
+      )
+    }})
+  }}
+  if (identical(pkg, "renv") && identical(name, "use")) {{
+    return(function(..., library = NULL, repos = getOption("repos"),
+                    attach = FALSE, sandbox = TRUE, isolate = TRUE,
+                    verbose = TRUE) {{
+      refs <- unlist(list(...), use.names = FALSE)
+      writeLines(refs, "{}")
+      dir.create(library, recursive = TRUE, showWarnings = FALSE)
+      for (pkg in c("reticulate", "cli"))
+        dir.create(file.path(library, pkg), showWarnings = FALSE)
+      invisible()
+    }})
+  }}
+  if (identical(pkg, "secretbase") && identical(name, "sha256")) {{
+    return(function(x) paste0("fake-", nchar(paste(x, collapse = "\n"))))
+  }}
+  getExportedValue(pkg, name)
+}}
+"#,
+            renv_use_args.to_string_lossy().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap
+
+cat("ir.fixture=github-ref\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=github-ref");
+    let renv_refs = fs::read_to_string(&renv_use_args)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", renv_use_args.display()));
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_file(&renv_use_args);
+    let _ = fs::remove_dir_all(&cache_dir);
+
+    assert!(
+        renv_refs.contains("github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap"),
+        "{renv_refs}"
+    );
+}
+
+#[test]
 fn run_latest_resolution_cache_marker_truncates_fractional_creation_time() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-latest-cache-fractional-time");

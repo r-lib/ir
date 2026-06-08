@@ -187,6 +187,22 @@ ir_marker_source_current <- function(source, exclude_newer) {
   now - created_at <= ir_latest_resolution_max_age_seconds()
 }
 
+ir_source_ref_rows <- function(res) {
+  stopifnot(all(c("direct", "type") %in% names(res)))
+
+  source_types <- c("github", "gitlab", "bitbucket", "git", "local", "url")
+  res$direct %in% TRUE & tolower(res$type) %in% source_types
+}
+
+ir_install_refs <- function(res) {
+  stopifnot(all(c("package", "version", "ref") %in% names(res)))
+
+  refs <- sprintf("%s@%s", res$package, res$version)
+  source <- ir_source_ref_rows(res)
+  refs[source] <- res$ref[source]
+  sort(unique(refs))
+}
+
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
@@ -283,19 +299,21 @@ ir_resolve_main <- function() {
 
   if (is.null(res)) {
     pkgs     <- character()
-    resolved <- character()
+    install_refs <- character()
+    has_source_ref <- FALSE
   } else {
     # Drop base / recommended packages: those are supplied by R itself.
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
-    resolved <- sort(unique(sprintf("%s@%s", res$package, res$version)))
+    install_refs <- ir_install_refs(res)
+    has_source_ref <- any(ir_source_ref_rows(res))
   }
 
   ## 3. Hash the resolved set -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(resolved,
+  key <- paste(c(install_refs,
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
@@ -306,12 +324,12 @@ ir_resolve_main <- function() {
   # an unchanged script then cost nothing beyond resolution.
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
   have <- list.files(library_path)
-  if (length(pkgs) && !all(pkgs %in% have)) {
+  if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
     do.call(renv::use, c(
-      as.list(resolved),
+      as.list(install_refs),
       list(
         library = library_path,
         repos   = repos,
