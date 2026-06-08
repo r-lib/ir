@@ -710,21 +710,37 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
 }
 
 #[test]
-fn run_frontmatter_github_ref_reaches_renv_use_unchanged() {
+fn run_frontmatter_github_ref_installs_github_package() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-github-ref-cache");
     let profile = unique_path("ir-github-ref-profile", "R");
     let script = unique_path("ir-github-ref", "R");
-    let renv_use_args = unique_path("ir-renv-use-args", "txt");
     fs::write(
         &profile,
-        format!(
-            r#"
-`::` <- function(pkg, name) {{
+        r#"
+install_fixture_package <- function(pkg, version, lib, fields = character()) {
+  src <- tempfile(pkg)
+  dir.create(file.path(src, "R"), recursive = TRUE)
+  writeLines(c(
+    paste0("Package: ", pkg),
+    paste0("Version: ", version),
+    paste0("Title: ", pkg, " fixture"),
+    paste0("Description: ", pkg, " fixture."),
+    "License: MIT",
+    "Encoding: UTF-8",
+    fields
+  ), file.path(src, "DESCRIPTION"))
+  writeLines('exportPattern("^[[:alpha:]]+")', file.path(src, "NAMESPACE"))
+  writeLines("ok <- function() TRUE", file.path(src, "R", "ok.R"))
+  utils::install.packages(src, lib = lib, repos = NULL,
+                          type = "source", quiet = TRUE)
+}
+
+`::` <- function(pkg, name) {
   pkg <- as.character(substitute(pkg))
   name <- as.character(substitute(name))
-  if (identical(pkg, "pak") && identical(name, "pkg_deps")) {{
-    return(function(refs, dependencies = NA, upgrade = TRUE) {{
+  if (identical(pkg, "pak") && identical(name, "pkg_deps")) {
+    return(function(refs, dependencies = NA, upgrade = TRUE) {
       stopifnot(identical(refs, "github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap"))
       data.frame(
         ref = c(refs, "cli"),
@@ -736,28 +752,37 @@ fn run_frontmatter_github_ref_reaches_renv_use_unchanged() {
         version = c("1.46.0.9000", "3.6.5"),
         stringsAsFactors = FALSE
       )
-    }})
-  }}
-  if (identical(pkg, "renv") && identical(name, "use")) {{
+    })
+  }
+  if (identical(pkg, "renv") && identical(name, "use")) {
     return(function(..., library = NULL, repos = getOption("repos"),
                     attach = FALSE, sandbox = TRUE, isolate = TRUE,
-                    verbose = TRUE) {{
+                    verbose = TRUE) {
       refs <- unlist(list(...), use.names = FALSE)
-      writeLines(refs, "{}")
+      stopifnot("github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap" %in% refs)
       dir.create(library, recursive = TRUE, showWarnings = FALSE)
-      for (pkg in c("reticulate", "cli"))
-        dir.create(file.path(library, pkg), showWarnings = FALSE)
+      install_fixture_package("reticulate", "1.46.0.9000", library, c(
+        "RemoteType: github",
+        "RemoteHost: api.github.com",
+        "RemoteUsername: rstudio",
+        "RemoteRepo: reticulate",
+        "RemoteRef: fix-windows-pwsh-uv-bootstrap",
+        "RemoteSha: 476a9e2aa9284afaf4be023a0a8d1be3dbab13d4"
+      ))
+      install_fixture_package("cli", "3.6.5", library, c(
+        "RemoteType: standard",
+        "RemoteRef: cli",
+        "RemoteSha: 3.6.5"
+      ))
       invisible()
-    }})
-  }}
-  if (identical(pkg, "secretbase") && identical(name, "sha256")) {{
+    })
+  }
+  if (identical(pkg, "secretbase") && identical(name, "sha256")) {
     return(function(x) paste0("fake-", nchar(paste(x, collapse = "\n"))))
-  }}
+  }
   getExportedValue(pkg, name)
-}}
+}
 "#,
-            renv_use_args.to_string_lossy().replace('\\', "/")
-        ),
     )
     .unwrap();
     fs::write(
@@ -766,7 +791,24 @@ fn run_frontmatter_github_ref_reaches_renv_use_unchanged() {
 #| packages:
 #|   - github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap
 
+library(reticulate)
+desc_file <- system.file("DESCRIPTION", package = "reticulate")
+desc <- as.list(read.dcf(desc_file)[1, ])
+stopifnot(
+  identical(desc$RemoteType, "github"),
+  identical(desc$RemoteUsername, "rstudio"),
+  identical(desc$RemoteRepo, "reticulate"),
+  identical(desc$RemoteRef, "fix-windows-pwsh-uv-bootstrap"),
+  nzchar(desc$RemoteSha)
+)
 cat("ir.fixture=github-ref\n")
+cat("github.remote=", paste(
+  desc$RemoteType,
+  desc$RemoteUsername,
+  desc$RemoteRepo,
+  desc$RemoteRef,
+  sep = "/"
+), "\n", sep = "")
 "#,
     )
     .unwrap();
@@ -781,18 +823,14 @@ cat("ir.fixture=github-ref\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=github-ref");
-    let renv_refs = fs::read_to_string(&renv_use_args)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", renv_use_args.display()));
+    assert_stdout_contains(
+        &out,
+        "github.remote=github/rstudio/reticulate/fix-windows-pwsh-uv-bootstrap",
+    );
 
     let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&script);
-    let _ = fs::remove_file(&renv_use_args);
     let _ = fs::remove_dir_all(&cache_dir);
-
-    assert!(
-        renv_refs.contains("github::rstudio/reticulate@fix-windows-pwsh-uv-bootstrap"),
-        "{renv_refs}"
-    );
 }
 
 #[test]
