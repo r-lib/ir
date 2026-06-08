@@ -188,10 +188,10 @@ ir_marker_source_current <- function(source, exclude_newer) {
 }
 
 ir_is_source_ref <- function(res) {
-  stopifnot(c("direct", "type") %in% names(res))
+  stopifnot("type" %in% names(res))
 
   source_types <- c("github", "gitlab", "bitbucket", "git", "local", "url")
-  res$direct & tolower(res$type) %in% source_types
+  tolower(res$type) %in% source_types
 }
 
 ir_install_refs <- function(res) {

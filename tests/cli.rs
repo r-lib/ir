@@ -161,6 +161,30 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn write_r_source_package(root: &Path, name: &str, extra_description: &[String]) -> PathBuf {
+    let source = root.join(name);
+    fs::create_dir_all(source.join("R")).unwrap();
+
+    let mut description = vec![
+        format!("Package: {name}"),
+        "Version: 0.0.1".to_string(),
+        format!("Title: {name} fixture"),
+        format!("Description: {name} fixture."),
+        "License: MIT".to_string(),
+        "Encoding: UTF-8".to_string(),
+    ];
+    description.extend(extra_description.iter().cloned());
+    fs::write(source.join("DESCRIPTION"), description.join("\n") + "\n").unwrap();
+    fs::write(
+        source.join("NAMESPACE"),
+        "exportPattern(\"^[[:alpha:]]+\")\n",
+    )
+    .unwrap();
+    fs::write(source.join("R").join("ok.R"), "ok <- function() TRUE\n").unwrap();
+
+    source
+}
+
 fn output_text(output: &Output) -> String {
     format!(
         "status: {}\nstdout:\n{}\nstderr:\n{}",
@@ -762,6 +786,57 @@ cat("github.remote=", paste(
     );
 
     let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_frontmatter_preserves_transitive_source_refs() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-transitive-source-cache");
+    let package_dir = unique_dir("ir-transitive-source-packages");
+    let dep = write_r_source_package(&package_dir, "irdep", &[]);
+    let parent = write_r_source_package(
+        &package_dir,
+        "irparent",
+        &[
+            "Imports: irdep".to_string(),
+            format!("Remotes: irdep=local::{}", renviron_path(&dep)),
+        ],
+    );
+    let script = unique_path("ir-transitive-source", "R");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - local::{}
+
+library(irparent)
+library(irdep)
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, c("irparent", "irdep")), mustWork = TRUE)
+loaded <- normalizePath(path.package(c("irparent", "irdep")), mustWork = TRUE)
+stopifnot(identical(loaded, expected))
+cat("ir.fixture=transitive-source\n")
+"#,
+            renviron_path(&parent)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=transitive-source");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&package_dir);
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
