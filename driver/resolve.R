@@ -194,12 +194,22 @@ ir_is_source_ref <- function(res) {
   tolower(res$type) %in% source_types
 }
 
+ir_renv_source_refs <- function(ref, type) {
+  stopifnot(length(ref) == length(type))
+
+  is_github <- tolower(type) == "github"
+  ref[is_github] <- sub("^(github::[^/]+/[^/@#]+)/(.*)$", "\\1:\\2",
+                        ref[is_github])
+  ref
+}
+
 ir_install_refs <- function(res) {
   stopifnot(c("package", "version", "ref") %in% names(res))
 
   refs <- sprintf("%s@%s", res$package, res$version)
   is_source_ref <- ir_is_source_ref(res)
-  refs[is_source_ref] <- res$ref[is_source_ref]
+  refs[is_source_ref] <- ir_renv_source_refs(res$ref[is_source_ref],
+                                             res$type[is_source_ref])
   sort(unique(refs))
 }
 

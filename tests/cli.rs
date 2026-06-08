@@ -170,6 +170,7 @@ fn write_r_source_package(root: &Path, name: &str, extra_description: &[String])
         "Version: 0.0.1".to_string(),
         format!("Title: {name} fixture"),
         format!("Description: {name} fixture."),
+        "Authors@R: person(\"IR\", \"Fixture\", email = \"ir@example.com\", role = c(\"aut\", \"cre\"))".to_string(),
         "License: MIT".to_string(),
         "Encoding: UTF-8".to_string(),
     ];
@@ -783,6 +784,67 @@ cat("github.remote=", paste(
     assert_stdout_contains(
         &out,
         "github.remote=github/rstudio/reticulate/fix-windows-pwsh-uv-bootstrap",
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_frontmatter_github_subdir_ref_installs_subdir_package() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-github-subdir-ref-cache");
+    let script = unique_path("ir-github-subdir-ref", "R");
+    let sha = "a7c16d1ea299853694af95b3cdd3b7ab3e97fb0e";
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - github::r-lib/pkgdepends/tests/testthat/fixtures/foo@{}
+
+library(foo)
+lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+expected <- normalizePath(file.path(lib, "foo"), mustWork = TRUE)
+loaded <- normalizePath(path.package("foo"), mustWork = TRUE)
+desc_file <- system.file("DESCRIPTION", package = "foo")
+desc <- as.list(read.dcf(desc_file)[1, ])
+stopifnot(
+  identical(loaded, expected),
+  identical(desc$RemoteType, "github"),
+  identical(desc$RemoteUsername, "r-lib"),
+  identical(desc$RemoteRepo, "pkgdepends"),
+  identical(desc$RemoteRef, "{}"),
+  identical(desc$RemoteSubdir, "tests/testthat/fixtures/foo"),
+  nzchar(desc$RemoteSha)
+)
+cat("ir.fixture=github-subdir-ref\n")
+cat("github.remote=", paste(
+  desc$RemoteType,
+  desc$RemoteUsername,
+  desc$RemoteRepo,
+  desc$RemoteSubdir,
+  sep = "/"
+), "\n", sep = "")
+"#,
+            sha, sha
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=github-subdir-ref");
+    assert_stdout_contains(
+        &out,
+        "github.remote=github/r-lib/pkgdepends/tests/testthat/fixtures/foo",
     );
 
     let _ = fs::remove_file(&script);
