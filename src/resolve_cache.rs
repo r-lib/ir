@@ -162,6 +162,7 @@ fn is_local_ref(dependency: &str) -> bool {
         || dependency == "."
         || dependency.starts_with("../")
         || dependency.starts_with("..\\")
+        || dependency.starts_with('\\')
         || Path::new(dependency).is_absolute()
 }
 
@@ -466,6 +467,7 @@ mod tests {
             "pkg=owner/repo/subdir@main",
             "gitlab::group/project",
             "https://example.com/pkg.tar.gz",
+            "\\work\\pkg",
         ] {
             let dependencies = vec![dependency.to_string()];
             assert!(

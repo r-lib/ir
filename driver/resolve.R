@@ -280,45 +280,75 @@ ir_pak_github_url_subdir_ref <- function(ref) {
          "@", parts[[3L]])
 }
 
-ir_renv_github_url_ref <- function(ref) {
-  stopifnot(length(ref) == 1L)
-
-  parts <- ir_github_url_subdir_match(ref)
-  if (!is.null(parts)) {
-    return(paste0(ir_package_prefix(ref), parts[[2L]], ":", parts[[4L]],
-                  "@", parts[[3L]]))
-  }
-
-  package_prefix <- ir_package_prefix(ref)
-  source <- sub("^github::", "", ir_strip_package_prefix(ref))
-  if (!grepl("^https?://github[.]com/", source, ignore.case = TRUE))
-    return(ref)
-
-  source <- sub("^https?://github[.]com/", "", source, ignore.case = TRUE)
-  source <- sub("^([^/]+/[^/]+)[.]git($|/)", "\\1\\2", source)
-  source <- sub("/+$", "", source)
-  source <- sub("^([^/]+/[^/]+)/(tree|commit|releases/tag)/(.+)$",
-                "\\1@\\3",
-                source)
-  paste0(package_prefix, source)
+ir_remote_field <- function(remote, field) {
+  value <- remote[[field]]
+  if (is.null(value) || !length(value) || is.na(value[[1L]])) ""
+  else as.character(value[[1L]])
 }
 
-ir_renv_source_refs <- function(ref, type) {
-  stopifnot(length(ref) == length(type))
-
-  package_prefix <- "(([[:alpha:]][[:alnum:].]*[[:alnum:]])=)?"
-  is_github <- tolower(type) == "github"
-  ref[is_github] <- vapply(ref[is_github], ir_renv_github_url_ref, character(1),
-                           USE.NAMES = FALSE)
-  ref[is_github] <- sub(paste0("^", package_prefix,
-                               "((github::)?[^/]+/[^/@#]+)/(.*)$"),
-                        "\\1\\3:\\5",
-                        ref[is_github])
-  ref
+ir_github_source_sha <- function(sources) {
+  source <- grep("^https://api[.]github[.]com/repos/.+/(zipball|tarball)/",
+                 sources, value = TRUE)
+  if (!length(source)) return("")
+  sub("^.*/(zipball|tarball)/", "", source[[1L]])
 }
 
-ir_local_ref_paths <- function(ref) {
-  sub("^local::", "", ir_strip_package_prefix(ref))
+ir_renv_github_record <- function(res, i) {
+  remote <- res$remote[[i]]
+  ref <- ir_remote_field(remote, "commitish")
+  if (!nzchar(ref) && nzchar(ir_remote_field(remote, "release")))
+    ref <- "*release"
+  if (!nzchar(ref) && nzchar(ir_remote_field(remote, "pull")))
+    ref <- paste0("pull/", ir_remote_field(remote, "pull"))
+
+  record <- list(Package = res$package[[i]],
+                 Version = res$version[[i]],
+                 Source = "GitHub",
+                 RemoteType = "github",
+                 RemoteHost = "api.github.com",
+                 RemoteUsername = ir_remote_field(remote, "username"),
+                 RemoteRepo = ir_remote_field(remote, "repo"))
+  subdir <- ir_remote_field(remote, "subdir")
+  if (nzchar(subdir)) record$RemoteSubdir <- subdir
+  if (nzchar(ref)) record$RemoteRef <- ref
+  sha <- ir_github_source_sha(res$sources[[i]])
+  if (nzchar(sha)) record$RemoteSha <- sha
+  record
+}
+
+ir_renv_local_record <- function(res, i) {
+  path <- ir_remote_field(res$remote[[i]], "path")
+  stopifnot(nzchar(path))
+  list(Package = res$package[[i]],
+       Version = res$version[[i]],
+       Source = "Local",
+       RemoteType = "local",
+       RemoteUrl = path,
+       Cacheable = FALSE)
+}
+
+ir_install_spec <- function(res, i) {
+  type <- tolower(res$type[[i]])
+  if (identical(type, "github")) return(ir_renv_github_record(res, i))
+  if (identical(type, "local")) return(ir_renv_local_record(res, i))
+  if (ir_is_source_ref(res[i, , drop = FALSE])) return(res$ref[[i]])
+  sprintf("%s@%s", res$package[[i]], res$version[[i]])
+}
+
+ir_install_spec_key <- function(spec) {
+  if (is.character(spec)) return(spec)
+  fields <- sort(names(spec))
+  values <- vapply(fields, function(field) {
+    paste(as.character(spec[[field]]), collapse = "\r")
+  }, character(1))
+  paste(paste(fields, values, sep = "="), collapse = "\n")
+}
+
+ir_install_plan <- function(res) {
+  specs <- lapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i))
+  keys <- vapply(specs, ir_install_spec_key, character(1))
+  keep <- !duplicated(keys)
+  list(specs = specs[keep], keys = sort(keys[keep]))
 }
 
 ir_local_ref_fingerprint <- function(path) {
@@ -341,22 +371,16 @@ ir_local_ref_fingerprint <- function(path) {
 }
 
 ir_local_ref_fingerprints <- function(res) {
-  stopifnot(c("type", "ref") %in% names(res))
+  stopifnot(c("type", "remote") %in% names(res))
 
   local <- tolower(res$type) == "local"
   if (!any(local)) return(character())
-  vapply(ir_local_ref_paths(res$ref[local]), ir_local_ref_fingerprint,
-         character(1))
-}
-
-ir_install_refs <- function(res) {
-  stopifnot(c("package", "version", "ref") %in% names(res))
-
-  refs <- sprintf("%s@%s", res$package, res$version)
-  is_source_ref <- ir_is_source_ref(res)
-  refs[is_source_ref] <- ir_renv_source_refs(res$ref[is_source_ref],
-                                             res$type[is_source_ref])
-  sort(unique(refs))
+  paths <- vapply(res$remote[local], function(remote) {
+    path <- ir_remote_field(remote, "path")
+    stopifnot(nzchar(path))
+    path
+  }, character(1))
+  vapply(paths, ir_local_ref_fingerprint, character(1))
 }
 
 ## --- pipeline ---------------------------------------------------------------
@@ -456,7 +480,8 @@ ir_resolve_main <- function() {
 
   if (is.null(res)) {
     pkgs     <- character()
-    install_refs <- character()
+    install_specs <- list()
+    install_keys <- character()
     local_ref_fingerprints <- character()
     has_source_ref <- FALSE
   } else {
@@ -464,15 +489,17 @@ ir_resolve_main <- function() {
     keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
-    install_refs <- ir_install_refs(res)
+    install_plan <- ir_install_plan(res)
+    install_specs <- install_plan$specs
+    install_keys <- install_plan$keys
     local_ref_fingerprints <- ir_local_ref_fingerprints(res)
     has_source_ref <- any(ir_is_source_ref(res))
   }
 
-  ## 3. Hash install refs -> content-addressed library path
+  ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(install_refs,
+  key <- paste(c(install_keys,
                  local_ref_fingerprints,
                  as.character(getRversion()),
                  R.version$platform),
@@ -489,7 +516,7 @@ ir_resolve_main <- function() {
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
     do.call(renv::use, c(
-      as.list(install_refs),
+      install_specs,
       list(
         library = library_path,
         repos   = repos,

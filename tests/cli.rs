@@ -1082,6 +1082,44 @@ cat("irlocal.version=", as.character(packageVersion("irlocal")), "\n", sep = "")
 }
 
 #[test]
+fn run_frontmatter_local_ref_with_pak_params_installs_local_package() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-local-ref-params-cache");
+    let package_dir = unique_dir("ir-local-ref-params-packages");
+    let package = write_r_source_package(&package_dir, "irlocal", &[]);
+    let script = unique_path("ir-local-ref-params", "R");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - local::{}?reinstall
+
+library(irlocal)
+cat("ir.fixture=local-ref-params\n")
+"#,
+            renviron_path(&package)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=local-ref-params");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&package_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn run_frontmatter_named_bare_local_ref_installs_local_package() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-named-bare-local-ref-cache");
