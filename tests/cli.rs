@@ -273,7 +273,8 @@ fn ci_dependencies_are_available() {
         "pkgs <- c(",
         "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
         "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
-        "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits'); ",
+        "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
+        "'htmltools'); ",
         "missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; ",
         "if (length(missing)) { ",
         "stop('missing R packages: ', paste(missing, collapse = ', '), call. = FALSE) ",
@@ -344,6 +345,83 @@ fn rx_help_outputs_match_snapshots() {
     for (name, args) in [("rx-help", &["--help"][..]), ("rx-help", &["-h"])] {
         assert_rx_help_snapshot(name, args);
     }
+}
+
+#[test]
+fn cli_help_honors_clicolor_force() {
+    let out = ir()
+        .env("CLICOLOR_FORCE", "1")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let stdout = stdout(&out);
+    assert!(stdout.contains("\u{1b}["), "{stdout}");
+    assert!(
+        stdout.contains("\u{1b}[32m") || stdout.contains("\u{1b}[33m"),
+        "{stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn docs_website_has_dark_mode_and_colored_reference_output() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = e2e_lock();
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let docs_dir = manifest_dir.join("docs");
+    let output_dir = unique_dir("ir-docs-reference-output");
+    let bin_dir = unique_dir("ir-docs-reference-bin");
+    let fake_ir = bin_dir.join("ir");
+
+    fs::write(
+        &fake_ir,
+        "#!/bin/sh\nprintf '\\033[1;32mUsage:\\033[0m ir'\nfor arg in \"$@\"; do printf ' %s' \"$arg\"; done\nprintf '\\n'\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&fake_ir).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&fake_ir, perms).unwrap();
+
+    let config = fs::read_to_string(docs_dir.join("_quarto.yml")).unwrap();
+    assert!(config.contains("light:"), "{config}");
+    assert!(config.contains("dark:"), "{config}");
+    assert!(config.contains("dark:\n        - cosmo"), "{config}");
+    assert!(config.contains("- dark.scss"), "{config}");
+    assert!(!config.contains("- darkly"), "{config}");
+
+    let styles = fs::read_to_string(docs_dir.join("styles.css")).unwrap();
+    assert!(styles.contains("quarto-dark"), "{styles}");
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new("quarto")
+        .current_dir(&docs_dir)
+        .env("PATH", path)
+        .args(["render", "reference.qmd", "--to", "html"])
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+    assert_success(&output);
+
+    let html = fs::read_to_string(output_dir.join("reference.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered reference page: {e}"));
+    assert!(html.contains("data-mode=\"dark\""), "{html}");
+    assert!(html.contains("color: #00BB00"), "{html}");
+    assert!(html.contains("font-weight: bold"), "{html}");
+    assert!(!html.contains("\u{1b}["), "{html}");
+
+    let _ = fs::remove_dir_all(&output_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[test]

@@ -1,16 +1,67 @@
 :root {
   --ir-accent: #2f6f5e;
+  --ir-accent-hover: #24594b;
+  --ir-bg: #ffffff;
   --ir-ink: #1f2933;
   --ir-muted: #52616b;
   --ir-panel: #f6f8f7;
+  --ir-navbar: #f8f9fa;
+}
+
+body.quarto-dark {
+  --ir-accent: #8fd8c1;
+  --ir-accent-hover: #b4eadb;
+  --ir-bg: #0f151a;
+  --ir-ink: #e7edf0;
+  --ir-muted: #aeb8be;
+  --ir-panel: #172026;
+  --ir-navbar: #111a20;
+  --bs-body-bg: var(--ir-bg);
+  --bs-body-color: var(--ir-ink);
+  --bs-border-color: #33424a;
+  --bs-link-color: var(--ir-accent);
+  --bs-link-hover-color: var(--ir-accent-hover);
 }
 
 body {
+  background-color: var(--ir-bg);
   color: var(--ir-ink);
 }
 
 a {
   color: var(--ir-accent);
+}
+
+a:hover {
+  color: var(--ir-accent-hover);
+}
+
+body.quarto-dark .navbar {
+  background-color: var(--ir-navbar);
+  box-shadow: inset 0 -1px 0 var(--bs-border-color);
+}
+
+body.quarto-dark .navbar .navbar-brand,
+body.quarto-dark .navbar .nav-link,
+body.quarto-dark .navbar-title,
+body.quarto-dark .quarto-color-scheme-toggle {
+  color: var(--ir-ink);
+}
+
+body.quarto-dark .navbar .nav-link.active,
+body.quarto-dark .navbar .nav-link:hover,
+body.quarto-dark .navbar .navbar-brand:hover,
+body.quarto-dark .quarto-color-scheme-toggle:hover {
+  color: var(--ir-accent);
+}
+
+body.quarto-dark .dropdown-menu {
+  --bs-dropdown-bg: var(--ir-panel);
+  --bs-dropdown-border-color: var(--bs-border-color);
+  --bs-dropdown-color: var(--ir-ink);
+  --bs-dropdown-link-color: var(--ir-ink);
+  --bs-dropdown-link-hover-bg: #1d2a33;
+  --bs-dropdown-link-hover-color: var(--ir-accent-hover);
 }
 
 .navbar-title {
@@ -25,6 +76,12 @@ a {
 
 pre {
   border-radius: 6px;
+}
+
+pre.ir-cli-help {
+  background-color: var(--ir-panel);
+  border: 1px solid var(--bs-border-color);
+  padding: 1rem;
 }
 
 code {

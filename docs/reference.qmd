@@ -11,8 +11,23 @@ This page renders the current CLI help by running the `ir` executable on `PATH` 
 
 ```{r}
 cli_help <- function(...) {
+  stopifnot(
+    requireNamespace("fansi", quietly = TRUE),
+    requireNamespace("htmltools", quietly = TRUE),
+    requireNamespace("knitr", quietly = TRUE)
+  )
+
   args <- c(..., "--help")
-  output <- system2("ir", args, stdout = TRUE, stderr = TRUE)
+  old_options <- options(cli.num_colors = 256L)
+  on.exit(options(old_options), add = TRUE)
+
+  output <- system2(
+    "ir",
+    args,
+    stdout = TRUE,
+    stderr = TRUE,
+    env = c("CLICOLOR_FORCE=1", "CLICOLOR=1")
+  )
   status <- attr(output, "status")
 
   if (!is.null(status)) {
@@ -22,7 +37,13 @@ cli_help <- function(...) {
     )
   }
 
-  cat(output, sep = "\n")
+  output <- htmltools::htmlEscape(output)
+  output <- fansi::sgr_to_html(output, term.cap = "256")
+  knitr::asis_output(paste0(
+    "<pre class=\"ir-cli-help\"><code>",
+    paste(output, collapse = "\n"),
+    "</code></pre>\n"
+  ))
 }
 ```
 

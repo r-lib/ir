@@ -32,7 +32,12 @@ website:
 format:
   html:
     theme:
-      - cosmo
-      - brand
+      light:
+        - cosmo
+        - brand
+      dark:
+        - cosmo
+        - brand
+        - dark.scss
     css: styles.css
     toc: true
