@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::builder::styling::{AnsiColor, Styles};
+use clap::builder::StyledStr;
 use clap::{Arg, ArgAction, ColorChoice, Command as ClapCommand};
 
 use crate::quarto::RenderSource;
@@ -17,12 +18,11 @@ pub(crate) fn root() -> ClapCommand {
         .color(color_choice())
         .styles(help_styles())
         .arg_required_else_help(true)
-        .after_help(concat!(
-            "Examples:\n",
+        .after_help(examples_help(concat!(
             "  ir run script.R\n",
             "  ir render report.qmd\n",
             "  ir tool run btw --help",
-        ))
+        )))
         .subcommand(run_command())
         .subcommand(render_command())
         .subcommand(tool_command())
@@ -38,24 +38,37 @@ fn color_choice() -> ColorChoice {
 
 fn help_styles() -> Styles {
     Styles::styled()
-        .header(AnsiColor::Green.on_default().bold())
-        .usage(AnsiColor::Green.on_default().bold())
+        .header(help_header_style())
+        .usage(help_header_style())
         .literal(AnsiColor::BrightBlue.on_default().bold())
         .placeholder(AnsiColor::BrightBlue.on_default())
+}
+
+fn help_header_style() -> clap::builder::styling::Style {
+    AnsiColor::Green.on_default().bold()
+}
+
+fn examples_help(body: &'static str) -> StyledStr {
+    let style = help_header_style();
+    StyledStr::from(format!(
+        "{}Examples:{}\n{}",
+        style.render(),
+        style.render_reset(),
+        body
+    ))
 }
 
 fn run_command() -> ClapCommand {
     ClapCommand::new("run")
         .about("Run a script or inline R expression")
         .override_usage("ir run [OPTIONS] [ARGS]...")
-        .after_help(concat!(
-            "Examples:\n",
+        .after_help(examples_help(concat!(
             "  ir run --with cli --vanilla script.R --input data.csv\n",
             "      # --with is for ir; --vanilla is for Rscript.\n",
             "      # --input data.csv is passed to script.R.\n\n",
             "  ir run --with cli -e 'print(commandArgs(TRUE))' --input data.csv\n",
             "      # --input data.csv is passed to commandArgs(TRUE).",
-        ))
+        )))
         .arg(
             Arg::new("expr")
                 .short('e')
@@ -94,14 +107,13 @@ fn run_command() -> ClapCommand {
 fn render_command() -> ClapCommand {
     ClapCommand::new("render")
         .about("Render a Quarto document or script")
-        .after_help(concat!(
-            "Examples:\n",
+        .after_help(examples_help(concat!(
             "  ir render --with ggplot2 report.qmd --to html\n",
             "      # --with is for ir; --to html is passed to quarto render.\n\n",
             "  ir render --vanilla slides.qmd --output slides.html\n",
             "      # --vanilla runs knitr R with --vanilla.\n",
             "      # --output slides.html is passed to quarto render.",
-        ))
+        )))
         .arg(
             Arg::new("with")
                 .long("with")
@@ -158,14 +170,13 @@ fn tool_run_command() -> ClapCommand {
     tool_run_args(
         ClapCommand::new("run")
             .about("Resolve a package and run an executable from its exec directory")
-            .after_help(concat!(
-                "Examples:\n",
+            .after_help(examples_help(concat!(
                 "  ir tool run btw --help\n",
                 "      # btw is shorthand for --from btw btw.\n\n",
                 "  ir tool run --from btw --vanilla btw --input data.csv\n",
                 "      # --from is for ir; --vanilla is for Rscript.\n",
                 "      # --input data.csv is passed to the btw executable.",
-            )),
+            ))),
     )
 }
 
@@ -220,11 +231,10 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
 fn tool_install_command() -> ClapCommand {
     ClapCommand::new("install")
         .about("Install package executable launchers")
-        .after_help(concat!(
-            "Examples:\n",
+        .after_help(examples_help(concat!(
             "  ir tool install btw\n",
             "  ir tool install --with cli --bin-dir ~/.local/bin btw",
-        ))
+        )))
         .arg(
             Arg::new("with")
                 .long("with")

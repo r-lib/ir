@@ -366,6 +366,23 @@ fn cli_help_honors_clicolor_force() {
     assert!(!stdout.contains("\u{1b}[4m"), "{stdout}");
 }
 
+#[test]
+fn examples_help_headings_are_colored() {
+    let colored_examples = "\u{1b}[1m\u{1b}[32mExamples:\u{1b}[0m";
+    for args in [
+        &["--help"][..],
+        &["run", "--help"],
+        &["render", "--help"],
+        &["tool", "run", "--help"],
+        &["tool", "install", "--help"],
+    ] {
+        let out = ir().env("CLICOLOR_FORCE", "1").args(args).output().unwrap();
+        assert_success(&out);
+        let stdout = stdout(&out);
+        assert!(stdout.contains(colored_examples), "{args:?}:\n{stdout}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn docs_website_has_dark_mode_and_colored_reference_output() {
