@@ -17,7 +17,7 @@ ir:
 ---
 ```
 
-Run the document with the render subcommand:
+Render the document with the `render` subcommand:
 
 ```console
 $ ir render report.qmd
