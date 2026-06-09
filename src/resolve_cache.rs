@@ -29,7 +29,7 @@ pub(crate) fn paths(
     rscript: &OsStr,
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto: bool,
+    quarto_render: bool,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
     if !dependencies
         .iter()
@@ -51,7 +51,7 @@ pub(crate) fn paths(
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
-        quarto,
+        quarto_render,
         &rscript_identity,
     ));
     let marker_name = marker
@@ -121,7 +121,7 @@ pub(crate) fn read(
 fn resolution_cache_key(
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto: bool,
+    quarto_render: bool,
     rscript_identity: &str,
 ) -> String {
     let source_key = exclude_newer
@@ -130,7 +130,7 @@ fn resolution_cache_key(
     let mut parts = dependencies.to_vec();
     parts.sort();
     parts.push(source_key);
-    if quarto {
+    if quarto_render {
         parts.push("quarto".to_string());
     }
     parts.push(format!("rscript: {rscript_identity}"));

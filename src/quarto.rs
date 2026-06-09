@@ -6,7 +6,7 @@ use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::script::{parse_quarto_frontmatter, ScriptSpec};
+use crate::spec::{parse_quarto_frontmatter, RuntimeSpec};
 
 pub(crate) struct RenderSource {
     path: PathBuf,
@@ -23,14 +23,14 @@ impl RenderSource {
         &self.path
     }
 
-    pub(crate) fn script_spec(&self) -> Result<ScriptSpec, Box<dyn Error>> {
+    pub(crate) fn script_spec(&self) -> Result<RuntimeSpec, Box<dyn Error>> {
         if is_quarto_document(&self.path) {
             return read_quarto_document_spec(&self.path);
         }
         if is_r_script(&self.path) {
             return read_quarto_script_spec(&self.path);
         }
-        Ok(ScriptSpec::default())
+        Ok(RuntimeSpec::default())
     }
 
     pub(crate) fn reject_unsupported_rscript_args(
@@ -87,11 +87,11 @@ pub(crate) fn run(
     }
 }
 
-fn read_quarto_document_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
+fn read_quarto_document_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
     parse_quarto_frontmatter(&read_to_string(script)?)
 }
 
-fn read_quarto_script_spec(script: &Path) -> Result<ScriptSpec, Box<dyn Error>> {
+fn read_quarto_script_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
     parse_quarto_frontmatter(&read_quarto_script_frontmatter_to_string(script)?)
 }
 

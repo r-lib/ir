@@ -10,7 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
 use crate::rig;
-use crate::script::{RunSource, ScriptSpec};
+use crate::script::RunSource;
+use crate::spec::RuntimeSpec;
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
 /// self-contained binary while the source stays editable as real R.
@@ -62,7 +63,7 @@ pub(crate) fn cmd_render(
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
-    spec.quarto = true;
+    spec.quarto_render = true;
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
@@ -83,7 +84,7 @@ pub(crate) fn cmd_render(
     std::process::exit(code);
 }
 
-pub(crate) fn rscript_for_spec(spec: &ScriptSpec) -> Result<OsString, Box<dyn Error>> {
+pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn Error>> {
     let Some(req) = &spec.r_requirement else {
         return Ok(rscript_command());
     };
@@ -97,14 +98,14 @@ pub(crate) fn rscript_for_spec(spec: &ScriptSpec) -> Result<OsString, Box<dyn Er
 /// refs are passed through.
 pub(crate) fn resolve_library(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
     Ok(resolve_library_inner(rscript, spec, false)?.library)
 }
 
 pub(crate) fn resolve_library_and_primary_package(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
 ) -> Result<(PathBuf, String), Box<dyn Error>> {
     let resolved = resolve_library_inner(rscript, spec, true)?;
     let library = resolved
@@ -123,7 +124,7 @@ struct ResolvedLibrary {
 
 fn resolve_library_inner(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
     primary_package: bool,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let dependencies = normalized_dependencies(&spec.dependencies);
@@ -133,7 +134,7 @@ fn resolve_library_inner(
         rscript,
         &dependencies,
         spec.exclude_newer.as_deref(),
-        spec.quarto,
+        spec.quarto_render,
     )?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {
@@ -173,7 +174,7 @@ fn resolve_library_inner(
     if let Some(exclude_newer) = &spec.exclude_newer {
         cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
     }
-    if spec.quarto {
+    if spec.quarto_render {
         // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
         // this flag tells the resolver a Quarto render needs rmarkdown.
         cmd.env("IR_QUARTO_RENDER", "1");

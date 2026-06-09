@@ -40,6 +40,7 @@ mod resolve_cache;
 mod rig;
 mod runtime;
 mod script;
+mod spec;
 mod tool;
 
 fn main() {
