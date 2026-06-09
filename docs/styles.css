@@ -1,13 +1,21 @@
 :root {
   --ir-muted: #52616b;
   --ir-panel: #f6f8f7;
-  --ir-help-panel: #eef3f0;
+  --ir-help-panel: #f5f8f7;
+  --ir-help-border: #d5dfdc;
+  --ir-ansi-green: #007f3b;
+  --ir-ansi-blue: #2f49a3;
+  --ir-ansi-yellow: #7c5f00;
 }
 
 body.quarto-dark {
   --ir-muted: #aeb8be;
   --ir-panel: #172026;
-  --ir-help-panel: #172026;
+  --ir-help-panel: #131c22;
+  --ir-help-border: #33424a;
+  --ir-ansi-green: #5fe084;
+  --ir-ansi-blue: #9eb6ff;
+  --ir-ansi-yellow: #ecd46b;
 }
 
 .navbar-title {
@@ -42,6 +50,24 @@ pre.console {
 
 pre.ir-cli-help {
   background-color: var(--ir-help-panel);
+  border-color: var(--ir-help-border);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-weight: 500;
+}
+
+pre.ir-cli-help span[style*="#00BB00"] {
+  color: var(--ir-ansi-green) !important;
+}
+
+pre.ir-cli-help span[style*="#5555FF"],
+pre.ir-cli-help span[style*="#00BBBB"] {
+  color: var(--ir-ansi-blue) !important;
+}
+
+pre.ir-cli-help span[style*="#BBBB00"] {
+  color: var(--ir-ansi-yellow) !important;
 }
 
 pre.console code,

@@ -17,6 +17,12 @@ pub(crate) fn root() -> ClapCommand {
         .color(color_choice())
         .styles(help_styles())
         .arg_required_else_help(true)
+        .after_help(concat!(
+            "Examples:\n",
+            "  ir run script.R\n",
+            "  ir render report.qmd\n",
+            "  ir tool run btw --help",
+        ))
         .subcommand(run_command())
         .subcommand(render_command())
         .subcommand(tool_command())
@@ -32,15 +38,24 @@ fn color_choice() -> ColorChoice {
 
 fn help_styles() -> Styles {
     Styles::styled()
-        .header(AnsiColor::Yellow.on_default().bold().underline())
-        .usage(AnsiColor::Green.on_default().bold().underline())
-        .literal(AnsiColor::Green.on_default().bold())
-        .placeholder(AnsiColor::Cyan.on_default())
+        .header(AnsiColor::Green.on_default().bold())
+        .usage(AnsiColor::Green.on_default().bold())
+        .literal(AnsiColor::BrightBlue.on_default().bold())
+        .placeholder(AnsiColor::BrightBlue.on_default())
 }
 
 fn run_command() -> ClapCommand {
     ClapCommand::new("run")
         .about("Run a script or inline R expression")
+        .override_usage("ir run [OPTIONS] [ARGS]...")
+        .after_help(concat!(
+            "Examples:\n",
+            "  ir run --with cli --vanilla script.R --input data.csv\n",
+            "      # --with is for ir; --vanilla is for Rscript.\n",
+            "      # --input data.csv is passed to script.R.\n\n",
+            "  ir run --with cli -e 'print(commandArgs(TRUE))' --input data.csv\n",
+            "      # --input data.csv is passed to commandArgs(TRUE).",
+        ))
         .arg(
             Arg::new("expr")
                 .short('e')
@@ -79,6 +94,14 @@ fn run_command() -> ClapCommand {
 fn render_command() -> ClapCommand {
     ClapCommand::new("render")
         .about("Render a Quarto document or script")
+        .after_help(concat!(
+            "Examples:\n",
+            "  ir render --with ggplot2 report.qmd --to html\n",
+            "      # --with is for ir; --to html is passed to quarto render.\n\n",
+            "  ir render --vanilla slides.qmd --output slides.html\n",
+            "      # --vanilla runs knitr R with --vanilla.\n",
+            "      # --output slides.html is passed to quarto render.",
+        ))
         .arg(
             Arg::new("with")
                 .long("with")
@@ -134,7 +157,15 @@ fn tool_command() -> ClapCommand {
 fn tool_run_command() -> ClapCommand {
     tool_run_args(
         ClapCommand::new("run")
-            .about("Resolve a package and run an executable from its exec directory"),
+            .about("Resolve a package and run an executable from its exec directory")
+            .after_help(concat!(
+                "Examples:\n",
+                "  ir tool run btw --help\n",
+                "      # btw is shorthand for --from btw btw.\n\n",
+                "  ir tool run --from btw --vanilla btw --input data.csv\n",
+                "      # --from is for ir; --vanilla is for Rscript.\n",
+                "      # --input data.csv is passed to the btw executable.",
+            )),
     )
 }
 
@@ -189,6 +220,11 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
 fn tool_install_command() -> ClapCommand {
     ClapCommand::new("install")
         .about("Install package executable launchers")
+        .after_help(concat!(
+            "Examples:\n",
+            "  ir tool install btw\n",
+            "  ir tool install --with cli --bin-dir ~/.local/bin btw",
+        ))
         .arg(
             Arg::new("with")
                 .long("with")
@@ -298,8 +334,9 @@ pub(crate) struct ToolInstallArgs {
 /// `-e <expr>`, `--with <spec>`, `--r-version <spec>` and `--isolated` are
 /// `ir`-level flags handled here. Any other `-...` argument is an Rscript
 /// option, forwarded verbatim to the user-code phase. Scanning stops at the
-/// first non-option, which is the script path unless `-e` was given (in which
-/// case it, and everything after, are program args, as with Rscript).
+/// script path unless `-e` was given, in which case scanning stops after the
+/// last `-e <expr>` pair. Everything after the source boundary is passed to
+/// user code as program args.
 pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
@@ -310,7 +347,11 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     let mut positional = None;
 
     while let Some(arg) = iter.next() {
-        if arg == "-e" || arg == "--expr" {
+        if !expressions.is_empty() && arg != "-e" && arg != "--expr" && !arg.starts_with("--expr=")
+        {
+            positional = Some(arg);
+            break;
+        } else if arg == "-e" || arg == "--expr" {
             let expr = iter
                 .next()
                 .ok_or("`-e` requires an expression (try `ir run -e '1 + 1'`)")?;

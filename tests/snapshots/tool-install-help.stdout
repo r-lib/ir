@@ -11,3 +11,7 @@ Options:
       --bin-dir <DIR>     Directory where launchers are written
       --force             Overwrite an existing launcher path
   -h, --help              Print help
+
+Examples:
+  ir tool install btw
+  ir tool install --with cli --bin-dir ~/.local/bin btw

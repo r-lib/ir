@@ -12,3 +12,11 @@ Options:
       --isolated          Disable the user library for this render
       --vanilla           Run Quarto's knitr R with --vanilla
   -h, --help              Print help
+
+Examples:
+  ir render --with ggplot2 report.qmd --to html
+      # --with is for ir; --to html is passed to quarto render.
+
+  ir render --vanilla slides.qmd --output slides.html
+      # --vanilla runs knitr R with --vanilla.
+      # --output slides.html is passed to quarto render.

@@ -10,3 +10,11 @@ Options:
   -w, --with <PKG>        Add a dependency for this tool run; may be repeated
       --r-version <SPEC>  Select the R version for this tool run with rig
   -h, --help              Print help
+
+Examples:
+  ir tool run btw --help
+      # btw is shorthand for --from btw btw.
+
+  ir tool run --from btw --vanilla btw --input data.csv
+      # --from is for ir; --vanilla is for Rscript.
+      # --input data.csv is passed to the btw executable.

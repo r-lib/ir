@@ -11,3 +11,11 @@ Options:
       --r-version <SPEC>  Select the R version for this run with rig
       --isolated          Disable the user library for this run
   -h, --help              Print help
+
+Examples:
+  ir run --with cli --vanilla script.R --input data.csv
+      # --with is for ir; --vanilla is for Rscript.
+      # --input data.csv is passed to script.R.
+
+  ir run --with cli -e 'print(commandArgs(TRUE))' --input data.csv
+      # --input data.csv is passed to commandArgs(TRUE).

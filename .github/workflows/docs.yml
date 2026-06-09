@@ -76,6 +76,7 @@ jobs:
           cargo build --release --locked
           test -x target/release/ir
           ./target/release/ir --help
+          echo "IR_BIN=$PWD/target/release/ir" >> "$GITHUB_ENV"
           echo "$PWD/target/release" >> "$GITHUB_PATH"
 
       - uses: quarto-dev/quarto-actions/publish@v2

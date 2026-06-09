@@ -12,3 +12,8 @@ Commands:
 Options:
   -h, --help     Print help
   -V, --version  Print version
+
+Examples:
+  ir run script.R
+  ir render report.qmd
+  ir tool run btw --help

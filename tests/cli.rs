@@ -358,10 +358,12 @@ fn cli_help_honors_clicolor_force() {
 
     let stdout = stdout(&out);
     assert!(stdout.contains("\u{1b}["), "{stdout}");
-    assert!(
-        stdout.contains("\u{1b}[32m") || stdout.contains("\u{1b}[33m"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("\u{1b}[32mUsage:"), "{stdout}");
+    assert!(stdout.contains("\u{1b}[94mir"), "{stdout}");
+    assert!(stdout.contains("\u{1b}[94m[COMMAND]"), "{stdout}");
+    assert!(!stdout.contains("\u{1b}[36m"), "{stdout}");
+    assert!(!stdout.contains("\u{1b}[33m"), "{stdout}");
+    assert!(!stdout.contains("\u{1b}[4m"), "{stdout}");
 }
 
 #[cfg(unix)]
@@ -374,23 +376,38 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
     let docs_dir = manifest_dir.join("docs");
     let output_dir = unique_dir("ir-docs-reference-output");
     let bin_dir = unique_dir("ir-docs-reference-bin");
+    let stale_bin_dir = unique_dir("ir-docs-reference-stale-bin");
     let fake_ir = bin_dir.join("ir");
+    let stale_ir = stale_bin_dir.join("ir");
 
     fs::write(
         &fake_ir,
         concat!(
             "#!/bin/sh\n",
-            "printf '\\033[1;32mUsage:\\033[0m ir [COMMAND]\\n\\n'\n",
-            "printf '\\033[1;33mCommands:\\033[0m\\n'\n",
-            "printf '  render  Render a Quarto document or script\\n\\n'\n",
-            "printf '\\033[1;33mOptions:\\033[0m\\n'\n",
-            "printf '  \\033[1;32m-h\\033[0m, \\033[1;32m--help\\033[0m  Print help\\n'\n",
+            "printf '\\033[1;32mUsage:\\033[0m \\033[1;94mir\\033[0m \\033[94m[COMMAND]\\033[0m\\n\\n'\n",
+            "printf '\\033[1;32mCommands:\\033[0m\\n'\n",
+            "printf '  \\033[1;94mrender\\033[0m  Render a Quarto document or script\\n\\n'\n",
+            "printf '\\033[1;32mOptions:\\033[0m\\n'\n",
+            "printf '  \\033[1;94m-h\\033[0m, \\033[1;94m--help\\033[0m  Print help\\n'\n",
         ),
     )
     .unwrap();
     let mut perms = fs::metadata(&fake_ir).unwrap().permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&fake_ir, perms).unwrap();
+
+    fs::write(
+        &stale_ir,
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"error: unrecognized subcommand 'render'\" >&2\n",
+            "exit 2\n",
+        ),
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&stale_ir).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&stale_ir, perms).unwrap();
 
     let config = fs::read_to_string(docs_dir.join("_quarto.yml")).unwrap();
     assert!(config.contains("light:"), "{config}");
@@ -401,9 +418,18 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
 
     let styles = fs::read_to_string(docs_dir.join("styles.css")).unwrap();
     assert!(styles.contains("quarto-dark"), "{styles}");
+    assert!(styles.contains("--ir-ansi-green"), "{styles}");
+    assert!(
+        styles.contains("pre.ir-cli-help span[style*=\"#00BB00\"]"),
+        "{styles}"
+    );
+    assert!(
+        styles.contains("pre.ir-cli-help span[style*=\"#5555FF\"]"),
+        "{styles}"
+    );
 
     let path = std::env::join_paths(
-        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+        std::iter::once(stale_bin_dir.as_os_str().to_owned()).chain(
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
                 .map(|path| path.into_os_string()),
         ),
@@ -413,6 +439,7 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
     let output = Command::new("quarto")
         .current_dir(&docs_dir)
         .env("PATH", path)
+        .env("IR_BIN", &fake_ir)
         .args(["render", "reference.qmd", "--to", "html"])
         .arg("--output-dir")
         .arg(&output_dir)
@@ -429,11 +456,13 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
     );
     assert!(html.contains("Options:"), "{html}");
     assert!(html.contains("color: #00BB00"), "{html}");
+    assert!(html.contains("color: #5555FF"), "{html}");
     assert!(html.contains("font-weight: bold"), "{html}");
     assert!(!html.contains("\u{1b}["), "{html}");
 
     let _ = fs::remove_dir_all(&output_dir);
     let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&stale_bin_dir);
 }
 
 #[test]
@@ -908,6 +937,31 @@ fn run_inline_expression_resolves_with_dependencies() {
     assert_stdout_contains(&out, "inline.lib_in_cache=true");
     assert_stdout_contains(&out, "inline.pkgs_in_cache=true");
     assert_stdout_contains(&out, "inline.glue=2");
+}
+
+#[test]
+fn run_inline_expression_forwards_option_like_args_after_expr() {
+    let _guard = e2e_lock();
+    let out = ir()
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "-e",
+            "cat('inline.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = '')",
+            "--script-flag",
+            "value",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "inline.args=--script-flag|value");
+    assert!(
+        !output_text(&out).contains("unknown option '--script-flag'"),
+        "{}",
+        output_text(&out)
+    );
 }
 
 #[test]
