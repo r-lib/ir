@@ -234,7 +234,9 @@ fn required_available_version_from_candidates<'a>(
 }
 
 fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    let path = crate::ir_cache_dir()?.join("rig").join("available.json");
+    let path = crate::runtime::ir_cache_dir()?
+        .join("rig")
+        .join("available.json");
     if path.exists() {
         let json = fs::read_to_string(&path)
             .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
