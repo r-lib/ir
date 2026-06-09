@@ -1,8 +1,8 @@
 ---
-title: "Quarto Documents"
+title: "Quarto Rendering"
 ---
 
-`ir run` renders `.qmd` and `.Rmd` files with `quarto render`. Packages live under an `ir:` key in the document YAML.
+`ir render` renders Quarto documents and Quarto-formatted R scripts with `quarto render`. Packages live under an `ir:` key in the source YAML.
 
 ```yaml
 ---
@@ -17,12 +17,27 @@ ir:
 ---
 ```
 
-Run the document with the same command used for scripts:
+Run the document with the render subcommand:
 
 ```console
-$ ir run report.qmd
-$ ir run report.qmd --to pdf
-$ ir run --vanilla report.qmd
+$ ir render report.qmd
+$ ir render report.qmd --to pdf
+$ ir render --vanilla report.qmd
+```
+
+Quarto R scripts use Quarto's knitr script header syntax:
+
+```r
+#' ---
+#' title: "My report"
+#' ir:
+#'   packages:
+#'     - dplyr>=1.0
+#' ---
+```
+
+```console
+$ ir render report.R
 ```
 
 The `ir.packages` value follows the same rules as script `packages`: use a YAML sequence where each entry is one package ref, or omit it, set it to `[]`, or set it to `null` for no dependencies.

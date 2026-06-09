@@ -4,6 +4,7 @@ execute:
   echo: false
   warning: false
   message: false
+  comment: ""
 ---
 
 This page renders the current CLI help by running the `ir` executable on `PATH` during the Quarto render.
@@ -28,55 +29,53 @@ cli_help <- function(...) {
 ## `ir`
 
 ```{r}
-#| comment: ""
 cli_help()
 ```
 
 ## `ir run`
 
 ```{r}
-#| comment: ""
 cli_help("run")
+```
+
+## `ir render`
+
+```{r}
+cli_help("render")
 ```
 
 ## `ir tool`
 
 ```{r}
-#| comment: ""
 cli_help("tool")
 ```
 
 ## `ir tool run`
 
 ```{r}
-#| comment: ""
 cli_help("tool", "run")
 ```
 
 ## `ir tool install`
 
 ```{r}
-#| comment: ""
 cli_help("tool", "install")
 ```
 
 ## `ir cache`
 
 ```{r}
-#| comment: ""
 cli_help("cache")
 ```
 
 ## `ir cache dir`
 
 ```{r}
-#| comment: ""
 cli_help("cache", "dir")
 ```
 
 ## `ir cache clean`
 
 ```{r}
-#| comment: ""
 cli_help("cache", "clean")
 ```

@@ -57,9 +57,8 @@ pub(crate) fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string(script)?)
 }
 
-/// True for Quarto documents dispatched to `quarto render`. Every other name,
-/// including `.R`, `.r`, and extensionless scripts, keeps the R-script flow.
-pub(crate) fn is_quarto(script: &Path) -> bool {
+/// True for Quarto markdown documents.
+pub(crate) fn is_quarto_document(script: &Path) -> bool {
     matches!(
         script
             .extension()
@@ -67,6 +66,18 @@ pub(crate) fn is_quarto(script: &Path) -> bool {
             .map(str::to_ascii_lowercase)
             .as_deref(),
         Some("qmd") | Some("rmd")
+    )
+}
+
+/// True for R scripts that Quarto can render through the knitr script flow.
+pub(crate) fn is_r_script(script: &Path) -> bool {
+    matches!(
+        script
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("r")
     )
 }
 

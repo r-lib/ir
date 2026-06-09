@@ -1,6 +1,6 @@
 # ir
 
-`ir` runs self-describing R scripts and Quarto documents.
+`ir` runs self-describing R scripts and renders Quarto sources.
 
 Put the packages and R version next to the code, then run the file. `ir`
 resolves the requirements, prepares a cached package library, and starts R with
@@ -50,7 +50,7 @@ one-file workflow.
 ```console
 $ ir run script.R
 $ ir run --vanilla script.R
-$ ir run report.qmd --to html
+$ ir render report.qmd --to html
 $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --r-version 4.5 script.R
 $ rx btw --help
@@ -89,7 +89,7 @@ This builds `target/release/ir` and `target/release/rx`.
 
 - `R` / `Rscript` on `PATH`, a rig default R install, or `IR_RSCRIPT`.
 - `rig` on `PATH` when using `r-version`.
-- `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd` or `.Rmd` files.
+- `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not
 need to pre-install pak or renv.
@@ -99,7 +99,7 @@ need to pre-install pak or renv.
 For command details, configuration, and edge cases, see:
 
 - [Scripts](https://t-kalinowski.github.io/ir/run.html)
-- [Quarto documents](https://t-kalinowski.github.io/ir/quarto.html)
+- [Quarto rendering](https://t-kalinowski.github.io/ir/quarto.html)
 - [Package tools](https://t-kalinowski.github.io/ir/tools.html)
 - [Cache management](https://t-kalinowski.github.io/ir/cache.html)
 - [Install and configuration](https://t-kalinowski.github.io/ir/config.html)

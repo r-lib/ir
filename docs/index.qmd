@@ -3,7 +3,7 @@ title: "ir"
 subtitle: "Self-describing R scripts, cached package libraries, and reproducible command-line runs."
 ---
 
-`ir` runs standalone R scripts and Quarto documents that declare their runtime requirements in the file itself. It resolves those requirements into cached package libraries and runs the program with the selected R.
+`ir` runs standalone R scripts and renders Quarto sources that declare their runtime requirements in the file itself. It resolves those requirements into cached package libraries and runs the program with the selected R.
 
 ```r
 #!/usr/bin/env -S ir run
@@ -27,7 +27,7 @@ library(tidyr)
 - Pin CRAN resolution to a Posit Package Manager snapshot with `exclude-newer`.
 - Select installed R versions with `--r-version` or frontmatter `r-version`.
 - Evaluate inline expressions with `ir run -e` and add command-line packages with `--with`.
-- Render Quarto documents through `ir run report.qmd` using the same package metadata model, with `rmarkdown` seeded automatically for the knitr engine.
+- Render Quarto documents and Quarto-formatted R scripts through `ir render`, using the same package metadata model with `rmarkdown` seeded automatically for the knitr engine.
 - Run package-shipped executables from an installed package's `exec/` directory with `rx` or `ir tool run`.
 - Install persistent launchers for package executables with `ir tool install`.
 - Inspect and clear the cache with `ir cache dir` and `ir cache clean`.
@@ -39,7 +39,7 @@ library(tidyr)
 ```console
 $ ir run script.R
 $ ir run --with cli -e 'cli::cli_alert_success("hi")'
-$ ir run --r-version 4.5 report.qmd --to html
+$ ir render --r-version 4.5 report.qmd --to html
 $ rx btw --help
 $ ir tool run --from btw btw --help
 $ ir tool install btw

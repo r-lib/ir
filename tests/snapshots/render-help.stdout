@@ -1,0 +1,12 @@
+Render a Quarto document or script
+
+Usage: ir render [OPTIONS] [ARGS]...
+
+Arguments:
+  [ARGS]...  Rscript options, source path, and Quarto render arguments
+
+Options:
+      --with <PKG>        Add a dependency for this render; may be repeated
+      --r-version <SPEC>  Select the R version for this render with rig
+      --isolated          Disable the user library for this render
+  -h, --help              Print help

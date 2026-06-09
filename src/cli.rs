@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Arg, ArgAction, Command as ClapCommand};
 
 use crate::runtime::nonempty_env;
-use crate::script::RunSource;
+use crate::script::{RenderSource, RunSource};
 
 pub(crate) fn root() -> ClapCommand {
     ClapCommand::new("ir")
@@ -12,6 +12,7 @@ pub(crate) fn root() -> ClapCommand {
         .about("Run self-describing R scripts")
         .arg_required_else_help(true)
         .subcommand(run_command())
+        .subcommand(render_command())
         .subcommand(tool_command())
         .subcommand(cache_command())
 }
@@ -51,6 +52,35 @@ fn run_command() -> ClapCommand {
         )
         .arg(raw_args_arg(
             "Rscript options, script path, and script arguments",
+        ))
+}
+
+fn render_command() -> ClapCommand {
+    ClapCommand::new("render")
+        .about("Render a Quarto document or script")
+        .arg(
+            Arg::new("with")
+                .long("with")
+                .value_name("PKG")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Add a dependency for this render; may be repeated"),
+        )
+        .arg(
+            Arg::new("r-version")
+                .long("r-version")
+                .value_name("SPEC")
+                .num_args(1)
+                .help("Select the R version for this render with rig"),
+        )
+        .arg(
+            Arg::new("isolated")
+                .long("isolated")
+                .action(ArgAction::SetTrue)
+                .help("Disable the user library for this render"),
+        )
+        .arg(raw_args_arg(
+            "Rscript options, source path, and Quarto render arguments",
         ))
 }
 
@@ -198,6 +228,15 @@ pub(crate) struct RunArgs {
     pub(crate) isolated: bool,
 }
 
+pub(crate) struct RenderArgs {
+    pub(crate) rscript_args: Vec<String>,
+    pub(crate) with_deps: Vec<String>,
+    pub(crate) r_requirement: Option<String>,
+    pub(crate) source: RenderSource,
+    pub(crate) render_args: Vec<String>,
+    pub(crate) isolated: bool,
+}
+
 pub(crate) struct ToolRunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
@@ -290,6 +329,61 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
         r_requirement,
         source,
         script_args,
+        isolated,
+    })
+}
+
+/// Parse `ir render`, which resolves metadata for a Quarto source and then
+/// forwards the source plus trailing args to `quarto render`.
+pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn Error>> {
+    let mut rscript_args = Vec::new();
+    let mut with_deps = Vec::new();
+    let mut r_requirement = None;
+    let mut isolated = false;
+    let mut iter = args.into_iter();
+    let mut positional = None;
+
+    while let Some(arg) = iter.next() {
+        if arg == "-e" || arg == "--expr" || arg.starts_with("--expr=") {
+            return Err("`-e` is only supported by `ir run`".into());
+        } else if arg == "--from" || arg.starts_with("--from=") {
+            return Err("`--from` is only supported by `ir tool run`".into());
+        } else if arg == "--with" {
+            let value = iter
+                .next()
+                .ok_or("`--with` requires a package (try `ir render --with dplyr report.qmd`)")?;
+            push_with_deps(&mut with_deps, &value);
+        } else if let Some(value) = arg.strip_prefix("--with=") {
+            push_with_deps(&mut with_deps, value);
+        } else if arg == "--r-version" {
+            let value = iter.next().ok_or(
+                "`--r-version` requires a version spec (try `ir render --r-version 4.5 report.qmd`)",
+            )?;
+            r_requirement = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--r-version=") {
+            r_requirement = Some(value.to_string());
+        } else if arg == "--isolated" {
+            isolated = true;
+        } else if arg == "-" {
+            return Err("`ir render` requires a source path, not stdin".into());
+        } else if arg.starts_with('-') {
+            rscript_args.push(arg);
+        } else {
+            positional = Some(arg);
+            break;
+        }
+    }
+
+    let render_args: Vec<String> = iter.collect();
+    let source =
+        positional.ok_or("`ir render` requires a source path (try `ir render report.qmd`)")?;
+
+    Ok(RenderArgs {
+        rscript_args,
+        with_deps,
+        r_requirement,
+        source: RenderSource::from_source_arg(source)?,
+        render_args,
         isolated,
     })
 }

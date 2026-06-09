@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::quarto;
 use crate::resolve_cache;
 use crate::rig;
-use crate::script::{RunSource, ScriptSpec};
+use crate::script::{RenderSource, RunSource, ScriptSpec};
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
 /// self-contained binary while the source stays editable as real R.
@@ -28,18 +28,11 @@ pub(crate) fn cmd_run(
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
-    spec.quarto = source.is_quarto();
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec)?;
-
-    // Reject comma-bearing Rscript options before resolving, so a run that could
-    // never be launched fails fast instead of after dependency resolution. quarto
-    // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
-    // escaping.
-    source.reject_unsupported_rscript_args(rscript_args)?;
 
     // Reuse a warm resolution marker, or launch the private resolver R session
     // to resolve deps and materialise the library.
@@ -52,6 +45,39 @@ pub(crate) fn cmd_run(
         library.as_deref(),
         rscript_args,
         script_args,
+        isolated,
+    )?;
+    std::process::exit(code);
+}
+
+/// Resolve dependencies for `source`, then render it with Quarto. Exits the
+/// process with Quarto's own exit code.
+pub(crate) fn cmd_render(
+    source: &RenderSource,
+    rscript_args: &[String],
+    with_deps: &[String],
+    r_requirement: Option<&str>,
+    render_args: &[String],
+    isolated: bool,
+) -> Result<(), Box<dyn Error>> {
+    let mut spec = source.script_spec()?;
+    spec.dependencies.extend(with_deps.iter().cloned());
+    spec.quarto = true;
+    if let Some(req) = r_requirement {
+        spec.r_requirement = Some(req.to_string());
+    }
+    let isolated = isolated || spec.isolated;
+    let rscript = rscript_for_spec(&spec)?;
+
+    source.reject_unsupported_rscript_args(rscript_args)?;
+
+    let library = resolve_library(&rscript, &spec)?;
+    let code = quarto::run(
+        &rscript,
+        library.as_deref(),
+        source.path(),
+        rscript_args,
+        render_args,
         isolated,
     )?;
     std::process::exit(code);
@@ -295,9 +321,6 @@ fn run_user_code(
     isolated: bool,
 ) -> Result<i32, Box<dyn Error>> {
     match source {
-        RunSource::Quarto(doc) => {
-            quarto::run(rscript, library, doc, rscript_args, script_args, isolated)
-        }
         RunSource::Script(script) => run_script(
             rscript,
             library,
