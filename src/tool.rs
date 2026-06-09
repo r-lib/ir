@@ -10,14 +10,14 @@ use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 use crate::runtime::{
     resolve_library, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
 };
-use crate::script::ScriptSpec;
+use crate::spec::RuntimeSpec;
 
 pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
     let mut deps = vec![run.target.package_ref.clone()];
     deps.extend(run.with_deps.iter().cloned());
-    let mut spec = ScriptSpec {
+    let mut spec = RuntimeSpec {
         dependencies: deps,
-        ..ScriptSpec::default()
+        ..RuntimeSpec::default()
     };
     if let Some(req) = &run.r_requirement {
         spec.r_requirement = Some(req.clone());
@@ -43,9 +43,9 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
 }
 
 pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
-    let mut spec = ScriptSpec {
+    let mut spec = RuntimeSpec {
         dependencies: vec![install.package_ref.clone()],
-        ..ScriptSpec::default()
+        ..RuntimeSpec::default()
     };
     spec.dependencies.extend(install.with_deps.iter().cloned());
     if let Some(req) = &install.r_requirement {

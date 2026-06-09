@@ -320,6 +320,8 @@ fn help_outputs_match_snapshots() {
         ("help", &["-h"]),
         ("run-help", &["run", "--help"]),
         ("run-help", &["run", "-h"]),
+        ("render-help", &["render", "--help"]),
+        ("render-help", &["render", "-h"]),
         ("tool-help", &["tool", "--help"]),
         ("tool-help", &["tool", "-h"]),
         ("tool-run-help", &["tool", "run", "--help"]),
@@ -355,6 +357,11 @@ fn clap_reports_public_usage_errors() {
         (vec!["run"], "requires a script"),
         (vec!["run", "--from", "btw", "btw"], "ir tool run"),
         (vec!["run", "-e"], "a value is required for '--expr <EXPR>'"),
+        (
+            vec!["render"],
+            "the following required arguments were not provided",
+        ),
+        (vec!["render", "-e", "1"], "unexpected argument '-e'"),
         (
             vec!["tool", "run", "--from", "btw"],
             "`--from` requires a command",
@@ -426,6 +433,22 @@ fn run_with_missing_script_errors() {
     let out = ir().args(["run", "/no/such/ir-script.R"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("cannot read script"));
+}
+
+#[test]
+fn run_quarto_source_reports_render_subcommand() {
+    let source = unique_path("ir-run-qmd-uses-render", "qmd");
+    fs::write(&source, "---\nir: [\n---\n").unwrap();
+
+    let out = ir().args(["run"]).arg(&source).output().unwrap();
+    let _ = fs::remove_file(&source);
+
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("use `ir render <source>`"),
+        "{}",
+        output_text(&out)
+    );
 }
 
 #[test]
@@ -1381,7 +1404,7 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
 // report.qmd deliberately does NOT declare rmarkdown, so the render only
 // succeeds because ir injects it quietly for the knitr engine.
 #[test]
-fn run_quarto_fixture_injects_rmarkdown_and_renders() {
+fn render_quarto_fixture_injects_rmarkdown_and_renders() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
     let cache_dir = unique_dir("ir-e2e-qmd-cache");
@@ -1390,7 +1413,7 @@ fn run_quarto_fixture_injects_rmarkdown_and_renders() {
         let out = ir()
             .current_dir(&fixture_dir)
             .env("IR_CACHE_DIR", &cache_dir)
-            .args(["run", "--isolated"])
+            .args(["render", "--isolated"])
             .arg("report.qmd")
             .args(["--to", "html"])
             .output()
@@ -1422,7 +1445,7 @@ fn run_quarto_fixture_injects_rmarkdown_and_renders() {
 
 // report-pinned.qmd declares rmarkdown itself, so the resolver leaves it alone.
 #[test]
-fn run_quarto_fixture_with_declared_rmarkdown_skips_injection() {
+fn render_quarto_fixture_with_declared_rmarkdown_skips_injection() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
     let cache_dir = unique_dir("ir-e2e-qmd-pinned-cache");
@@ -1430,7 +1453,7 @@ fn run_quarto_fixture_with_declared_rmarkdown_skips_injection() {
     let out = ir()
         .current_dir(&fixture_dir)
         .env("IR_CACHE_DIR", &cache_dir)
-        .args(["run", "--isolated"])
+        .args(["render", "--isolated"])
         .arg("report-pinned.qmd")
         .args(["--to", "html"])
         .output()
@@ -1461,7 +1484,7 @@ fn run_quarto_fixture_with_declared_rmarkdown_skips_injection() {
 // report-transitive.qmd declares `quarto`, which Imports rmarkdown. The
 // resolver sees rmarkdown already in the resolved set and skips its own seed.
 #[test]
-fn run_quarto_fixture_with_transitive_rmarkdown_renders() {
+fn render_quarto_fixture_with_transitive_rmarkdown_renders() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
     let cache_dir = unique_dir("ir-e2e-qmd-transitive-cache");
@@ -1469,7 +1492,7 @@ fn run_quarto_fixture_with_transitive_rmarkdown_renders() {
     let out = ir()
         .current_dir(&fixture_dir)
         .env("IR_CACHE_DIR", &cache_dir)
-        .args(["run", "--isolated"])
+        .args(["render", "--isolated"])
         .arg("report-transitive.qmd")
         .args(["--to", "html"])
         .output()
@@ -1505,7 +1528,7 @@ fn run_quarto_fixture_with_transitive_rmarkdown_renders() {
 // report-bare.qmd declares no dependencies at all, so the resolver must still
 // inject rmarkdown quietly for the knitr engine to render.
 #[test]
-fn run_quarto_bare_fixture_injects_rmarkdown() {
+fn render_quarto_bare_fixture_injects_rmarkdown() {
     let _guard = e2e_lock();
     let fixture_dir = fixture("run");
     let cache_dir = unique_dir("ir-e2e-qmd-bare-cache");
@@ -1514,7 +1537,7 @@ fn run_quarto_bare_fixture_injects_rmarkdown() {
         let out = ir()
             .current_dir(&fixture_dir)
             .env("IR_CACHE_DIR", &cache_dir)
-            .args(["run", "--isolated"])
+            .args(["render", "--isolated"])
             .arg("report-bare.qmd")
             .args(["--to", "html"])
             .output()
@@ -1545,7 +1568,36 @@ fn run_quarto_bare_fixture_injects_rmarkdown() {
 }
 
 #[test]
-fn run_quarto_selects_requested_r_version() {
+fn render_quarto_script_fixture_renders_with_dependencies() {
+    let _guard = e2e_lock();
+    let fixture_dir = fixture("run");
+    let cache_dir = unique_dir("ir-e2e-render-script-cache");
+
+    let out = ir()
+        .current_dir(&fixture_dir)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["render", "--isolated", "--vanilla"])
+        .arg("report-script.R")
+        .args(["--to", "html"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let html = fs::read_to_string(fixture_dir.join("report-script.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
+    assert!(html.contains("ir.fixture=render-script"), "{html}");
+    assert!(html.contains("render.script.glue_in_cache=true"), "{html}");
+    assert!(html.contains("render.script.vanilla=true"), "{html}");
+    assert!(html.contains("render.script.result=4"), "{html}");
+
+    let _ = fs::remove_file(fixture_dir.join("report-script.html"));
+    let _ = fs::remove_dir_all(fixture_dir.join("report-script_files"));
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn render_quarto_selects_requested_r_version() {
     let _guard = e2e_lock();
 
     // Opt-in: needs rig plus a non-default R installed (CI provisions both).
@@ -1553,7 +1605,7 @@ fn run_quarto_selects_requested_r_version() {
     // single R there is nothing to select.
     let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
         eprintln!(
-            "SKIP run_quarto_selects_requested_r_version: set IR_TEST_R_VERSION to a rig-installed, non-default R version"
+            "SKIP render_quarto_selects_requested_r_version: set IR_TEST_R_VERSION to a rig-installed, non-default R version"
         );
         return;
     };
@@ -1561,7 +1613,7 @@ fn run_quarto_selects_requested_r_version() {
     // Selecting the version the default path already uses would prove nothing.
     if default_r_version().as_deref() == Some(target.as_str()) {
         eprintln!(
-            "SKIP run_quarto_selects_requested_r_version: IR_TEST_R_VERSION ({target}) matches the default R; pick a different installed version"
+            "SKIP render_quarto_selects_requested_r_version: IR_TEST_R_VERSION ({target}) matches the default R; pick a different installed version"
         );
         return;
     }
@@ -1576,7 +1628,7 @@ fn run_quarto_selects_requested_r_version() {
         // secretbase. A real `--r-version` user has no R_LIBS_USER exported; drop
         // it so the requested R uses its own toolchain.
         .env_remove("R_LIBS_USER")
-        .args(["run", "--isolated", "--r-version"])
+        .args(["render", "--isolated", "--r-version"])
         .arg(&target)
         .arg("r-version-select.qmd")
         .args(["--to", "html"])
@@ -1626,7 +1678,7 @@ fn run_script_frontmatter_selects_r_version() {
     let script = fixture("run/r-version-frontmatter.R");
 
     let out = ir()
-        // See run_quarto_selects_requested_r_version: drop the ambient
+        // See render_quarto_selects_requested_r_version: drop the ambient
         // R_LIBS_USER so the frontmatter-selected R resolves against its own
         // toolchain rather than the default R's (ABI-mismatched) library.
         .env_remove("R_LIBS_USER")

@@ -40,6 +40,7 @@ mod resolve_cache;
 mod rig;
 mod runtime;
 mod script;
+mod spec;
 mod tool;
 
 fn main() {
@@ -67,6 +68,17 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 run.r_requirement.as_deref(),
                 &run.script_args,
                 run.isolated,
+            )
+        }
+        Some(("render", _)) => {
+            let render = cli::parse_render_args(argv[2..].to_vec())?;
+            runtime::cmd_render(
+                &render.source,
+                &render.with_deps,
+                render.r_requirement.as_deref(),
+                &render.render_args,
+                render.isolated,
+                render.vanilla,
             )
         }
         Some(("tool", matches)) => match matches.subcommand() {

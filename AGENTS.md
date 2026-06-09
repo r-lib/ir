@@ -17,7 +17,8 @@ parse CLI -> read source metadata -> resolve packages with the embedded R driver
 
 - `src/main.rs`: entrypoint and top-level routing only.
 - `src/cli.rs`: clap definitions and argument scanning.
-- `src/script.rs`: source detection and YAML frontmatter parsing.
+- `src/script.rs`: R source detection and R script frontmatter extraction.
+- `src/spec.rs`: runtime metadata model and shared YAML frontmatter parsing.
 - `src/runtime.rs`: Rscript selection, dependency resolution, cache roots, and
   user code execution.
 - `src/tool.rs`: `ir tool run/install`, executable discovery, and launcher
@@ -25,7 +26,7 @@ parse CLI -> read source metadata -> resolve packages with the embedded R driver
 - `src/cache.rs`: `ir cache` commands.
 - `src/resolve_cache.rs`: resolution cache keys and marker reads.
 - `src/rig.rs`: R version selection through `rig`.
-- `src/quarto.rs`: Quarto detection and rendering.
+- `src/quarto.rs`: Quarto detection, source frontmatter extraction, and rendering.
 - `src/bin/rx.rs`: `rx` shim into `ir tool rx`.
 
 ## Conventions

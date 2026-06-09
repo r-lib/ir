@@ -1,29 +1,56 @@
 use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::io;
-use std::path::Path;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use crate::spec::{parse_quarto_frontmatter, RuntimeSpec};
+
+pub(crate) struct RenderSource {
+    path: PathBuf,
+}
+
+impl RenderSource {
+    pub(crate) fn from_source_arg(source: String) -> Result<Self, Box<dyn Error>> {
+        let path = PathBuf::from(&source);
+        fs::metadata(&path).map_err(|e| format!("cannot read source `{source}`: {e}"))?;
+        Ok(Self { path })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn script_spec(&self) -> Result<RuntimeSpec, Box<dyn Error>> {
+        if is_quarto_document(&self.path) {
+            return read_quarto_document_spec(&self.path);
+        }
+        if is_r_script(&self.path) {
+            return read_quarto_script_spec(&self.path);
+        }
+        Ok(RuntimeSpec::default())
+    }
+}
 
 /// Phase 2 — render `doc` with `quarto render`, pointed at the selected R and
 /// the materialised library.
 ///
 /// `QUARTO_R` pins quarto's knitr R to `ir`'s selected Rscript. `R_LIBS`
-/// injects the resolved library exactly as for a script. `rscript_args`
-/// (leading Rscript options) are forwarded to quarto's knitr Rscript via
-/// `QUARTO_KNITR_RSCRIPT_ARGS`, which quarto splits on commas with no escaping.
-/// `script_args` (trailing) become `quarto render <doc> <script_args>`.
+/// injects the resolved library exactly as for a script. With `vanilla`, Quarto's
+/// knitr Rscript receives `--vanilla`. `render_args` become
+/// `quarto render <doc> <render_args>`.
 pub(crate) fn run(
     rscript: &OsStr,
     library: Option<&Path>,
     doc: &Path,
-    rscript_args: &[String],
-    script_args: &[String],
+    render_args: &[String],
     isolated: bool,
+    vanilla: bool,
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(command());
-    cmd.arg("render").arg(doc).args(script_args);
+    cmd.arg("render").arg(doc).args(render_args);
 
     if let Some(value) = r_value(rscript) {
         cmd.env("QUARTO_R", value);
@@ -31,11 +58,11 @@ pub(crate) fn run(
     if let Some(lib) = library {
         cmd.env("R_LIBS", lib);
     }
-    if !rscript_args.is_empty() {
-        cmd.env("QUARTO_KNITR_RSCRIPT_ARGS", rscript_args.join(","));
-    }
     if isolated {
         cmd.env("R_LIBS_USER", "NULL");
+    }
+    if vanilla {
+        cmd.env("QUARTO_KNITR_RSCRIPT_ARGS", "--vanilla");
     }
 
     #[cfg(unix)]
@@ -52,14 +79,20 @@ pub(crate) fn run(
     }
 }
 
-/// Read a Quarto document for YAML frontmatter parsing.
-pub(crate) fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+fn read_quarto_document_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
+    parse_quarto_frontmatter(&read_to_string(script)?)
+}
+
+fn read_quarto_script_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
+    parse_quarto_frontmatter(&read_quarto_script_frontmatter_to_string(script)?)
+}
+
+fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string(script)?)
 }
 
-/// True for Quarto documents dispatched to `quarto render`. Every other name,
-/// including `.R`, `.r`, and extensionless scripts, keeps the R-script flow.
-pub(crate) fn is_quarto(script: &Path) -> bool {
+/// True for Quarto markdown documents.
+pub(crate) fn is_quarto_document(script: &Path) -> bool {
     matches!(
         script
             .extension()
@@ -70,18 +103,58 @@ pub(crate) fn is_quarto(script: &Path) -> bool {
     )
 }
 
-/// `QUARTO_KNITR_RSCRIPT_ARGS` is comma-separated with no escaping, so an
-/// Rscript option containing a comma cannot be forwarded faithfully.
-pub(crate) fn reject_comma_rscript_args(rscript_args: &[String]) -> Result<(), Box<dyn Error>> {
-    if let Some(arg) = rscript_args.iter().find(|arg| arg.contains(',')) {
-        return Err(format!(
-            "Rscript option `{arg}` contains a comma, which cannot be forwarded to \
-             quarto's knitr engine: QUARTO_KNITR_RSCRIPT_ARGS is comma-separated \
-             with no escaping."
-        )
-        .into());
+/// True for R scripts that Quarto can render through the knitr script flow.
+fn is_r_script(script: &Path) -> bool {
+    matches!(
+        script
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("r")
+    )
+}
+
+fn read_quarto_script_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+    let file = File::open(script)?;
+    let mut reader = BufReader::new(file);
+    let mut frontmatter = String::new();
+    let mut line = String::new();
+
+    let mut read_next_line = |line: &mut String| {
+        line.clear();
+        reader.read_line(line)
+    };
+
+    read_next_line(&mut line)?;
+    if line.starts_with("#!") {
+        read_next_line(&mut line)?;
     }
-    Ok(())
+
+    let Some(first) = strip_quarto_script_comment(&line) else {
+        return Ok(frontmatter);
+    };
+    if first.trim_end() != "---" {
+        return Ok(frontmatter);
+    }
+    frontmatter.push_str(first);
+
+    while read_next_line(&mut line)? != 0 {
+        let Some(rest) = strip_quarto_script_comment(&line) else {
+            break;
+        };
+        frontmatter.push_str(rest);
+        if rest.trim_end() == "---" {
+            break;
+        }
+    }
+
+    Ok(frontmatter)
+}
+
+fn strip_quarto_script_comment(line: &str) -> Option<&str> {
+    line.strip_prefix("#'")
+        .map(|rest| rest.strip_prefix(' ').unwrap_or(rest))
 }
 
 /// The value to pass as `QUARTO_R`, or `None` to leave quarto's own R lookup in

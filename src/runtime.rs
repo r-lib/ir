@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::quarto;
+use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
 use crate::rig;
-use crate::script::{RunSource, ScriptSpec};
+use crate::script::RunSource;
+use crate::spec::RuntimeSpec;
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
 /// self-contained binary while the source stays editable as real R.
@@ -28,18 +29,11 @@ pub(crate) fn cmd_run(
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     spec.dependencies.extend(with_deps.iter().cloned());
-    spec.quarto = source.is_quarto();
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
     }
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec)?;
-
-    // Reject comma-bearing Rscript options before resolving, so a run that could
-    // never be launched fails fast instead of after dependency resolution. quarto
-    // forwards them via comma-separated QUARTO_KNITR_RSCRIPT_ARGS, which has no
-    // escaping.
-    source.reject_unsupported_rscript_args(rscript_args)?;
 
     // Reuse a warm resolution marker, or launch the private resolver R session
     // to resolve deps and materialise the library.
@@ -57,7 +51,38 @@ pub(crate) fn cmd_run(
     std::process::exit(code);
 }
 
-pub(crate) fn rscript_for_spec(spec: &ScriptSpec) -> Result<OsString, Box<dyn Error>> {
+/// Resolve dependencies for `source`, then render it with Quarto. Exits the
+/// process with Quarto's own exit code.
+pub(crate) fn cmd_render(
+    source: &RenderSource,
+    with_deps: &[String],
+    r_requirement: Option<&str>,
+    render_args: &[String],
+    isolated: bool,
+    vanilla: bool,
+) -> Result<(), Box<dyn Error>> {
+    let mut spec = source.script_spec()?;
+    spec.dependencies.extend(with_deps.iter().cloned());
+    spec.quarto_render = true;
+    if let Some(req) = r_requirement {
+        spec.r_requirement = Some(req.to_string());
+    }
+    let isolated = isolated || spec.isolated;
+    let rscript = rscript_for_spec(&spec)?;
+
+    let library = resolve_library(&rscript, &spec)?;
+    let code = quarto::run(
+        &rscript,
+        library.as_deref(),
+        source.path(),
+        render_args,
+        isolated,
+        vanilla,
+    )?;
+    std::process::exit(code);
+}
+
+pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn Error>> {
     let Some(req) = &spec.r_requirement else {
         return Ok(rscript_command());
     };
@@ -71,14 +96,14 @@ pub(crate) fn rscript_for_spec(spec: &ScriptSpec) -> Result<OsString, Box<dyn Er
 /// refs are passed through.
 pub(crate) fn resolve_library(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
     Ok(resolve_library_inner(rscript, spec, false)?.library)
 }
 
 pub(crate) fn resolve_library_and_primary_package(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
 ) -> Result<(PathBuf, String), Box<dyn Error>> {
     let resolved = resolve_library_inner(rscript, spec, true)?;
     let library = resolved
@@ -97,7 +122,7 @@ struct ResolvedLibrary {
 
 fn resolve_library_inner(
     rscript: &OsStr,
-    spec: &ScriptSpec,
+    spec: &RuntimeSpec,
     primary_package: bool,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let dependencies = normalized_dependencies(&spec.dependencies);
@@ -107,7 +132,7 @@ fn resolve_library_inner(
         rscript,
         &dependencies,
         spec.exclude_newer.as_deref(),
-        spec.quarto,
+        spec.quarto_render,
     )?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {
@@ -147,7 +172,7 @@ fn resolve_library_inner(
     if let Some(exclude_newer) = &spec.exclude_newer {
         cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
     }
-    if spec.quarto {
+    if spec.quarto_render {
         // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
         // this flag tells the resolver a Quarto render needs rmarkdown.
         cmd.env("IR_QUARTO_RENDER", "1");
@@ -295,9 +320,6 @@ fn run_user_code(
     isolated: bool,
 ) -> Result<i32, Box<dyn Error>> {
     match source {
-        RunSource::Quarto(doc) => {
-            quarto::run(rscript, library, doc, rscript_args, script_args, isolated)
-        }
         RunSource::Script(script) => run_script(
             rscript,
             library,
