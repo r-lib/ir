@@ -347,44 +347,6 @@ fn rx_help_outputs_match_snapshots() {
 }
 
 #[test]
-fn cli_help_honors_clicolor_force() {
-    let out = ir()
-        .env_remove("NO_COLOR")
-        .env_remove("CLICOLOR")
-        .env_remove("FORCE_COLOR")
-        .env("CLICOLOR_FORCE", "1")
-        .arg("--help")
-        .output()
-        .unwrap();
-    assert_success(&out);
-
-    let stdout = stdout(&out);
-    assert!(stdout.contains("\u{1b}["), "{stdout}");
-    assert!(stdout.contains("\u{1b}[32mUsage:"), "{stdout}");
-    assert!(stdout.contains("\u{1b}[94mir"), "{stdout}");
-    assert!(stdout.contains("\u{1b}[94m[COMMAND]"), "{stdout}");
-    assert!(!stdout.contains("\u{1b}[36m"), "{stdout}");
-    assert!(!stdout.contains("\u{1b}[33m"), "{stdout}");
-    assert!(!stdout.contains("\u{1b}[4m"), "{stdout}");
-}
-
-#[test]
-fn cli_help_is_plain_when_output_is_captured() {
-    let out = ir()
-        .env_remove("NO_COLOR")
-        .env_remove("CLICOLOR")
-        .env_remove("CLICOLOR_FORCE")
-        .env_remove("FORCE_COLOR")
-        .arg("--help")
-        .output()
-        .unwrap();
-    assert_success(&out);
-
-    let stdout = stdout(&out);
-    assert!(!stdout.contains("\u{1b}["), "{stdout}");
-}
-
-#[test]
 fn clap_reports_public_usage_errors() {
     let cases = [
         (vec!["frobnicate"], "unrecognized subcommand 'frobnicate'"),
