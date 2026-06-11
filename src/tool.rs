@@ -9,7 +9,9 @@ use std::process::Command;
 use saphyr::Yaml;
 
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
-use crate::runtime::{resolve_library_and_primary_package, rscript_for_spec, spawn_error};
+use crate::runtime::{
+    nonempty_env, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
+};
 use crate::spec::{load_first_yaml_document, RuntimeSpec};
 
 pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
@@ -58,12 +60,16 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
         .into());
     }
 
+    let setup_launcher_dir_on_path = !install.bin_dir.exists();
     fs::create_dir_all(&install.bin_dir).map_err(|e| {
         format!(
             "failed to create launcher directory `{}`: {e}",
             install.bin_dir.display()
         )
     })?;
+    if setup_launcher_dir_on_path {
+        ensure_launcher_dir_on_path(&install.bin_dir)?;
+    }
 
     let path_prefix = resolved_runtime_path_prefix(&library, &rscript)?;
     let reinstall_command = tool_install_recovery_command(install);
@@ -538,6 +544,180 @@ fn launcher_mapping_get<'a, 'input>(
     } else {
         mapping.as_mapping_get(normalized.as_str())
     }
+}
+
+fn tool_install_path_setup_enabled() -> bool {
+    nonempty_env("IR_NO_MODIFY_PATH").is_none() && nonempty_env("RAPP_NO_MODIFY_PATH").is_none()
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_launcher_dir_on_path(bin_dir: &Path) -> Result<(), Box<dyn Error>> {
+    if !tool_install_path_setup_enabled() {
+        return Ok(());
+    }
+
+    let bin_dir = fs::canonicalize(bin_dir).map_err(|e| {
+        format!(
+            "cannot resolve launcher directory `{}`: {e}",
+            bin_dir.display()
+        )
+    })?;
+    if bin_dir != macos_default_launcher_dir()? || path_has_dir(&bin_dir) {
+        return Ok(());
+    }
+
+    let zprofile = macos_zprofile()?;
+    let display = macos_zprofile_display(&zprofile);
+    let lines = macos_path_lines();
+    if profile_has_lines(&zprofile, lines)? {
+        eprintln!(
+            "~/.local/bin PATH setup is already present in {display}, but ~/.local/bin is still not on PATH."
+        );
+        eprintln!("Restart your shell, or run:\n\n  source {display}");
+        return Ok(());
+    }
+
+    if let Err(e) = append_macos_path_lines(&zprofile, lines) {
+        eprintln!("Could not add ~/.local/bin to PATH in {display}: {e}");
+        return Ok(());
+    }
+
+    eprintln!("Added ~/.local/bin to PATH in {display}.");
+    eprintln!("Restart your shell, or run:\n\n  source {display}");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_default_launcher_dir() -> Result<PathBuf, Box<dyn Error>> {
+    let home = nonempty_env("HOME").ok_or("cannot determine home directory for PATH setup")?;
+    Ok(fs::canonicalize(
+        PathBuf::from(home).join(".local").join("bin"),
+    )?)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_zprofile() -> Result<PathBuf, Box<dyn Error>> {
+    let dir = nonempty_env("ZDOTDIR")
+        .or_else(|| nonempty_env("HOME"))
+        .ok_or("cannot determine zsh profile path for PATH setup")?;
+    Ok(PathBuf::from(dir).join(".zprofile"))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_zprofile_display(zprofile: &Path) -> String {
+    if let Some(home) = nonempty_env("HOME") {
+        if zprofile == PathBuf::from(home).join(".zprofile") {
+            return "~/.zprofile".to_string();
+        }
+    }
+    zprofile.display().to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_path_lines() -> &'static str {
+    concat!(
+        "case \":$PATH:\" in\n",
+        "  *:\"$HOME/.local/bin\":*) ;;\n",
+        "  *) export PATH=\"$HOME/.local/bin:$PATH\" ;;\n",
+        "esac\n"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn profile_has_lines(profile: &Path, lines: &str) -> Result<bool, Box<dyn Error>> {
+    if !profile.exists() {
+        return Ok(false);
+    }
+    let profile = fs::read_to_string(profile)?;
+    Ok(profile.contains(lines))
+}
+
+#[cfg(target_os = "macos")]
+fn append_macos_path_lines(profile: &Path, lines: &str) -> Result<(), Box<dyn Error>> {
+    use std::io::Write as _;
+
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(profile)?;
+    file.write_all(b"\n")?;
+    file.write_all(lines.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn path_has_dir(dir: &Path) -> bool {
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    env::split_paths(&path).any(|entry| {
+        entry == dir
+            || fs::canonicalize(&entry)
+                .map(|entry| entry == dir)
+                .unwrap_or(false)
+    })
+}
+
+#[cfg(not(unix))]
+fn ensure_launcher_dir_on_path(bin_dir: &Path) -> Result<(), Box<dyn Error>> {
+    if !tool_install_path_setup_enabled() {
+        return Ok(());
+    }
+
+    let bin_dir = launcher_path_str(&fs::canonicalize(bin_dir)?)?;
+    let script = r#"
+$ErrorActionPreference = "Stop"
+$InstallDir = $env:IR_NEW_PATH_ENTRY
+function Normalize-PathEntry([string]$PathEntry) {
+  try { $PathEntry = (Resolve-Path -LiteralPath $PathEntry -ErrorAction Stop).ProviderPath } catch {}
+  try { $PathEntry = [System.IO.Path]::GetFullPath($PathEntry) } catch {}
+  return $PathEntry.TrimEnd('\').ToLowerInvariant()
+}
+function Get-ShortPathEntry([string]$PathEntry) {
+  try {
+    $FileSystem = New-Object -ComObject Scripting.FileSystemObject
+    $ShortPath = $FileSystem.GetFolder($PathEntry).ShortPath
+    if ($ShortPath -and $ShortPath.Length -lt $PathEntry.Length) { return $ShortPath }
+  } catch {}
+  return $PathEntry
+}
+$PathEntry = Get-ShortPathEntry $InstallDir
+$RegistryPath = 'registry::HKEY_CURRENT_USER\Environment'
+$PathEntries = (Get-Item -LiteralPath $RegistryPath).GetValue(
+  'Path', '', 'DoNotExpandEnvironmentNames') -split ';' -ne ''
+$PathEntryNorm = Normalize-PathEntry $PathEntry
+$InstallDirNorm = Normalize-PathEntry $InstallDir
+$PathEntryNorms = $PathEntries | ForEach-Object { Normalize-PathEntry $_ }
+if (($PathEntryNorm -in $PathEntryNorms) -or ($InstallDirNorm -in $PathEntryNorms)) { exit 0 }
+$NewPath = (,$PathEntry + $PathEntries) -join ';'
+if ($NewPath.Length -gt 32767) {
+  Write-Error "Adding $PathEntry would make your user Path $($NewPath.Length) characters, exceeding the Windows environment variable limit of 32767."
+  exit 3
+}
+Set-ItemProperty -Type ExpandString -LiteralPath $RegistryPath Path -Value $NewPath
+$DummyName = 'ir-' + [guid]::NewGuid().ToString()
+[Environment]::SetEnvironmentVariable($DummyName, 'ir-dummy', 'User')
+[Environment]::SetEnvironmentVariable($DummyName, $null, 'User')
+Write-Output "Added $PathEntry to your user Path"
+"#;
+    match Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .env("IR_NEW_PATH_ENTRY", bin_dir)
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!(
+            "Could not add launcher directory to the user Path; powershell exited with status {status}."
+        ),
+        Err(e) => eprintln!("Could not add launcher directory to the user Path: {e}"),
+    }
+
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn ensure_launcher_dir_on_path(_bin_dir: &Path) -> Result<(), Box<dyn Error>> {
+    Ok(())
 }
 
 fn resolved_runtime_path_prefix(

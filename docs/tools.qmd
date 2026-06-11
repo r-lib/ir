@@ -93,3 +93,7 @@ Plain `Rscript` package executables keep Rscript's normal startup package behavi
 By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
 On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`.
 `--bin-dir` overrides those defaults.
+When `ir tool install` creates the launcher directory, it also sets up `PATH` for that directory where needed.
+On macOS, it adds the default `~/.local/bin` launcher directory to `~/.zprofile` when it is not already on `PATH`, respecting `ZDOTDIR`.
+On Windows, it adds the resolved launcher directory to the user `Path`.
+Set `IR_NO_MODIFY_PATH=1` or `RAPP_NO_MODIFY_PATH=1` to skip PATH setup.

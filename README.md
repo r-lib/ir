@@ -66,7 +66,10 @@ Install on Windows PowerShell:
 ```
 
 The installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
-They tell you if that directory is not on `PATH`.
+On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
+On Windows, the install directory is added to the user `PATH`.
+On Linux, the installer tells you if the install directory is not on `PATH`.
+Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 
 You can also build from source with Rust:
