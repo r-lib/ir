@@ -9,10 +9,10 @@ use crate::runtime::nonempty_env;
 use crate::script::RunSource;
 
 const HELP_STYLES: Styles = Styles::styled()
-    .header(AnsiColor::Green.on_default().bold())
-    .usage(AnsiColor::Green.on_default().bold())
-    .literal(AnsiColor::BrightBlue.on_default().bold())
-    .placeholder(AnsiColor::BrightBlue.on_default());
+    .header(AnsiColor::BrightBlue.on_default().bold())
+    .usage(AnsiColor::BrightBlue.on_default().bold())
+    .literal(AnsiColor::BrightRed.on_default().bold())
+    .placeholder(AnsiColor::Cyan.on_default());
 
 pub(crate) fn root() -> ClapCommand {
     ClapCommand::new("ir")
