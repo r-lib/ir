@@ -278,8 +278,9 @@ pub(crate) struct ToolInstallArgs {
 /// `-e <expr>`, `--with <spec>`, `--r-version <spec>` and `--isolated` are
 /// `ir`-level flags handled here. Any other `-...` argument is an Rscript
 /// option, forwarded verbatim to the user-code phase. Scanning stops at the
-/// first non-option, which is the script path unless `-e` was given (in which
-/// case it, and everything after, are program args, as with Rscript).
+/// script path unless `-e` was given, in which case scanning stops after the
+/// last `-e <expr>` pair. Everything after the source boundary is passed to
+/// user code as program args.
 pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
@@ -290,7 +291,11 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     let mut positional = None;
 
     while let Some(arg) = iter.next() {
-        if arg == "-e" || arg == "--expr" {
+        if !expressions.is_empty() && arg != "-e" && arg != "--expr" && !arg.starts_with("--expr=")
+        {
+            positional = Some(arg);
+            break;
+        } else if arg == "-e" || arg == "--expr" {
             let expr = iter
                 .next()
                 .ok_or("`-e` requires an expression (try `ir run -e '1 + 1'`)")?;

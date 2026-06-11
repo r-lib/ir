@@ -783,6 +783,31 @@ fn run_inline_expression_resolves_with_dependencies() {
 }
 
 #[test]
+fn run_inline_expression_forwards_option_like_args_after_expr() {
+    let _guard = e2e_lock();
+    let out = ir()
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "-e",
+            "cat('inline.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = '')",
+            "--script-flag",
+            "value",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "inline.args=--script-flag|value");
+    assert!(
+        !output_text(&out).contains("unknown option '--script-flag'"),
+        "{}",
+        output_text(&out)
+    );
+}
+
+#[test]
 fn run_normalizes_version_specs_before_resolution_cache_keying() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-ref-normalized-cache");
