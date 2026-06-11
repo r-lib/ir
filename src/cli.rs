@@ -1,11 +1,9 @@
-use std::env;
 use std::error::Error;
-use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::builder::StyledStr;
-use clap::{Arg, ArgAction, ColorChoice, Command as ClapCommand};
+use clap::{Arg, ArgAction, Command as ClapCommand};
 
 use crate::quarto::RenderSource;
 use crate::runtime::nonempty_env;
@@ -15,7 +13,6 @@ pub(crate) fn root() -> ClapCommand {
     ClapCommand::new("ir")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Run self-describing R scripts")
-        .color(color_choice())
         .styles(help_styles())
         .arg_required_else_help(true)
         .after_help(examples_help(concat!(
@@ -28,13 +25,6 @@ pub(crate) fn root() -> ClapCommand {
         .subcommand(render_command())
         .subcommand(tool_command())
         .subcommand(cache_command())
-}
-
-fn color_choice() -> ColorChoice {
-    match env::var_os("CLICOLOR_FORCE") {
-        Some(value) if !value.is_empty() && value != OsString::from("0") => ColorChoice::Always,
-        _ => ColorChoice::Auto,
-    }
 }
 
 fn help_styles() -> Styles {

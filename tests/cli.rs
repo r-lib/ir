@@ -349,6 +349,8 @@ fn rx_help_outputs_match_snapshots() {
 #[test]
 fn cli_help_honors_clicolor_force() {
     let out = ir()
+        .env_remove("NO_COLOR")
+        .env_remove("CLICOLOR")
         .env("CLICOLOR_FORCE", "1")
         .arg("--help")
         .output()
@@ -375,7 +377,13 @@ fn examples_help_headings_are_colored() {
         &["tool", "run", "--help"],
         &["tool", "install", "--help"],
     ] {
-        let out = ir().env("CLICOLOR_FORCE", "1").args(args).output().unwrap();
+        let out = ir()
+            .env_remove("NO_COLOR")
+            .env_remove("CLICOLOR")
+            .env("CLICOLOR_FORCE", "1")
+            .args(args)
+            .output()
+            .unwrap();
         assert_success(&out);
         let stdout = stdout(&out);
         assert!(stdout.contains(colored_examples), "{args:?}:\n{stdout}");
