@@ -16,6 +16,8 @@ For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executabl
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
 The executable must use a shebang that names `Rscript` or `Rapp`.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
+For Rapp-style package apps, `#| launcher:` metadata with `name:` can rename the command that `rx --from pkg <command>` discovers.
+Explicit launcher Rscript options such as `default-packages`, `vanilla`, and `no-environ` are applied when the app runs.
 
 Tool runs support the same dependency and R selection flags as script runs:
 
@@ -43,7 +45,12 @@ $ ir tool install --with cli --r-version 4.5 btw
 
 Installed launchers keep the same resolved package ref, `--with` package additions, and R version selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
+For Rapp-style package apps, `#| launcher:` metadata with `name:` controls the installed command name, and explicit launcher Rscript options such as `default-packages`, `vanilla`, and `no-environ` are included in the generated launcher.
 
 By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
 On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`.
 `--bin-dir` overrides those defaults.
+When `ir tool install` creates the launcher directory, it also sets up `PATH` for that directory where needed.
+On macOS, it adds the default `~/.local/bin` launcher directory to `~/.zprofile` when it is not already on `PATH`, respecting `ZDOTDIR`.
+On Windows, it adds the resolved launcher directory to the user `Path`.
+Set `IR_NO_MODIFY_PATH=1` or `RAPP_NO_MODIFY_PATH=1` to skip PATH setup.

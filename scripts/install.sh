@@ -6,6 +6,7 @@
 # Downloads the archive for this machine's platform from the latest GitHub
 # Release, verifies it runs, and installs `ir` and `rx` into $IR_INSTALL_DIR
 # (default ~/.local/bin). Override the destination with IR_INSTALL_DIR=/some/dir.
+# On macOS, the default install directory is added to ~/.zprofile when needed.
 set -eu
 
 OWNER="t-kalinowski"
@@ -34,6 +35,91 @@ require_supported_glibc() {
     echo "build from source instead: https://github.com/${OWNER}/${REPO}#install" >&2
     exit 1
   fi
+}
+
+path_has_dir() {
+  case ":${PATH}:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+show_path_hint() {
+  echo "add ${INSTALL_DIR} to your PATH to run ${commands}"
+}
+
+zprofile_path() {
+  if [ -n "${ZDOTDIR:-}" ]; then
+    printf '%s/.zprofile\n' "$ZDOTDIR"
+  else
+    printf '%s/.zprofile\n' "$HOME"
+  fi
+}
+
+zprofile_display() {
+  profile="$1"
+  if [ "$profile" = "${HOME}/.zprofile" ]; then
+    printf '~/.zprofile\n'
+  else
+    printf '%s\n' "$profile"
+  fi
+}
+
+profile_has_macos_path_lines() {
+  [ -f "$1" ] && grep -F 'export PATH="$HOME/.local/bin:$PATH"' "$1" >/dev/null 2>&1
+}
+
+write_macos_path_lines() {
+  profile="$1"
+  {
+    printf '\n'
+    printf 'case ":$PATH:" in\n'
+    printf '  *:"$HOME/.local/bin":*) ;;\n'
+    printf '  *) export PATH="$HOME/.local/bin:$PATH" ;;\n'
+    printf 'esac\n'
+  } >>"$profile"
+}
+
+ensure_install_dir_on_path() {
+  if path_has_dir "$INSTALL_DIR"; then
+    return 0
+  fi
+
+  if [ -n "${IR_NO_MODIFY_PATH:-}" ]; then
+    show_path_hint
+    return 0
+  fi
+
+  case "$OS" in
+    Darwin) ;;
+    *)
+      show_path_hint
+      return 0
+      ;;
+  esac
+
+  default_install_dir="${HOME}/.local/bin"
+  if [ "$INSTALL_DIR" != "$default_install_dir" ]; then
+    show_path_hint
+    return 0
+  fi
+
+  profile="$(zprofile_path)"
+  profile_display="$(zprofile_display "$profile")"
+  if profile_has_macos_path_lines "$profile"; then
+    echo "~/.local/bin PATH setup is already present in ${profile_display}, but ~/.local/bin is still not on PATH."
+    echo "restart your shell, or run: source ${profile_display}"
+  elif write_macos_path_lines "$profile"; then
+    echo "Added ~/.local/bin to PATH in ${profile_display}."
+    echo "restart your shell, or run: source ${profile_display}"
+  else
+    echo "could not add ~/.local/bin to PATH in ${profile_display}" >&2
+    show_path_hint
+    return 0
+  fi
+
+  PATH="${INSTALL_DIR}:${PATH}"
+  export PATH
 }
 
 OS="$(uname -s)"
@@ -95,7 +181,4 @@ if [ -f "$extracted_rx" ]; then
   commands="${APP} and rx"
 fi
 
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *) echo "add ${INSTALL_DIR} to your PATH to run ${commands}" ;;
-esac
+ensure_install_dir_on_path

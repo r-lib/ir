@@ -5,7 +5,7 @@
 //! through the compiled binary and assert marker lines printed by those public
 //! workflows.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -141,6 +141,18 @@ fn unique_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+fn tree_contains_dir_named(root: &Path, name: &str) -> bool {
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.is_dir()
+            && (path.file_name() == Some(OsStr::new(name)) || tree_contains_dir_named(&path, name))
+    })
+}
+
 fn unique_dir_in(parent: &Path, prefix: &str) -> (PathBuf, OsString) {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -223,8 +235,21 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+}
+
 fn assert_stdout_contains(output: &Output, needle: &str) {
     let text = stdout(output);
+    assert!(
+        text.contains(needle),
+        "missing {needle:?}\n{}",
+        output_text(output)
+    );
+}
+
+fn assert_stderr_contains(output: &Output, needle: &str) {
+    let text = stderr(output);
     assert!(
         text.contains(needle),
         "missing {needle:?}\n{}",
@@ -584,6 +609,29 @@ fn docs_run_page_dark_mode_styles_console_blocks() {
     );
 
     let _ = fs::remove_dir_all(&output_dir);
+}
+
+#[test]
+fn install_scripts_configure_default_path_entries() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let sh = fs::read_to_string(manifest_dir.join("scripts/install.sh")).unwrap();
+    assert!(sh.contains("ensure_install_dir_on_path"), "{sh}");
+    assert!(sh.contains("IR_NO_MODIFY_PATH"), "{sh}");
+    assert!(sh.contains("ZDOTDIR"), "{sh}");
+    assert!(sh.contains("Added ~/.local/bin to PATH in"), "{sh}");
+    assert!(sh.contains("profile_display"), "{sh}");
+    assert!(
+        sh.contains("add ${INSTALL_DIR} to your PATH to run ${commands}"),
+        "{sh}"
+    );
+
+    let ps1 = fs::read_to_string(manifest_dir.join("scripts/install.ps1")).unwrap();
+    assert!(ps1.contains("Ensure-InstallDirOnPath"), "{ps1}");
+    assert!(ps1.contains("IR_NO_MODIFY_PATH"), "{ps1}");
+    assert!(ps1.contains("Set-ItemProperty -Type ExpandString"), "{ps1}");
+    assert!(ps1.contains("32767"), "{ps1}");
+    assert!(ps1.contains("added $installDir to user PATH"), "{ps1}");
 }
 
 #[test]
@@ -2064,6 +2112,151 @@ fn tool_install_installs_real_package_entrypoint() {
     let _ = fs::remove_dir_all(&bin_dir);
 }
 
+#[test]
+fn tool_run_and_install_use_rapp_launcher_metadata() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-tool-launcher-metadata-cache");
+    let bin_dir = unique_dir("ir-tool-launcher-metadata-bin");
+    let package_dir = unique_dir("ir-tool-launcher-metadata-packages");
+    let package = write_r_source_package(&package_dir, "irtoolmeta", &[]);
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("default-name.R"),
+        r#"#!/usr/bin/env Rscript
+#| launcher:
+#|   name: custom-tool
+#|   default-packages: [base, irtoolmeta]
+cat("launcher.name=", Sys.getenv("RAPP_LAUNCHER_NAME"), "\n", sep = "")
+cat("package.function=", ok(), "\n", sep = "")
+"#,
+    )
+    .unwrap();
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["tool", "run", "--from", &package_ref, "custom-tool"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "launcher.name=custom-tool");
+    assert_stdout_contains(&out, "package.function=TRUE");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "custom-tool");
+    assert!(
+        !launcher_path(&bin_dir, "default-name").exists(),
+        "launcher should use Rapp launcher metadata"
+    );
+
+    let out = Command::new(launcher_path(&bin_dir, "custom-tool"))
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "launcher.name=custom-tool");
+    assert_stdout_contains(&out, "package.function=TRUE");
+
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&package_dir);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn tool_install_adds_default_macos_bin_dir_to_zprofile() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-tool-install-macos-path-cache");
+    let home = unique_dir("ir-tool-install-macos-path-home");
+    let package_dir = unique_dir("ir-tool-install-macos-path-packages");
+    let package = write_r_source_package(&package_dir, "irmacpath", &[]);
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("hello.R"),
+        r#"#!/usr/bin/env Rscript
+cat("mac.path.fixture=TRUE\n")
+"#,
+    )
+    .unwrap();
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("ZDOTDIR")
+        .env_remove("IR_TOOL_BIN_DIR")
+        .env_remove("RAPP_BIN_DIR")
+        .env_remove("XDG_BIN_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("IR_NO_MODIFY_PATH")
+        .args(["tool", "install"])
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stderr_contains(&out, "Added ~/.local/bin to PATH in ~/.zprofile");
+    assert_stdout_contains(&out, "Installed");
+    assert!(launcher_path(&home.join(".local").join("bin"), "hello").exists());
+    assert!(
+        !tree_contains_dir_named(&cache_dir, "Rapp"),
+        "PATH setup should not add a hidden Rapp dependency"
+    );
+
+    let zprofile = fs::read_to_string(home.join(".zprofile")).unwrap();
+    assert_eq!(
+        zprofile,
+        concat!(
+            "\n",
+            "case \":$PATH:\" in\n",
+            "  *:\"$HOME/.local/bin\":*) ;;\n",
+            "  *) export PATH=\"$HOME/.local/bin:$PATH\" ;;\n",
+            "esac\n"
+        )
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("ZDOTDIR")
+        .env_remove("IR_TOOL_BIN_DIR")
+        .env_remove("RAPP_BIN_DIR")
+        .env_remove("XDG_BIN_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("IR_NO_MODIFY_PATH")
+        .args(["tool", "install", "--force"])
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed");
+    let stderr = stderr(&out);
+    assert!(
+        !stderr.contains("PATH"),
+        "reinstall should not rerun PATH setup:\n{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(home.join(".zprofile")).unwrap(),
+        zprofile
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&home);
+    let _ = fs::remove_dir_all(&package_dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
@@ -2081,6 +2274,7 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let warm = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RSCRIPT", &rscript)
+        .env("IR_NO_MODIFY_PATH", "1")
         .env_remove("R_PROFILE_USER")
         .args([
             "tool",
@@ -2098,6 +2292,7 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let cached = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RSCRIPT", &rscript)
+        .env("IR_NO_MODIFY_PATH", "1")
         .env("R_PROFILE_USER", &profile)
         .args([
             "tool",
