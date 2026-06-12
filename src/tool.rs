@@ -546,6 +546,7 @@ fn launcher_mapping_get<'a, 'input>(
     }
 }
 
+#[cfg(any(target_os = "macos", not(unix)))]
 fn tool_install_path_setup_enabled() -> bool {
     nonempty_env("IR_NO_MODIFY_PATH").is_none() && nonempty_env("RAPP_NO_MODIFY_PATH").is_none()
 }

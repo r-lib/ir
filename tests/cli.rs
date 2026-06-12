@@ -5,7 +5,7 @@
 //! through the compiled binary and assert marker lines printed by those public
 //! workflows.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -145,6 +145,7 @@ fn unique_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+#[cfg(target_os = "macos")]
 fn tree_contains_dir_named(root: &Path, name: &str) -> bool {
     let Ok(entries) = fs::read_dir(root) else {
         return false;
@@ -153,7 +154,8 @@ fn tree_contains_dir_named(root: &Path, name: &str) -> bool {
     entries.flatten().any(|entry| {
         let path = entry.path();
         path.is_dir()
-            && (path.file_name() == Some(OsStr::new(name)) || tree_contains_dir_named(&path, name))
+            && (path.file_name() == Some(std::ffi::OsStr::new(name))
+                || tree_contains_dir_named(&path, name))
     })
 }
 
@@ -239,6 +241,7 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
+#[cfg(target_os = "macos")]
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
 }
