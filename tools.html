@@ -23,6 +23,41 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -303,7 +338,8 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#install-launchers" id="toc-install-launchers" class="nav-link active" data-scroll-target="#install-launchers">Install launchers</a></li>
+  <li><a href="#write-package-tools" id="toc-write-package-tools" class="nav-link active" data-scroll-target="#write-package-tools">Write package tools</a></li>
+  <li><a href="#install-launchers" id="toc-install-launchers" class="nav-link" data-scroll-target="#install-launchers">Install launchers</a></li>
   </ul>
 </nav>
     </div>
@@ -335,13 +371,36 @@ ul.task-list li input[type="checkbox"] {
 $ rx --from btw btw --help
 $ rx --from github::r-lib/Rapp Rapp
 $ ir tool run --from btw btw --help</code></pre>
-<p>For <code>rx --from pkg tool</code>, <code>ir</code> installs <code>pkg</code>, finds the named package executable, and launches it with the selected Rscript. Tool runs use an isolated library containing the resolved package plus any <code>--with</code> dependencies; the user R library is not used. The executable must use a shebang that names <code>Rscript</code> or <code>Rapp</code>. A bare self-named package ref such as <code>rx btw</code> is shorthand for <code>rx --from btw btw</code>.</p>
+<p>For <code>rx --from pkg tool</code>, <code>ir</code> installs <code>pkg</code>, finds the named package executable, and launches it with the selected Rscript. Tool runs use an isolated library containing the resolved package plus any <code>--with</code> dependencies; the user R library is not used. Here, a package executable means a file in the installed package’s <code>exec/</code> directory with an <code>Rscript</code> or <code>Rapp</code> shebang. Other executable formats, such as Python or shell scripts, are ignored. A bare self-named package ref such as <code>rx btw</code> is shorthand for <code>rx --from btw btw</code>.</p>
+<p>An <code>Rscript</code> executable is an ordinary R script. A <code>Rapp</code> executable is an app script that uses Rapp’s command-line parser and help metadata. Both forms may include nested <code>#| launcher:</code> metadata to rename the command that <code>rx --from pkg &lt;command&gt;</code> discovers or to set Rscript options such as <code>default-packages</code>, <code>vanilla</code>, and <code>no-environ</code>. If <code>launcher.name</code> is absent, a top-level <code>#| name:</code> is used as the command name when present.</p>
 <p>Tool runs support the same dependency and R selection flags as script runs:</p>
 <pre class="console"><code>$ rx --with cli --from btw btw
 $ rx -w cli --from btw btw
 $ rx --from 'btw&gt;=0.1.0' btw
 $ rx --r-version 4.5 --from btw btw</code></pre>
 <p>Package refs use pak syntax. Quote refs when the shell would otherwise interpret characters such as <code>&gt;</code>.</p>
+<section id="write-package-tools" class="level2">
+<h2 class="anchored" data-anchor-id="write-package-tools">Write package tools</h2>
+<p>A plain Rscript package executable can be as small as this:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/usr/bin/env Rscript</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"hello</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If that file is <code>exec/hello.R</code>, then <code>rx --from mypkg hello</code> runs it, and <code>ir tool install mypkg</code> installs a <code>hello</code> launcher.</p>
+<p>Use nested launcher metadata when the installed command name or Rscript startup options should differ from the file name or Rscript defaults:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/usr/bin/env Rscript</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="co">#| launcher:</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co">#|   name: greet</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co">#|   default-packages: [base, mypkg]</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">hello</span>(), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>That file is installed and discovered as <code>greet</code>, not by its file name.</p>
+<p>A Rapp app uses a <code>Rapp</code> shebang and may use top-level Rapp metadata for its own help output:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/usr/bin/env Rapp</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co">#| name: friendly-greeting</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co">#| description: Greet someone.</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>who <span class="ot">&lt;-</span> <span class="st">"world"</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">hello</span>(who), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If that file is <code>exec/greet.R</code>, it is installed and discovered as <code>friendly-greeting</code>. Rapp apps use <code>base,&lt;pkg&gt;</code> as their default startup packages unless <code>#| launcher:</code> sets <code>default-packages</code>.</p>
+</section>
 <section id="install-launchers" class="level2">
 <h2 class="anchored" data-anchor-id="install-launchers">Install launchers</h2>
 <p><code>ir tool install</code> resolves a package and writes launchers for the executables it provides.</p>
@@ -350,7 +409,7 @@ $ ir tool install github::r-lib/Rapp
 $ ir tool install --bin-dir ~/.local/bin btw
 $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw</code></pre>
-<p>Installed launchers keep the same resolved package ref, <code>--with</code> package additions, and R version selection that were used at install time. They set <code>R_LIBS</code> to the resolved library and <code>R_LIBS_USER=NULL</code>.</p>
+<p>Installed launchers keep the same resolved package ref, <code>--with</code> package additions, and R version selection that were used at install time. They set <code>R_LIBS</code> to the resolved library and <code>R_LIBS_USER=NULL</code>. Nested <code>#| launcher:</code> metadata is included in generated launchers. If there is no <code>launcher.name</code>, top-level <code>#| name:</code> is used for the launcher name when present. Plain <code>Rscript</code> package executables keep Rscript’s normal startup package behavior unless launcher metadata explicitly sets <code>default-packages</code>.</p>
 <p>By default, <code>ir tool install</code> writes launchers to <code>IR_TOOL_BIN_DIR</code>, <code>RAPP_BIN_DIR</code>, <code>XDG_BIN_HOME</code>, <code>XDG_DATA_HOME/../bin</code>, or <code>~/.local/bin</code> on Unix. On Windows, it uses <code>%LOCALAPPDATA%\Programs\R\ir\bin</code>, falling back to <code>%USERPROFILE%\AppData\Local\Programs\R\ir\bin</code>. <code>--bin-dir</code> overrides those defaults.</p>
 
 
