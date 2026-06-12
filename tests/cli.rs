@@ -2076,6 +2076,7 @@ fn tool_run_and_install_use_launcher_metadata() {
     fs::write(
         exec_dir.join("default-name.R"),
         r#"#!/usr/bin/env Rscript
+#| name: ignored-top-level
 #| launcher:
 #|   name: custom-tool
 cat("launcher.name=", Sys.getenv("RAPP_LAUNCHER_NAME"), "\n", sep = "")
@@ -2106,7 +2107,7 @@ cat("selected=actual\n")
     fs::write(
         exec_dir.join("top-level.R"),
         r#"#!/usr/bin/env Rscript
-#| name: Friendly Tool
+#| name: top-level-tool
 cat("launcher.name=", Sys.getenv("RAPP_LAUNCHER_NAME"), "\n", sep = "")
 cat("selected=top-level\n")
 "#,
@@ -2134,11 +2135,11 @@ cat("selected=top-level\n")
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .args(["tool", "run", "--from", &package_ref, "top-level"])
+        .args(["tool", "run", "--from", &package_ref, "top-level-tool"])
         .output()
         .unwrap();
     assert_success(&out);
-    assert_stdout_contains(&out, "launcher.name=top-level");
+    assert_stdout_contains(&out, "launcher.name=top-level-tool");
     assert_stdout_contains(&out, "selected=top-level");
 
     let out = ir()
@@ -2152,7 +2153,7 @@ cat("selected=top-level\n")
     assert_stdout_contains(&out, "custom-tool");
     assert_stdout_contains(&out, "new-name");
     assert_stdout_contains(&out, "old-name");
-    assert_stdout_contains(&out, "top-level");
+    assert_stdout_contains(&out, "top-level-tool");
     assert!(
         !launcher_path(&bin_dir, "default-name").exists(),
         "launcher should use package launcher metadata"
@@ -2165,11 +2166,11 @@ cat("selected=top-level\n")
     assert_stdout_contains(&out, "launcher.name=custom-tool");
     assert_stdout_contains(&out, "package.function=TRUE");
 
-    let out = Command::new(launcher_path(&bin_dir, "top-level"))
+    let out = Command::new(launcher_path(&bin_dir, "top-level-tool"))
         .output()
         .unwrap();
     assert_success(&out);
-    assert_stdout_contains(&out, "launcher.name=top-level");
+    assert_stdout_contains(&out, "launcher.name=top-level-tool");
     assert_stdout_contains(&out, "selected=top-level");
 
     let _ = fs::remove_dir_all(&bin_dir);
@@ -2351,6 +2352,8 @@ fn tool_run_and_install_apply_package_default_packages() {
     fs::write(
         exec_dir.join("no-launcher.R"),
         r#"#!/usr/bin/env Rapp
+#| name: no-launcher-app
+
 cat("package.function=", ok(), "\n", sep = "")
 "#,
     )
@@ -2369,7 +2372,7 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .args(["tool", "run", "--from", &package_ref, "no-launcher"])
+        .args(["tool", "run", "--from", &package_ref, "no-launcher-app"])
         .output()
         .unwrap();
     assert_success(&out);
@@ -2393,7 +2396,7 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
         .unwrap();
     assert_success(&out);
 
-    let out = Command::new(launcher_path(&bin_dir, "no-launcher"))
+    let out = Command::new(launcher_path(&bin_dir, "no-launcher-app"))
         .output()
         .unwrap();
     assert_success(&out);

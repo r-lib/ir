@@ -299,14 +299,14 @@ fn package_launcher_metadata(
 ) -> Result<PackageLauncherMetadata, Box<dyn Error>> {
     let frontmatter = read_rapp_frontmatter_to_string(path)?;
     if frontmatter.trim().is_empty() {
-        return package_launcher_metadata_from_mapping(None, path, package, package_launcher);
+        return package_launcher_metadata_from_mapping(None, None, path, package, package_launcher);
     }
 
     let Some(doc) = load_first_yaml_document(&frontmatter, "launcher frontmatter")? else {
-        return package_launcher_metadata_from_mapping(None, path, package, package_launcher);
+        return package_launcher_metadata_from_mapping(None, None, path, package, package_launcher);
     };
     if doc.is_null() {
-        return package_launcher_metadata_from_mapping(None, path, package, package_launcher);
+        return package_launcher_metadata_from_mapping(None, None, path, package, package_launcher);
     }
     if !doc.is_mapping() {
         return Err(format!(
@@ -317,18 +317,26 @@ fn package_launcher_metadata(
     }
 
     let launcher = launcher_frontmatter_mapping(&doc, path)?;
-    package_launcher_metadata_from_mapping(launcher, path, package, package_launcher)
+    let top_level_name = launcher_optional_string(&doc, "name", path)?;
+    package_launcher_metadata_from_mapping(
+        launcher,
+        top_level_name,
+        path,
+        package,
+        package_launcher,
+    )
 }
 
 fn package_launcher_metadata_from_mapping(
     launcher: Option<&Yaml<'_>>,
+    top_level_name: Option<String>,
     path: &Path,
     package: &str,
     package_launcher: PackageLauncher,
 ) -> Result<PackageLauncherMetadata, Box<dyn Error>> {
     let name = match launcher {
-        Some(launcher) => launcher_optional_string(launcher, "name", path)?,
-        None => None,
+        Some(launcher) => launcher_optional_string(launcher, "name", path)?.or(top_level_name),
+        None => top_level_name,
     };
     let rscript_args = match (launcher, package_launcher) {
         (Some(_), _) | (None, PackageLauncher::Rapp) => {
