@@ -248,32 +248,6 @@ fn assert_command_success(mut command: Command, label: &str) {
 }
 
 #[cfg(unix)]
-struct ResolverToolingPaths {
-    pak: PathBuf,
-    renv: PathBuf,
-    secretbase: PathBuf,
-}
-
-#[cfg(unix)]
-fn resolver_tooling_package_paths() -> ResolverToolingPaths {
-    let expr = concat!(
-        "cat(find.package('pak'), '\\n', ",
-        "find.package('renv'), '\\n', ",
-        "find.package('secretbase'), '\\n', sep = '')"
-    );
-    let output = Command::new(rscript()).args(["-e", expr]).output().unwrap();
-    assert_success(&output);
-
-    let stdout = stdout(&output);
-    let mut lines = stdout.lines().map(PathBuf::from);
-    ResolverToolingPaths {
-        pak: lines.next().unwrap(),
-        renv: lines.next().unwrap(),
-        secretbase: lines.next().unwrap(),
-    }
-}
-
-#[cfg(unix)]
 fn make_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1906,49 +1880,96 @@ fn resolver_tooling_ignores_ambient_user_library_package() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-ambient-tooling-cache");
     let ambient_library = unique_dir("ir-ambient-tooling-user-library");
-    let package_dir = unique_dir("ir-ambient-tooling-packages");
     let fake_load_marker = unique_path("ir-ambient-secretbase-loaded", "txt");
     let profile = unique_path("ir-tooling-install-profile", "R");
 
-    let fake_secretbase = write_r_source_package(&package_dir, "secretbase", &[]);
-    fs::write(
-        fake_secretbase.join("R").join("ok.R"),
-        format!(
-            ".onLoad <- function(...) writeLines('loaded', {})\n",
-            r_string(&fake_load_marker)
-        ),
-    )
-    .unwrap();
-
-    let install_fake = format!(
-        "utils::install.packages({}, repos = NULL, type = 'source', lib = {})",
-        r_string(&fake_secretbase),
-        r_string(&ambient_library)
-    );
-    let mut install = Command::new(rscript());
-    install.args(["-e", &install_fake]);
-    assert_command_success(install, "install fake ambient secretbase");
-    let _ = fs::remove_file(&fake_load_marker);
-
-    let tooling = resolver_tooling_package_paths();
     fs::write(
         &profile,
         format!(
             r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(
+    paste0("Package: ", pkg),
+    "Version: 0.0.1",
+    paste0("Title: ", pkg),
+    paste0("Description: ", pkg, "."),
+    "License: MIT"
+  ), file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+}}
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "secretbase",
+  "export(sha256)",
+  paste(
+    sprintf(".onLoad <- function(...) writeLines('loaded', %s)", {}),
+    "sha256 <- function(x) 'ambienthash'",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "pak",
+  "export(pkg_deps)",
+  paste(
+    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
+    "  refs <- as.character(refs)",
+    "  data.frame(",
+    "    status = rep('OK', length(refs)),",
+    "    ref = refs,",
+    "    package = sub('@.*$', '', refs),",
+    "    version = rep('0.0.1', length(refs)),",
+    "    type = rep('standard', length(refs)),",
+    "    priority = NA_character_,",
+    "    direct = TRUE,",
+    "    stringsAsFactors = FALSE",
+    "  )",
+    "}}",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "renv",
+  "export(use)",
+  paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {{",
+    "  specs <- unlist(list(...), use.names = FALSE)",
+    "  for (spec in specs) {{",
+    "    pkg <- sub('@.*$', '', spec)",
+    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "  }}",
+    "  invisible(TRUE)",
+    "}}",
+    sep = "\n"
+  )
+)
+
 utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
-  paths <- c(pak = {}, renv = {}, secretbase = {})
   dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   for (pkg in pkgs) {{
-    target <- file.path(lib, pkg)
-    unlink(target, recursive = TRUE, force = TRUE)
-    if (!file.symlink(paths[[pkg]], target))
-      stop("failed to link resolver tooling package: ", pkg, call. = FALSE)
+    if (!identical(pkg, "secretbase"))
+      stop("unexpected resolver tooling package: ", pkg, call. = FALSE)
+    ir_test_write_pkg(
+      lib,
+      "secretbase",
+      "export(sha256)",
+      "sha256 <- function(x) 'privatehash'"
+    )
   }}
 }}, ns = "utils")
 "#,
-            r_string(&tooling.pak),
-            r_string(&tooling.renv),
-            r_string(&tooling.secretbase)
+            r_string(&fake_load_marker)
         ),
     )
     .unwrap();
@@ -1978,7 +1999,6 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 
     let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&fake_load_marker);
-    let _ = fs::remove_dir_all(&package_dir);
     let _ = fs::remove_dir_all(&ambient_library);
     let _ = fs::remove_dir_all(&cache_dir);
 }
