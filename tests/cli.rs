@@ -2598,6 +2598,64 @@ cat("mac.custom.path.fixture=TRUE\n")
     let _ = fs::remove_dir_all(&package_dir);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn tool_install_existing_launcher_does_not_modify_zprofile() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-tool-install-collision-path-cache");
+    let home = unique_dir("ir-tool-install-collision-path-home");
+    let default_bin_dir = home.join(".local").join("bin");
+    fs::create_dir_all(&default_bin_dir).unwrap();
+    fs::write(
+        launcher_path(&default_bin_dir, "hello"),
+        "existing launcher\n",
+    )
+    .unwrap();
+    let package_dir = unique_dir("ir-tool-install-collision-path-packages");
+    let package = write_r_source_package(&package_dir, "irmacpathcollision", &[]);
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("hello.R"),
+        r#"#!/usr/bin/env Rscript
+cat("mac.path.collision.fixture=TRUE\n")
+"#,
+    )
+    .unwrap();
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("ZDOTDIR")
+        .env_remove("IR_TOOL_BIN_DIR")
+        .env_remove("RAPP_BIN_DIR")
+        .env_remove("XDG_BIN_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("IR_NO_MODIFY_PATH")
+        .args(["tool", "install"])
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let text = output_text(&out);
+    assert!(
+        text.contains("already exists; pass --force to overwrite it"),
+        "{text}"
+    );
+    assert!(
+        !home.join(".zprofile").exists(),
+        "failed install should not write .zprofile\n{text}"
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&home);
+    let _ = fs::remove_dir_all(&package_dir);
+}
+
 #[test]
 fn tool_run_and_install_use_launcher_metadata() {
     let _guard = e2e_lock();

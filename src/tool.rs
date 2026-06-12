@@ -66,9 +66,6 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
             install.bin_dir.display()
         )
     })?;
-    if install.setup_bin_dir_on_path {
-        ensure_launcher_dir_on_path(&install.bin_dir)?;
-    }
 
     let path_prefix = resolved_runtime_path_prefix(&library, &rscript)?;
     let reinstall_command = tool_install_recovery_command(install);
@@ -81,6 +78,9 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
             )
             .into());
         }
+    }
+    if install.setup_bin_dir_on_path {
+        ensure_launcher_dir_on_path(&install.bin_dir)?;
     }
 
     let mut installed = Vec::new();
@@ -674,7 +674,7 @@ fn ensure_launcher_dir_on_path(bin_dir: &Path) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let bin_dir = launcher_path_str(&fs::canonicalize(bin_dir)?)?;
+    let bin_dir = windows_path_entry_str(bin_dir)?;
     let script = r#"
 $ErrorActionPreference = "Stop"
 $InstallDir = $env:IR_NEW_PATH_ENTRY
@@ -723,6 +723,26 @@ Write-Output "Added $PathEntry to your user Path"
     }
 
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn windows_path_entry_str(path: &Path) -> Result<String, Box<dyn Error>> {
+    let path = launcher_path_str(path)?;
+    Ok(non_verbatim_windows_path(path))
+}
+
+#[cfg(not(unix))]
+fn non_verbatim_windows_path(path: String) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if path.starts_with(r"\\?\") {
+        let bytes = path.as_bytes();
+        if bytes.len() > 6 && bytes[5] == b':' && bytes[4].is_ascii_alphabetic() {
+            return path[4..].to_string();
+        }
+    }
+    path
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
