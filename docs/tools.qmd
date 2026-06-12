@@ -14,10 +14,14 @@ $ ir tool run --from btw btw --help
 
 For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executable, and launches it with the selected Rscript.
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
-The executable must use a shebang that names `Rscript` or `Rapp`.
+Here, a package executable means a file in the installed package's `exec/` directory with an `Rscript` or `Rapp` shebang.
+Other executable formats, such as Python or shell scripts, are ignored.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
-For package apps, `#| launcher:` metadata with `name:` can rename the command that `rx --from pkg <command>` discovers.
-Explicit launcher Rscript options such as `default-packages`, `vanilla`, and `no-environ` are applied when the app runs.
+
+An `Rscript` executable is an ordinary R script.
+A `Rapp` executable is an app script that uses Rapp's command-line parser and help metadata.
+Both forms may include nested `#| launcher:` metadata to rename the command that `rx --from pkg <command>` discovers or to set Rscript options such as `default-packages`, `vanilla`, and `no-environ`.
+Top-level Rapp metadata such as `#| name:` is for the app's own help output and does not rename the package executable.
 
 Tool runs support the same dependency and R selection flags as script runs:
 
@@ -30,6 +34,43 @@ $ rx --r-version 4.5 --from btw btw
 
 Package refs use pak syntax.
 Quote refs when the shell would otherwise interpret characters such as `>`.
+
+## Write package tools
+
+A plain Rscript package executable can be as small as this:
+
+```r
+#!/usr/bin/env Rscript
+cat("hello\n")
+```
+
+If that file is `exec/hello.R`, then `rx --from mypkg hello` runs it, and `ir tool install mypkg` installs a `hello` launcher.
+
+Use nested launcher metadata when the installed command name or Rscript startup options should differ from the file name or Rscript defaults:
+
+```r
+#!/usr/bin/env Rscript
+#| launcher:
+#|   name: greet
+#|   default-packages: [base, mypkg]
+cat(hello(), "\n")
+```
+
+That file is installed and discovered as `greet`, not by its file name.
+
+A Rapp app uses a `Rapp` shebang and may use top-level Rapp metadata for its own help output:
+
+```r
+#!/usr/bin/env Rapp
+#| name: friendly-greeting
+#| description: Greet someone.
+
+who <- "world"
+cat(hello(who), "\n")
+```
+
+If that file is `exec/greet.R`, it is installed and discovered as `greet`; the top-level Rapp name is for help output, not launcher naming.
+Rapp apps use `base,<pkg>` as their default startup packages unless `#| launcher:` sets `default-packages`.
 
 ## Install launchers
 
@@ -45,7 +86,8 @@ $ ir tool install --with cli --r-version 4.5 btw
 
 Installed launchers keep the same resolved package ref, `--with` package additions, and R version selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
-For package apps, `#| launcher:` metadata with `name:` controls the installed command name, and explicit launcher Rscript options such as `default-packages`, `vanilla`, and `no-environ` are included in the generated launcher.
+Nested `#| launcher:` metadata is included in generated launchers.
+Plain `Rscript` package executables without launcher metadata keep Rscript's normal startup package behavior.
 
 By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
 On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`.
