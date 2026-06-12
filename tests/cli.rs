@@ -2668,6 +2668,8 @@ fn tool_run_and_install_support_direct_package_scripts() {
     let package = write_r_source_package(&package_dir, "irtooldirect", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
+    let python = fs::canonicalize(python_executable()).unwrap();
+    assert!(python.is_absolute());
     write_executable(
         &exec_dir.join("direct-sh"),
         "#!/bin/sh\nprintf 'tool.fixture=sh\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
@@ -2676,7 +2678,7 @@ fn tool_run_and_install_support_direct_package_scripts() {
         &exec_dir.join("direct-python"),
         &format!(
             "#!{}\nimport sys\nprint('tool.fixture=python')\nprint('tool.args=' + '|'.join(sys.argv[1:]))\n",
-            python_executable().display()
+            python.display()
         ),
     );
     write_executable(&exec_dir.join("native-tool"), "not a script\n");

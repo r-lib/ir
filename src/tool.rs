@@ -186,14 +186,13 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         .and_then(OsStr::to_str)
         == Some("Rapp")
     {
-        Some(exec_dir.join("Rapp"))
+        let path = exec_dir.join("Rapp");
+        path.is_file().then_some(path)
     } else {
         None
     };
     if let Some(path) = &rapp_frontend {
-        if path.is_file() {
-            executables.push(rapp_frontend_executable(path.to_path_buf()));
-        }
+        executables.push(rapp_frontend_executable(path.to_path_buf()));
     }
 
     for entry in fs::read_dir(exec_dir)
