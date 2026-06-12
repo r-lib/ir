@@ -180,6 +180,18 @@ fn discover_package_executables(
 
 fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
     let mut executables = Vec::new();
+    if exec_dir
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(OsStr::to_str)
+        == Some("Rapp")
+    {
+        let path = exec_dir.join("Rapp");
+        if path.is_file() {
+            executables.push(rapp_frontend_executable(path));
+        }
+    }
+
     for entry in fs::read_dir(exec_dir)
         .map_err(|e| format!("cannot read exec directory `{}`: {e}", exec_dir.display()))?
     {
@@ -193,6 +205,15 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         executables.push(executable);
     }
     Ok(executables)
+}
+
+fn rapp_frontend_executable(path: PathBuf) -> PackageExecutable {
+    PackageExecutable {
+        name: "Rapp".to_string(),
+        path,
+        launcher: PackageLauncher::RappFrontend,
+        rscript_args: Vec::new(),
+    }
 }
 
 fn reject_duplicate_launcher_names(
@@ -343,7 +364,7 @@ fn package_launcher_metadata_from_mapping(
         PackageLauncher::Rscript if launcher.is_some() => {
             launcher_rscript_args(launcher, path, package, false)?
         }
-        PackageLauncher::Rscript => Vec::new(),
+        PackageLauncher::Rscript | PackageLauncher::RappFrontend => Vec::new(),
     };
 
     Ok(PackageLauncherMetadata { name, rscript_args })
@@ -590,6 +611,9 @@ fn run_package_executable(
         PackageLauncher::Rapp => {
             cmd.arg("-e").arg("Rapp::run()").arg(&executable.path);
         }
+        PackageLauncher::RappFrontend => {
+            cmd.arg("-e").arg("Rapp::run()");
+        }
     }
     cmd.args(args)
         .env("R_LIBS", library)
@@ -614,6 +638,7 @@ fn run_package_executable(
 enum PackageLauncher {
     Rscript,
     Rapp,
+    RappFrontend,
 }
 
 fn package_executable_launcher_kind(
@@ -736,6 +761,10 @@ fn installed_launcher_contents(
             cmd.push(sh_quote_str("Rapp::run()"));
             cmd.push(sh_quote_path(&executable.path)?);
         }
+        PackageLauncher::RappFrontend => {
+            cmd.push("-e".to_string());
+            cmd.push(sh_quote_str("Rapp::run()"));
+        }
     }
     cmd.push("\"$@\"".to_string());
     lines.push(cmd.join(" "));
@@ -761,6 +790,10 @@ fn installed_launcher_contents(
             cmd.push("-e".to_string());
             cmd.push("Rapp::run()".to_string());
             cmd.push(cmd_quote_path(&executable.path)?);
+        }
+        PackageLauncher::RappFrontend => {
+            cmd.push("-e".to_string());
+            cmd.push("Rapp::run()".to_string());
         }
     }
     cmd.push("%*".to_string());

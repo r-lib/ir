@@ -16,6 +16,7 @@ For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executabl
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
 Here, a package executable means a file in the installed package's `exec/` directory with an `Rscript` or `Rapp` shebang.
 Other executable formats, such as Python or shell scripts, are ignored.
+The `Rapp` package's own `Rapp` frontend is handled specially, so `rx --from Rapp Rapp path/to/app.R` and `ir tool install Rapp` work with the resolved Rapp package.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
 
 An `Rscript` executable is an ordinary R script.

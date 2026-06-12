@@ -2412,6 +2412,51 @@ fn tool_install_installs_real_package_entrypoint() {
 }
 
 #[test]
+fn tool_run_and_install_rapp_package_frontend() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-rapp-frontend-cache");
+    let bin_dir = unique_dir("ir-rapp-frontend-bin");
+    let app = unique_path("ir-rapp-frontend-app", "R");
+    fs::write(
+        &app,
+        "#!/usr/bin/env Rapp\ncat(\"ir.fixture=rapp-frontend\\n\")\n",
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["tool", "run", "--from", "Rapp", "Rapp"])
+        .arg(&app)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=rapp-frontend");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("R_PROFILE_USER")
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("Rapp")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "Rapp");
+
+    let out = Command::new(launcher_path(&bin_dir, "Rapp"))
+        .arg(&app)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=rapp-frontend");
+
+    let _ = fs::remove_file(&app);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn tool_run_and_install_use_launcher_metadata() {
     let _guard = e2e_lock();
     let cache_dir = unique_dir("ir-tool-launcher-metadata-cache");
