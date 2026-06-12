@@ -1,0 +1,158 @@
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
+
+fn repo_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn output_text(output: &Output) -> String {
+    format!(
+        "status: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+fn assert_success(output: &Output) {
+    assert!(output.status.success(), "{}", output_text(output));
+}
+
+fn assert_stdout_contains(output: &Output, expected: &str) {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(expected),
+        "stdout did not contain {expected:?}\n{}",
+        output_text(output)
+    );
+}
+
+fn dev_deps_sh_plan(platform: &str) -> Output {
+    Command::new("sh")
+        .current_dir(repo_root())
+        .args([
+            "scripts/install-dev-deps.sh",
+            "--dry-run",
+            "--platform",
+            platform,
+        ])
+        .output()
+        .unwrap()
+}
+
+fn dev_deps_sh_plan_with_args(args: &[&str]) -> Output {
+    Command::new("sh")
+        .current_dir(repo_root())
+        .arg("scripts/install-dev-deps.sh")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn install_dev_deps_sh_prints_linux_plan() {
+    let out = dev_deps_sh_plan("linux-deb");
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "apt-get install");
+    assert_stdout_contains(&out, "https://sh.rustup.rs");
+    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "quarto-linux-");
+    assert_stdout_contains(&out, "rig add release");
+    assert_stdout_contains(&out, "rig add 4.4.3");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=4.4.3");
+}
+
+#[test]
+fn install_dev_deps_sh_prints_macos_plan() {
+    let out = dev_deps_sh_plan("macos");
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "xcode-select --install");
+    assert_stdout_contains(&out, "https://sh.rustup.rs");
+    assert_stdout_contains(&out, "brew tap r-lib/rig");
+    assert_stdout_contains(&out, "brew install --cask rig");
+    assert_stdout_contains(&out, "brew install --cask quarto");
+    assert_stdout_contains(&out, "rig add release");
+    assert_stdout_contains(&out, "rig add 4.4.3");
+}
+
+#[test]
+fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
+    let out = dev_deps_sh_plan_with_args(&[
+        "--dry-run",
+        "--platform",
+        "linux-deb",
+        "--skip",
+        "rust",
+        "--skip",
+        "python",
+        "--skip",
+        "quarto",
+        "--skip",
+        "r-release",
+    ]);
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "rig add 4.4.3");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("https://sh.rustup.rs"), "{stdout}");
+    assert!(!stdout.contains("python3 python3-venv"), "{stdout}");
+    assert!(!stdout.contains("quarto-linux-"), "{stdout}");
+    assert!(!stdout.contains("rig add release"), "{stdout}");
+}
+
+#[test]
+fn ci_uses_dev_deps_script_for_non_default_r_setup() {
+    let path = repo_root().join(".github/workflows/ci.yml");
+    let workflow = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+
+    assert!(workflow.contains("scripts/install-dev-deps.sh"));
+    assert!(!workflow.contains("Install rig (Linux)"));
+    assert!(!workflow.contains("Install rig (macOS)"));
+}
+
+#[cfg(windows)]
+#[test]
+fn install_dev_deps_ps1_prints_windows_plan() {
+    let out = Command::new("powershell")
+        .current_dir(repo_root())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "scripts/install-dev-deps.ps1",
+            "-DryRun",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(
+        &out,
+        "winget install --id Microsoft.VisualStudio.2022.BuildTools",
+    );
+    assert_stdout_contains(&out, "winget install --id Rustlang.Rustup");
+    assert_stdout_contains(&out, "winget install --id posit.rig");
+    assert_stdout_contains(&out, "winget install --id Posit.Quarto");
+    assert_stdout_contains(&out, "rig add release");
+    assert_stdout_contains(&out, "rig add 4.4.3");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=4.4.3");
+}
+
+#[test]
+fn install_dev_deps_ps1_documents_windows_bootstrap() {
+    let path = repo_root().join("scripts/install-dev-deps.ps1");
+    let script = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+
+    assert!(script.contains("Microsoft.VisualStudio.2022.BuildTools"));
+    assert!(script.contains("Rustlang.Rustup"));
+    assert!(script.contains("posit.rig"));
+    assert!(script.contains("Posit.Quarto"));
+    assert!(script.contains("IR_TEST_R_VERSION=4.4.3"));
+}
