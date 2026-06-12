@@ -6,14 +6,13 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use saphyr::{Yaml, YamlLoader};
-use saphyr_parser::Parser;
+use saphyr::Yaml;
 
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 use crate::runtime::{
     resolve_library, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
 };
-use crate::spec::RuntimeSpec;
+use crate::spec::{load_first_yaml_document, RuntimeSpec};
 
 pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
     let mut deps = vec![run.target.package_ref.clone()];
@@ -330,7 +329,7 @@ fn package_launcher_metadata(path: &Path) -> Result<PackageLauncherMetadata, Box
         return Ok(PackageLauncherMetadata::default());
     }
 
-    let Some(doc) = load_first_yaml_document(&frontmatter)? else {
+    let Some(doc) = load_first_yaml_document(&frontmatter, "launcher frontmatter")? else {
         return Ok(PackageLauncherMetadata::default());
     };
     if doc.is_null() {
@@ -344,26 +343,41 @@ fn package_launcher_metadata(path: &Path) -> Result<PackageLauncherMetadata, Box
         .into());
     }
 
-    let mut metadata = PackageLauncherMetadata::default();
-    if let Some(launcher) = doc.as_mapping_get("launcher") {
-        if !launcher.is_null() {
-            if !launcher.is_mapping() {
-                return Err(format!(
-                    "launcher frontmatter `launcher` in `{}` must be a YAML mapping",
-                    path.display()
-                )
-                .into());
-            }
-            metadata.name = launcher_optional_string(launcher, "name", path)?;
-            metadata.rscript_args = launcher_rscript_args(launcher, path)?;
-        }
-    }
+    let launcher = launcher_frontmatter_mapping(&doc, path)?;
+    let launcher_name = match launcher {
+        Some(launcher) => launcher_optional_string(launcher, "name", path)?,
+        None => None,
+    };
+    let name = match launcher_name {
+        Some(name) => Some(name),
+        None => launcher_optional_string(&doc, "name", path)?,
+    };
+    let rscript_args = match launcher {
+        Some(launcher) => launcher_rscript_args(launcher, path)?,
+        None => Vec::new(),
+    };
 
-    if metadata.name.is_none() {
-        metadata.name = launcher_optional_string(&doc, "name", path)?;
-    }
+    Ok(PackageLauncherMetadata { name, rscript_args })
+}
 
-    Ok(metadata)
+fn launcher_frontmatter_mapping<'a, 'input>(
+    doc: &'a Yaml<'input>,
+    path: &Path,
+) -> Result<Option<&'a Yaml<'input>>, Box<dyn Error>> {
+    let Some(launcher) = doc.as_mapping_get("launcher") else {
+        return Ok(None);
+    };
+    if launcher.is_null() {
+        return Ok(None);
+    }
+    if !launcher.is_mapping() {
+        return Err(format!(
+            "launcher frontmatter `launcher` in `{}` must be a YAML mapping",
+            path.display()
+        )
+        .into());
+    }
+    Ok(Some(launcher))
 }
 
 fn read_rapp_frontmatter_to_string(path: &Path) -> Result<String, Box<dyn Error>> {
@@ -394,15 +408,6 @@ fn rapp_hashpipe_content(line: &str) -> Option<&str> {
     line.trim_start().strip_prefix("#| ")
 }
 
-fn load_first_yaml_document(source: &str) -> Result<Option<Yaml<'_>>, Box<dyn Error>> {
-    let mut parser = Parser::new_from_str(source);
-    let mut loader = YamlLoader::default();
-    parser
-        .load(&mut loader, false)
-        .map_err(|e| format!("could not parse launcher frontmatter as YAML: {e}"))?;
-    Ok(loader.into_documents().into_iter().next())
-}
-
 fn launcher_rscript_args(launcher: &Yaml<'_>, path: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut args = Vec::new();
     for (key, arg) in [
@@ -419,10 +424,9 @@ fn launcher_rscript_args(launcher: &Yaml<'_>, path: &Path) -> Result<Vec<String>
         }
     }
 
-    if let Some(default_packages) = launcher_default_packages(launcher, path)? {
-        if !default_packages.is_empty() {
-            args.push(format!("--default-packages={}", default_packages.join(",")));
-        }
+    let default_packages = launcher_default_packages(launcher, path)?;
+    if !default_packages.is_empty() {
+        args.push(format!("--default-packages={}", default_packages.join(",")));
     }
 
     Ok(args)
@@ -474,19 +478,19 @@ fn launcher_optional_bool(
 fn launcher_default_packages(
     mapping: &Yaml<'_>,
     path: &Path,
-) -> Result<Option<Vec<String>>, Box<dyn Error>> {
+) -> Result<Vec<String>, Box<dyn Error>> {
     let Some(value) = launcher_mapping_get(mapping, "default-packages") else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     if value.is_null() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     if let Some(value) = value.as_str() {
-        return Ok(Some(vec![nonempty_launcher_string(
+        return Ok(vec![nonempty_launcher_string(
             value,
             "default-packages",
             path,
-        )?]));
+        )?]);
     }
 
     let Some(values) = value.as_vec() else {
@@ -508,7 +512,7 @@ fn launcher_default_packages(
         };
         packages.push(nonempty_launcher_string(value, "default-packages", path)?);
     }
-    Ok(Some(packages))
+    Ok(packages)
 }
 
 fn nonempty_launcher_string(value: &str, key: &str, path: &Path) -> Result<String, Box<dyn Error>> {

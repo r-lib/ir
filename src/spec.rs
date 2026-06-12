@@ -18,7 +18,7 @@ pub(crate) fn parse_r_frontmatter(frontmatter: &str) -> Result<RuntimeSpec, Box<
         return Ok(RuntimeSpec::default());
     }
 
-    let Some(doc) = load_first_yaml_document(frontmatter)? else {
+    let Some(doc) = load_first_yaml_document(frontmatter, "script frontmatter")? else {
         return Ok(RuntimeSpec::default());
     };
 
@@ -30,7 +30,7 @@ pub(crate) fn parse_quarto_frontmatter(document: &str) -> Result<RuntimeSpec, Bo
         return Ok(RuntimeSpec::default());
     }
 
-    let Some(doc) = load_first_yaml_document(document)? else {
+    let Some(doc) = load_first_yaml_document(document, "script frontmatter")? else {
         return Ok(RuntimeSpec::default());
     };
     if doc.is_null() {
@@ -72,12 +72,15 @@ fn runtime_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<RuntimeSpec, Box<dyn
     })
 }
 
-fn load_first_yaml_document(source: &str) -> Result<Option<Yaml<'_>>, Box<dyn Error>> {
+pub(crate) fn load_first_yaml_document<'a>(
+    source: &'a str,
+    context: &str,
+) -> Result<Option<Yaml<'a>>, Box<dyn Error>> {
     let mut parser = Parser::new_from_str(source);
     let mut loader = YamlLoader::default();
     parser
         .load(&mut loader, false)
-        .map_err(|e| format!("could not parse script frontmatter as YAML: {e}"))?;
+        .map_err(|e| format!("could not parse {context} as YAML: {e}"))?;
     Ok(loader.into_documents().into_iter().next())
 }
 
