@@ -523,10 +523,11 @@ fn is_r_package_name(name: &str) -> bool {
 
 pub(crate) fn is_package_executable_name(name: &str) -> bool {
     !name.is_empty()
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.contains(':')
-        && !name.chars().any(char::is_whitespace)
+        && !name.chars().any(|c| {
+            c.is_control()
+                || c.is_whitespace()
+                || matches!(c, '/' | '\\' | ':' | '"' | '<' | '>' | '|' | '?' | '*')
+        })
 }
 
 #[derive(Clone, Copy)]

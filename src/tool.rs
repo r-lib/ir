@@ -338,11 +338,12 @@ fn package_launcher_metadata_from_mapping(
         Some(launcher) => launcher_optional_string(launcher, "name", path)?.or(top_level_name),
         None => top_level_name,
     };
-    let rscript_args = match (launcher, package_launcher) {
-        (Some(_), _) | (None, PackageLauncher::Rapp) => {
-            launcher_rscript_args(launcher, path, package)?
+    let rscript_args = match package_launcher {
+        PackageLauncher::Rapp => launcher_rscript_args(launcher, path, package, true)?,
+        PackageLauncher::Rscript if launcher.is_some() => {
+            launcher_rscript_args(launcher, path, package, false)?
         }
-        (None, PackageLauncher::Rscript) => Vec::new(),
+        PackageLauncher::Rscript => Vec::new(),
     };
 
     Ok(PackageLauncherMetadata { name, rscript_args })
@@ -400,6 +401,7 @@ fn launcher_rscript_args(
     launcher: Option<&Yaml<'_>>,
     path: &Path,
     package: &str,
+    use_package_default_packages: bool,
 ) -> Result<Vec<String>, Box<dyn Error>> {
     let mut args = Vec::new();
     if let Some(launcher) = launcher {
@@ -418,8 +420,11 @@ fn launcher_rscript_args(
         }
     }
 
-    let default_packages = launcher_default_packages(launcher, path, package)?;
-    args.push(format!("--default-packages={default_packages}"));
+    if let Some(default_packages) =
+        launcher_default_packages(launcher, path, package, use_package_default_packages)?
+    {
+        args.push(format!("--default-packages={default_packages}"));
+    }
 
     Ok(args)
 }
@@ -471,18 +476,19 @@ fn launcher_default_packages(
     mapping: Option<&Yaml<'_>>,
     path: &Path,
     package: &str,
-) -> Result<String, Box<dyn Error>> {
+    use_package_default_packages: bool,
+) -> Result<Option<String>, Box<dyn Error>> {
     let Some(mapping) = mapping else {
-        return Ok(format!("base,{package}"));
+        return Ok(use_package_default_packages.then(|| format!("base,{package}")));
     };
     let Some(value) = launcher_mapping_get(mapping, "default-packages") else {
-        return Ok(format!("base,{package}"));
+        return Ok(use_package_default_packages.then(|| format!("base,{package}")));
     };
     if value.is_null() {
-        return Ok("NULL".to_string());
+        return Ok(Some("NULL".to_string()));
     }
     if let Some(value) = value.as_str() {
-        return nonempty_launcher_string(value, "default-packages", path);
+        return nonempty_launcher_string(value, "default-packages", path).map(Some);
     }
 
     let Some(values) = value.as_vec() else {
@@ -504,7 +510,7 @@ fn launcher_default_packages(
         };
         packages.push(nonempty_launcher_string(value, "default-packages", path)?);
     }
-    Ok(packages.join(","))
+    Ok(Some(packages.join(",")))
 }
 
 fn nonempty_launcher_string(value: &str, key: &str, path: &Path) -> Result<String, Box<dyn Error>> {

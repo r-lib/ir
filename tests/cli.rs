@@ -2080,7 +2080,8 @@ fn tool_run_and_install_use_launcher_metadata() {
 #| launcher:
 #|   name: custom-tool
 cat("launcher.name=", Sys.getenv("RAPP_LAUNCHER_NAME"), "\n", sep = "")
-cat("package.function=", ok(), "\n", sep = "")
+cat("utils.attached=", tolower("package:utils" %in% search()), "\n", sep = "")
+cat("package.function.exists=", tolower(exists("ok")), "\n", sep = "")
 "#,
     )
     .unwrap();
@@ -2122,7 +2123,8 @@ cat("selected=top-level\n")
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "launcher.name=custom-tool");
-    assert_stdout_contains(&out, "package.function=TRUE");
+    assert_stdout_contains(&out, "utils.attached=true");
+    assert_stdout_contains(&out, "package.function.exists=false");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -2164,7 +2166,8 @@ cat("selected=top-level\n")
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "launcher.name=custom-tool");
-    assert_stdout_contains(&out, "package.function=TRUE");
+    assert_stdout_contains(&out, "utils.attached=true");
+    assert_stdout_contains(&out, "package.function.exists=false");
 
     let out = Command::new(launcher_path(&bin_dir, "top-level-tool"))
         .output()
@@ -2283,6 +2286,49 @@ cat("selected=valid\n")
     assert_success(&out);
     assert_stdout_contains(&out, "selected=valid");
 
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&package_dir);
+}
+
+#[test]
+fn tool_install_rejects_invalid_metadata_launcher_name() {
+    let _guard = e2e_lock();
+    let cache_dir = unique_dir("ir-tool-invalid-launcher-cache");
+    let bin_dir = unique_dir("ir-tool-invalid-launcher-bin");
+    let package_dir = unique_dir("ir-tool-invalid-launcher-packages");
+    let package = write_r_source_package(&package_dir, "irtoolbadname", &[]);
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("invalid.R"),
+        r#"#!/usr/bin/env Rscript
+#| launcher:
+#|   name: bad?name
+cat("not reached\n")
+"#,
+    )
+    .unwrap();
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "invalid launcher names should fail\n{}",
+        output_text(&out)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("unsupported launcher name `bad?name`"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&package_dir);
 }

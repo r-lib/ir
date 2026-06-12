@@ -88,7 +88,7 @@ Installed launchers keep the same resolved package ref, `--with` package additio
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.
-Plain `Rscript` package executables without launcher metadata keep Rscript's normal startup package behavior.
+Plain `Rscript` package executables keep Rscript's normal startup package behavior unless launcher metadata explicitly sets `default-packages`.
 
 By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
 On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`.
