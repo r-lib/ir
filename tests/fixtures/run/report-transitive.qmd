@@ -1,0 +1,48 @@
+---
+title: ir fixture transitive rmarkdown
+format: html
+ir:
+  packages:
+    - quarto
+---
+
+```{r}
+# The `quarto` package Imports rmarkdown, so the resolver finds rmarkdown
+# already in the resolved set and does not inject its own seed. Attach both and
+# confirm each loads from ir's resolved run library: the normalised
+# path.package location (renv symlink resolved) must equal the normalised run
+# library entry, proving the loaded package is that copy, not a system one.
+pkgs <- c("quarto", "rmarkdown")
+suppressPackageStartupMessages(invisible(lapply(
+  pkgs,
+  library,
+  character.only = TRUE
+)))
+lib <- strsplit(
+  Sys.getenv("R_LIBS"),
+  .Platform$path.sep,
+  fixed = TRUE
+)[[1L]][[1L]]
+in_cache <- function(pkg) {
+  normalizePath(path.package(pkg), mustWork = TRUE) ==
+    normalizePath(file.path(lib, pkg), mustWork = TRUE)
+}
+
+cat("ir.fixture=qmd-transitive\n")
+cat("transitive.quarto_in_cache=", tolower(in_cache("quarto")), "\n", sep = "")
+cat(
+  "transitive.rmarkdown_in_cache=",
+  tolower(in_cache("rmarkdown")),
+  "\n",
+  sep = ""
+)
+cat(
+  "transitive.rmarkdown_version=",
+  read.dcf(file.path(path.package("rmarkdown"), "DESCRIPTION"), "Version")[
+    1,
+    1
+  ],
+  "\n",
+  sep = ""
+)
+```

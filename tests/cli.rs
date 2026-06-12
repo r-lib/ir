@@ -1746,70 +1746,13 @@ fn render_quarto_fixture_with_declared_rmarkdown_skips_injection() {
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
-// report-transitive.qmd declares a local package that Imports rmarkdown. The
+// report-transitive.qmd declares `quarto`, which Imports rmarkdown. The
 // resolver sees rmarkdown already in the resolved set and skips its own seed.
 #[test]
 fn render_quarto_fixture_with_transitive_rmarkdown_renders() {
     let _guard = e2e_lock();
+    let fixture_dir = fixture("run");
     let cache_dir = unique_dir("ir-e2e-qmd-transitive-cache");
-    let package_dir = unique_dir("ir-e2e-qmd-transitive-packages");
-    let fixture_dir = unique_dir("ir-e2e-qmd-transitive-fixture");
-    let package = write_r_source_package(
-        &package_dir,
-        "irqmdtransitive",
-        &["Imports: rmarkdown".to_string()],
-    );
-    fs::write(
-        fixture_dir.join("report-transitive.qmd"),
-        format!(
-            r#"---
-title: ir fixture transitive rmarkdown
-format: html
-ir:
-  packages:
-    - local::{}
----
-
-```{{r}}
-pkgs <- c("irqmdtransitive", "rmarkdown")
-suppressPackageStartupMessages(invisible(lapply(
-  pkgs,
-  library,
-  character.only = TRUE
-)))
-lib <- strsplit(
-  Sys.getenv("R_LIBS"),
-  .Platform$path.sep,
-  fixed = TRUE
-)[[1L]][[1L]]
-in_cache <- function(pkg) {{
-  normalizePath(path.package(pkg), mustWork = TRUE) ==
-    normalizePath(file.path(lib, pkg), mustWork = TRUE)
-}}
-
-cat("ir.fixture=qmd-transitive\n")
-cat("transitive.package_in_cache=", tolower(in_cache("irqmdtransitive")), "\n", sep = "")
-cat(
-  "transitive.rmarkdown_in_cache=",
-  tolower(in_cache("rmarkdown")),
-  "\n",
-  sep = ""
-)
-cat(
-  "transitive.rmarkdown_version=",
-  read.dcf(file.path(path.package("rmarkdown"), "DESCRIPTION"), "Version")[
-    1,
-    1
-  ],
-  "\n",
-  sep = ""
-)
-```
-"#,
-            renviron_path(&package)
-        ),
-    )
-    .unwrap();
 
     let out = ir()
         .current_dir(&fixture_dir)
@@ -1825,10 +1768,10 @@ cat(
     let html = fs::read_to_string(fixture_dir.join("report-transitive.html"))
         .unwrap_or_else(|e| panic!("failed to read rendered report: {e}\n{}", output_text(&out)));
     assert!(html.contains("ir.fixture=qmd-transitive"), "{html}");
-    // Both the declared local package and the transitively-pulled rmarkdown
-    // must be materialised into the resolved run library, with rmarkdown's
-    // version read from that library's DESCRIPTION.
-    assert!(html.contains("transitive.package_in_cache=true"), "{html}");
+    // Both the declared `quarto` and the transitively-pulled rmarkdown must be
+    // materialised into the resolved run library, with rmarkdown's version read
+    // from that library's DESCRIPTION.
+    assert!(html.contains("transitive.quarto_in_cache=true"), "{html}");
     assert!(
         html.contains("transitive.rmarkdown_in_cache=true"),
         "{html}"
@@ -1844,8 +1787,6 @@ cat(
 
     let _ = fs::remove_file(fixture_dir.join("report-transitive.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report-transitive_files"));
-    let _ = fs::remove_dir_all(&fixture_dir);
-    let _ = fs::remove_dir_all(&package_dir);
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
