@@ -203,7 +203,7 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         if !path.is_file() {
             continue;
         }
-        if rapp_frontend.as_ref() == Some(&path) {
+        if rapp_frontend.is_some() && is_rapp_frontend_alias(&path) {
             continue;
         }
         let Some(executable) = package_executable_from_discovered_path(&path)? else {
@@ -212,6 +212,19 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         executables.push(executable);
     }
     Ok(executables)
+}
+
+fn is_rapp_frontend_alias(path: &Path) -> bool {
+    let name = if path
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(is_package_executable_launcher_suffix)
+    {
+        path.file_stem()
+    } else {
+        path.file_name()
+    };
+    name.and_then(OsStr::to_str) == Some("Rapp")
 }
 
 fn rapp_frontend_executable(path: PathBuf) -> PackageExecutable {
