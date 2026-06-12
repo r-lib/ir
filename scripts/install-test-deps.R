@@ -11,6 +11,8 @@ pkgs <- c(
   "dplyr",
   "tidyr",
   "reticulate",
+  "fansi",
+  "htmltools",
   "knitr",
   "rmarkdown",
   "quarto",
