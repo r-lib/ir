@@ -157,7 +157,10 @@ fn install_dev_deps_ps1_prints_windows_plan() {
         &out,
         "winget install --id Microsoft.VisualStudio.2022.BuildTools",
     );
-    assert_stdout_contains(&out, "winget install --id Rustlang.Rustup");
+    assert_stdout_contains(&out, "Invoke-WebRequest -Uri https://win.rustup.rs");
+    assert_stdout_contains(&out, "rustup-init-");
+    assert_stdout_contains(&out, "-y --default-toolchain stable");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("Rustlang.Rustup"));
     assert_stdout_contains(&out, "winget install --id posit.rig");
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
@@ -172,7 +175,8 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
     assert!(script.contains("Microsoft.VisualStudio.2022.BuildTools"));
-    assert!(script.contains("Rustlang.Rustup"));
+    assert!(script.contains("https://win.rustup.rs"));
+    assert!(!script.contains("Rustlang.Rustup"));
     assert!(script.contains("posit.rig"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains(r#"Test-AnyTool @("python", "python3")"#));

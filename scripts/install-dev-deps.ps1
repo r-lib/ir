@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $TestRVersion = "4.4.3"
+$RustupInitUrl = "https://win.rustup.rs"
 
 function Write-Step {
     param(
@@ -104,6 +105,24 @@ function Install-WingetPackage {
     )
 }
 
+function Install-Rustup {
+    $rustupInit = Join-Path ([System.IO.Path]::GetTempPath()) "rustup-init-$([System.Guid]::NewGuid().ToString('N')).exe"
+
+    Write-Host "+ Invoke-WebRequest -Uri $RustupInitUrl -OutFile $rustupInit"
+    if (-not $DryRun) {
+        Invoke-WebRequest -Uri $RustupInitUrl -OutFile $rustupInit
+    }
+
+    try {
+        Invoke-Step $rustupInit @("-y", "--default-toolchain", "stable")
+    }
+    finally {
+        if (-not $DryRun) {
+            Remove-Item $rustupInit -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Require-Tool "winget"
 Add-KnownInstallPaths
 
@@ -121,7 +140,7 @@ if (-not (Test-Tool "cl")) {
 }
 
 if (-not (Test-Tool "cargo")) {
-    Install-WingetPackage "Rustlang.Rustup"
+    Install-Rustup
     Add-KnownInstallPaths
 }
 
