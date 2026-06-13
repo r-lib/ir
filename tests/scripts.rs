@@ -214,6 +214,30 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "IR_TEST_R_VERSION=4.4.3");
 }
 
+#[cfg(windows)]
+#[test]
+fn install_dev_deps_ps1_uses_choco_for_rig_on_github_actions() {
+    let out = Command::new("powershell")
+        .current_dir(repo_root())
+        .env("GITHUB_ACTIONS", "true")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "& .\\scripts\\install-dev-deps.ps1 -DryRun -Skip rust, python, quarto, r-release",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "choco install rig -y --no-progress");
+    assert_stdout_contains(&out, "rig add 4.4.3");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("winget install --id posit.rig"), "{stdout}");
+    assert!(!stdout.contains("rig add release"), "{stdout}");
+}
+
 #[test]
 fn install_dev_deps_ps1_documents_windows_bootstrap() {
     let path = repo_root().join("scripts/install-dev-deps.ps1");
@@ -224,6 +248,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("https://win.rustup.rs"));
     assert!(!script.contains("Rustlang.Rustup"));
     assert!(script.contains("posit.rig"));
+    assert!(script.contains("choco"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains("[string[]]$Skip"));
     assert!(script.contains("unsupported skip component"));

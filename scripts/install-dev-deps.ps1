@@ -152,6 +152,16 @@ function Install-WingetPackage {
     )
 }
 
+function Install-Rig {
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        Require-Tool "choco"
+        Invoke-Step "choco" @("install", "rig", "-y", "--no-progress")
+    }
+    else {
+        Install-WingetPackage "posit.rig"
+    }
+}
+
 function Install-Rustup {
     $rustupInit = Join-Path ([System.IO.Path]::GetTempPath()) "rustup-init-$([System.Guid]::NewGuid().ToString('N')).exe"
 
@@ -202,7 +212,7 @@ if (-not $SkipPython -and -not (Test-AnyRunnableTool @("python", "python3"))) {
 }
 
 if (-not (Test-Tool "rig")) {
-    Install-WingetPackage "posit.rig"
+    Install-Rig
     Add-KnownInstallPaths
 }
 
