@@ -250,6 +250,8 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("posit.rig"));
     assert!(script.contains("choco"));
     assert!(script.contains("Posit.Quarto"));
+    assert!(script.contains("ProgramFiles \"rig\""));
+    assert!(script.contains("ProgramFiles \"rig\\bin\""));
     assert!(script.contains("[string[]]$Skip"));
     assert!(script.contains("unsupported skip component"));
     assert!(script.contains("function Test-RunnableTool"));
