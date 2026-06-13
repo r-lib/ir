@@ -187,6 +187,7 @@ fn docs_workflow_requires_all_ci_jobs() {
 fn install_dev_deps_ps1_prints_windows_plan() {
     let out = Command::new("powershell")
         .current_dir(repo_root())
+        .env_remove("GITHUB_ACTIONS")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -234,7 +235,10 @@ fn install_dev_deps_ps1_uses_choco_for_rig_on_github_actions() {
     assert_stdout_contains(&out, "choco install rig -y --no-progress");
     assert_stdout_contains(&out, "rig add 4.4.3");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("winget install --id posit.rig"), "{stdout}");
+    assert!(
+        !stdout.contains("winget install --id posit.rig"),
+        "{stdout}"
+    );
     assert!(!stdout.contains("rig add release"), "{stdout}");
 }
 
