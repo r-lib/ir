@@ -348,7 +348,7 @@ ul.task-list li input[type="checkbox"] {
 <pre class="console"><code>$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh</code></pre>
 <p>Install on Windows PowerShell:</p>
 <pre class="console"><code>&gt; irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex</code></pre>
-<p>The installers download the latest release archive and install <code>ir</code> and <code>rx</code> into <code>~/.local/bin</code> on Unix or <code>$HOME\bin</code> on Windows. Set <code>IR_INSTALL_DIR</code> to choose another directory.</p>
+<p>The installers download the latest release archive and install <code>ir</code> and <code>rx</code> into <code>~/.local/bin</code> on Unix or <code>$HOME\bin</code> on Windows. On macOS, the default <code>~/.local/bin</code> directory is added to <code>~/.zprofile</code> when needed. On Windows, the install directory is added to the user <code>PATH</code>. On Linux, the installer tells you if the install directory is not on <code>PATH</code>. Set <code>IR_NO_MODIFY_PATH=1</code> to skip PATH changes. Set <code>IR_INSTALL_DIR</code> to choose another directory.</p>
 </section>
 <section id="environment" class="level2">
 <h2 class="anchored" data-anchor-id="environment">Environment</h2>
@@ -392,9 +392,19 @@ ul.task-list li input[type="checkbox"] {
 <td>first launcher-directory override</td>
 </tr>
 <tr class="even">
+<td><code>IR_NO_MODIFY_PATH</code></td>
+<td>install scripts, <code>ir tool install</code></td>
+<td>disables automatic PATH setup when nonempty</td>
+</tr>
+<tr class="odd">
 <td><code>RAPP_BIN_DIR</code></td>
 <td><code>ir tool install</code></td>
 <td>second launcher-directory override</td>
+</tr>
+<tr class="even">
+<td><code>RAPP_NO_MODIFY_PATH</code></td>
+<td><code>ir tool install</code></td>
+<td>also disables automatic launcher PATH setup when nonempty</td>
 </tr>
 <tr class="odd">
 <td><code>XDG_BIN_HOME</code></td>
@@ -419,7 +429,7 @@ ul.task-list li input[type="checkbox"] {
 </tbody>
 </table>
 <p>The default cache directory is computed before launching R. <code>IR_CACHE_DIR</code> is authoritative; otherwise <code>ir</code> uses the process <code>R_USER_CACHE_DIR</code>, process <code>XDG_CACHE_HOME</code>, or a platform default and appends <code>R/ir</code>. The selected path is passed to the resolver R session, so R startup files do not redirect the <code>ir</code> cache.</p>
-<p><code>IR_RSCRIPT</code> is ignored when <code>r-version</code> is set, because version selection is resolved through <code>rig</code>. <code>--bin-dir &lt;dir&gt;</code> overrides the launcher-directory environment variables for <code>ir tool install</code>.</p>
+<p><code>IR_RSCRIPT</code> is ignored when <code>r-version</code> is set, because version selection is resolved through <code>rig</code>. <code>--bin-dir &lt;dir&gt;</code> overrides the launcher-directory environment variables for <code>ir tool install</code>. On macOS, <code>ir tool install</code> adds the default <code>~/.local/bin</code> directory to the zsh profile when needed. On Windows, it adds the default or environment-selected launcher directory to the user <code>Path</code>.</p>
 
 
 </section>
