@@ -95,10 +95,7 @@ jobs:
           # caching and environment setup. Use this script here only for rig and
           # the second R needed by the version-selection tests.
           .\scripts\install-dev-deps.ps1 `
-            -Skip rust `
-            -Skip python `
-            -Skip quarto `
-            -Skip r-release
+            -Skip rust, python, quarto, r-release
           Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=4.4.3"
 
       - run: cargo build --verbose

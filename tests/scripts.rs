@@ -133,6 +133,11 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Keep the GitHub setup actions above"));
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
+    assert!(workflow.contains("-Skip rust, python, quarto, r-release"));
+    assert!(
+        !workflow.contains("-Skip rust `\n            -Skip python"),
+        "PowerShell array parameters must be passed in one binding"
+    );
     assert!(!workflow.contains("#32"));
     assert!(!workflow.contains(r"\\?\"));
     assert!(!workflow.contains("Install rig (Linux)"));
