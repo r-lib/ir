@@ -144,6 +144,7 @@ function Add-KnownInstallPaths {
 function Install-WingetPackage {
     param([Parameter(Mandatory = $true)][string]$Id)
 
+    Require-Tool "winget"
     Invoke-Step "winget" @(
         "install",
         "--id",
@@ -182,10 +183,10 @@ function Install-Rustup {
     }
 }
 
-Require-Tool "winget"
 Add-KnownInstallPaths
 
 if (-not $SkipRust -and -not (Test-Tool "cl")) {
+    Require-Tool "winget"
     Invoke-Step "winget" @(
         "install",
         "--id",

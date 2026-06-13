@@ -259,6 +259,10 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("[string[]]$Skip"));
     assert!(script.contains("unsupported skip component"));
     assert!(script.contains("function Test-RunnableTool"));
+    assert!(
+        !script.contains("Require-Tool \"winget\"\nAdd-KnownInstallPaths"),
+        "Windows CI must not require winget before honoring skipped components"
+    );
     assert!(script.contains("Microsoft\\WindowsApps"));
     assert!(script.contains(r#"Test-AnyRunnableTool @("python", "python3")"#));
     assert!(!script.contains(r#"Test-AnyTool @("python", "python3")"#));
