@@ -3,7 +3,7 @@ title: Quarto Rendering
 ---
 
 `ir render` renders Quarto documents and Quarto-formatted R scripts with `quarto render`.
-Packages live under an `ir:` key in the source YAML.
+Runtime metadata lives under an `ir:` key in the source YAML.
 
 ```yaml
 ---
@@ -57,4 +57,4 @@ Set `IR_QUARTO` to use a specific Quarto executable.
 A Quarto render needs the `rmarkdown` package for the knitr engine.
 `ir` appends `rmarkdown` to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
 
-Declare `rmarkdown` yourself under `ir.packages` - directly (e.g. `rmarkdown@2.29`) or transitively, such as through `quarto` - to override the injected seed.
+Declare `rmarkdown` yourself under `ir.packages` - directly (for example, `rmarkdown@2.29`) or transitively through a package that imports it - to override the injected seed.

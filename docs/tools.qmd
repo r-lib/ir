@@ -15,6 +15,7 @@ $ ir tool run --from btw btw --help
 For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executable, and launches it.
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
 Here, a package executable means a supported file in the installed package's `exec/` directory: Rscript and Rapp entries use the selected Rscript, while direct executable scripts such as shell or Python entries run as package scripts.
+On Unix, direct executable scripts must be executable; on Windows, direct executables are `.bat` or `.cmd` files.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
 
 An `Rscript` executable is an ordinary R script.

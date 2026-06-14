@@ -82,7 +82,7 @@ This builds `target/release/ir` and `target/release/rx`.
 
 ## Development setup
 
-To install the system dependencies needed to build the package and run tests on
+To install the system dependencies needed to build the project and run tests on
 a new machine, run:
 
 ```console
@@ -116,7 +116,9 @@ For command details, configuration, and edge cases, see:
 - [Quarto rendering](https://t-kalinowski.github.io/ir/quarto.html)
 - [Package tools](https://t-kalinowski.github.io/ir/tools.html)
 - [Cache management](https://t-kalinowski.github.io/ir/cache.html)
-- [Install and configuration](
-    https://t-kalinowski.github.io/ir/config.html
-  )
+- [Install and configuration](https://t-kalinowski.github.io/ir/config.html)
 - [CLI reference](https://t-kalinowski.github.io/ir/reference.html)
+
+## License
+
+MIT. See [LICENSE](LICENSE).

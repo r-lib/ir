@@ -91,6 +91,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/ir" "$pkg/ir"
           cp "target/${{ matrix.target }}/release/rx" "$pkg/rx"
           cp README.md "$pkg/README.md"
+          cp LICENSE "$pkg/LICENSE"
           tar -C dist -czf "dist/${{ matrix.archive }}" "ir-${{ matrix.target }}"
 
       - name: Package (Windows)
@@ -102,6 +103,7 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/ir.exe" "$pkg/ir.exe"
           Copy-Item "target/${{ matrix.target }}/release/rx.exe" "$pkg/rx.exe"
           Copy-Item "README.md" "$pkg/README.md"
+          Copy-Item "LICENSE" "$pkg/LICENSE"
           Push-Location dist
           Compress-Archive -Path "ir-${{ matrix.target }}" -DestinationPath "${{ matrix.archive }}" -Force
           Pop-Location

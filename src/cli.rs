@@ -172,8 +172,9 @@ fn tool_command() -> ClapCommand {
         .after_help(section_help(
             "Tools",
             concat!(
-                "  A tool is an executable provided by an R package with an Rscript or Rapp\n",
-                "  shebang.\n",
+                "  A tool is a supported executable in an R package's exec/ directory.\n",
+                "  Rscript and Rapp entries use the selected Rscript; direct executable scripts\n",
+                "  run as package scripts.\n",
                 "  `ir tool run` resolves the package plus any --with dependencies into an\n",
                 "  isolated library, then runs the selected executable. The user R library is not\n",
                 "  used.\n",
