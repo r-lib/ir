@@ -141,14 +141,15 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("scripts/install-dev-deps.sh"));
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
     assert!(workflow.contains("Use rig for R itself so CI has one R installer"));
-    assert!(workflow.contains("Install R package test dependencies"));
-    assert!(workflow.contains("Rscript scripts/install-test-r-deps.R"));
+    assert!(workflow.contains("Install R package docs dependencies"));
+    assert!(workflow.contains("Rscript scripts/install-docs-r-deps.R"));
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
     assert!(workflow.contains("--skip quarto"));
     assert!(workflow.contains("-Skip rust, python, quarto"));
     assert!(!workflow.contains("r-lib/actions/setup-r"));
     assert!(!workflow.contains("r-lib/actions/setup-r-dependencies"));
+    assert!(!workflow.contains("scripts/install-test-r-deps.R"));
     assert!(!workflow.contains("IR_TEST_R_REPOS"));
     assert!(!workflow.contains("IR_RSCRIPT"));
     assert!(!workflow.contains("--skip r-release"));
@@ -305,10 +306,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
 
 #[test]
 fn r_dependency_installers_use_rig_provided_pak() {
-    for script in [
-        "scripts/install-test-r-deps.R",
-        "scripts/install-docs-r-deps.R",
-    ] {
+    for script in ["scripts/install-docs-r-deps.R"] {
         let path = repo_root().join(script);
         let script = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));

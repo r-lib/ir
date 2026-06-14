@@ -329,10 +329,7 @@ fn default_r_version() -> Option<String> {
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
         "pkgs <- c(",
-        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
-        "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
-        "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
-        "'htmltools'); ",
+        "'pak', 'fansi', 'htmltools', 'knitr', 'rmarkdown'); ",
         "missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; ",
         "if (length(missing)) { ",
         "stop('missing R packages: ', paste(missing, collapse = ', '), call. = FALSE) ",

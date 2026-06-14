@@ -48,8 +48,8 @@ jobs:
             -Skip rust, python, quarto
           Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=4.4.3"
 
-      - name: Install R package test dependencies
-        run: Rscript scripts/install-test-r-deps.R
+      - name: Install R package docs dependencies
+        run: Rscript scripts/install-docs-r-deps.R
 
       - run: cargo build --verbose
       - run: cargo test --verbose
