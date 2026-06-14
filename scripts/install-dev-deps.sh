@@ -13,10 +13,11 @@ SKIP_RUST=0
 SKIP_PYTHON=0
 SKIP_QUARTO=0
 SKIP_R_RELEASE=0
+SET_RIG_DEFAULT=0
 
 usage() {
   cat <<EOF
-Usage: scripts/install-dev-deps.sh [--dry-run] [--platform macos|linux-deb] [--skip COMPONENT]
+Usage: scripts/install-dev-deps.sh [--dry-run] [--platform macos|linux-deb] [--skip COMPONENT] [--set-rig-default]
 
 Installs Rust, Python, rig, R release, R ${TEST_R_VERSION}, and Quarto.
 Use scripts/install-dev-deps.ps1 on Windows.
@@ -25,6 +26,7 @@ Options:
   --dry-run           Print the commands without running them.
   --platform PLATFORM Print or run the plan for a supported platform.
   --skip COMPONENT    Skip installing rust, python, quarto, or r-release.
+  --set-rig-default   Run rig default release after installing R release.
   -h, --help          Show this help.
 EOF
 }
@@ -251,7 +253,7 @@ install_r_versions() {
     run rig add release
   fi
   run rig add "$TEST_R_VERSION"
-  if [ "$SKIP_R_RELEASE" -eq 0 ]; then
+  if [ "$SET_RIG_DEFAULT" -eq 1 ]; then
     run rig default release
   fi
 }
@@ -321,6 +323,9 @@ while [ "$#" -gt 0 ]; do
       shift
       [ "$#" -gt 0 ] || die "--skip requires a value"
       skip_component "$1"
+      ;;
+    --set-rig-default)
+      SET_RIG_DEFAULT=1
       ;;
     -h | --help)
       usage

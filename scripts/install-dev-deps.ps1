@@ -5,6 +5,7 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun,
+    [switch]$SetRigDefault,
     [string[]]$Skip = @()
 )
 
@@ -232,7 +233,7 @@ if (-not $SkipRRelease) {
     Invoke-Step "rig" @("add", "release")
 }
 Invoke-Step "rig" @("add", $TestRVersion)
-if (-not $SkipRRelease) {
+if ($SetRigDefault) {
     Invoke-Step "rig" @("default", "release")
 }
 

@@ -67,6 +67,11 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_stdout_contains(&out, "rig list --json");
     assert_stdout_contains(&out, "IR_TEST_R_VERSION=4.4.3");
     assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig run -r 4.4.3"),
         "{}",
         output_text(&out)
@@ -87,6 +92,11 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add 4.4.3");
     assert_stdout_contains(&out, "rig list --json");
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
+        "{}",
+        output_text(&out)
+    );
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig run -r 4.4.3"),
         "{}",
@@ -120,6 +130,16 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     assert!(!stdout.contains("python3 python3-venv"), "{stdout}");
     assert!(!stdout.contains("quarto-linux-"), "{stdout}");
     assert!(!stdout.contains("rig add release"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn install_dev_deps_sh_sets_rig_default_only_when_requested() {
+    let out =
+        dev_deps_sh_plan_with_args(&["--dry-run", "--platform", "linux-deb", "--set-rig-default"]);
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "rig default release");
 }
 
 #[test]
@@ -193,6 +213,11 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add 4.4.3");
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
+        "{}",
+        output_text(&out)
+    );
     assert_stdout_contains(&out, "IR_TEST_R_VERSION=4.4.3");
 }
 
@@ -221,6 +246,27 @@ fn install_dev_deps_ps1_uses_choco_for_rig_on_github_actions() {
         "{stdout}"
     );
     assert!(!stdout.contains("rig add release"), "{stdout}");
+    assert!(!stdout.contains("rig default release"), "{stdout}");
+}
+
+#[cfg(windows)]
+#[test]
+fn install_dev_deps_ps1_sets_rig_default_only_when_requested() {
+    let out = Command::new("powershell")
+        .current_dir(repo_root())
+        .env_remove("GITHUB_ACTIONS")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "& .\\scripts\\install-dev-deps.ps1 -DryRun -SetRigDefault",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "rig default release");
 }
 
 #[test]
@@ -238,6 +284,8 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("ProgramFiles \"rig\""));
     assert!(script.contains("ProgramFiles \"rig\\bin\""));
     assert!(script.contains("[string[]]$Skip"));
+    assert!(script.contains("[switch]$SetRigDefault"));
+    assert!(script.contains("if ($SetRigDefault)"));
     assert!(script.contains("unsupported skip component"));
     assert!(script.contains("function Test-RunnableTool"));
     assert!(
