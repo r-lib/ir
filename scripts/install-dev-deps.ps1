@@ -4,13 +4,28 @@
 
 [CmdletBinding()]
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string[]]$Skip = @()
 )
 
 $ErrorActionPreference = "Stop"
 
 $TestRVersion = "4.4.3"
 $RustupInitUrl = "https://win.rustup.rs"
+$SkipRust = $false
+$SkipPython = $false
+$SkipQuarto = $false
+$SkipRRelease = $false
+
+foreach ($component in $Skip) {
+    switch ($component) {
+        "rust" { $SkipRust = $true }
+        "python" { $SkipPython = $true }
+        "quarto" { $SkipQuarto = $true }
+        "r-release" { $SkipRRelease = $true }
+        default { throw "unsupported skip component: $component" }
+    }
+}
 
 function Write-Step {
     param(
@@ -120,6 +135,8 @@ function Add-KnownInstallPaths {
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "R\bin")
+    Add-PathIfExists (Join-Path $env:ProgramFiles "rig")
+    Add-PathIfExists (Join-Path $env:ProgramFiles "rig\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "R\rig\bin")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\R\rig\bin")
 }
@@ -127,6 +144,7 @@ function Add-KnownInstallPaths {
 function Install-WingetPackage {
     param([Parameter(Mandatory = $true)][string]$Id)
 
+    Require-Tool "winget"
     Invoke-Step "winget" @(
         "install",
         "--id",
@@ -135,6 +153,16 @@ function Install-WingetPackage {
         "--accept-package-agreements",
         "--accept-source-agreements"
     )
+}
+
+function Install-Rig {
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        Require-Tool "choco"
+        Invoke-Step "choco" @("install", "rig", "-y", "--no-progress")
+    }
+    else {
+        Install-WingetPackage "posit.rig"
+    }
 }
 
 function Install-Rustup {
@@ -155,10 +183,10 @@ function Install-Rustup {
     }
 }
 
-Require-Tool "winget"
 Add-KnownInstallPaths
 
-if (-not (Test-Tool "cl")) {
+if (-not $SkipRust -and -not (Test-Tool "cl")) {
+    Require-Tool "winget"
     Invoke-Step "winget" @(
         "install",
         "--id",
@@ -171,27 +199,27 @@ if (-not (Test-Tool "cl")) {
     )
 }
 
-if (-not (Test-Tool "cargo")) {
+if (-not $SkipRust -and -not (Test-Tool "cargo")) {
     Install-Rustup
     Add-KnownInstallPaths
 }
 
-if ($DryRun -or (Test-Tool "rustup")) {
+if (-not $SkipRust -and ($DryRun -or (Test-Tool "rustup"))) {
     Invoke-Step "rustup" @("toolchain", "install", "stable", "--component", "rustfmt", "--component", "clippy")
     Invoke-Step "rustup" @("default", "stable")
 }
 
-if (-not (Test-AnyRunnableTool @("python", "python3"))) {
+if (-not $SkipPython -and -not (Test-AnyRunnableTool @("python", "python3"))) {
     Install-WingetPackage "Python.Python.3.13"
     Add-KnownInstallPaths
 }
 
 if (-not (Test-Tool "rig")) {
-    Install-WingetPackage "posit.rig"
+    Install-Rig
     Add-KnownInstallPaths
 }
 
-if (-not (Test-Tool "quarto")) {
+if (-not $SkipQuarto -and -not (Test-Tool "quarto")) {
     Install-WingetPackage "Posit.Quarto"
     Add-KnownInstallPaths
 }
@@ -200,9 +228,13 @@ if (-not $DryRun -and -not (Test-Tool "rig")) {
     throw "rig is not on PATH after installation; restart PowerShell and rerun this script"
 }
 
-Invoke-Step "rig" @("add", "release")
+if (-not $SkipRRelease) {
+    Invoke-Step "rig" @("add", "release")
+}
 Invoke-Step "rig" @("add", $TestRVersion)
-Invoke-Step "rig" @("default", "release")
+if (-not $SkipRRelease) {
+    Invoke-Step "rig" @("default", "release")
+}
 
 Invoke-Step "cargo" @("--version")
 Invoke-Step "rustc" @("--version")

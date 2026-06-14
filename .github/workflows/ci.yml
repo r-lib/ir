@@ -55,22 +55,26 @@ jobs:
             any::prettyunits
 
       # `ir run --r-version` resolves through rig, so the version-selection test
-      # needs rig plus a second, non-default R. Provision both on Linux and
-      # macOS; the Windows job is wired up separately once the `\\?\` path bug
-      # in `ir run` is fixed (#32).
-      #
+      # needs rig plus a second, non-default R.
       # Pin the default Rscript to the one set up above before installing rig.
       # On Linux `rig add` makes the first rig-managed R the default and relinks
       # /usr/local/bin/Rscript to it, so pinning the symlink (`which Rscript`)
       # would silently follow rig's R. Resolve the real per-version binary
       # instead, which rig never touches.
-      - name: Pin the default Rscript before installing rig
+      - name: Pin the default Rscript before installing rig (Unix)
         if: runner.os != 'Windows'
         run: |
           rscript_path=$(Rscript -e 'cat(file.path(R.home("bin"), "Rscript"))')
           echo "IR_RSCRIPT=$rscript_path" >> "$GITHUB_ENV"
 
-      - name: Install rig and non-default R
+      - name: Pin the default Rscript before installing rig (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $rscriptPath = Rscript -e "cat(normalizePath(file.path(R.home('bin'), 'Rscript.exe'), winslash = '/', mustWork = TRUE))"
+          Add-Content -Path $env:GITHUB_ENV -Value "IR_RSCRIPT=$rscriptPath"
+
+      - name: Install rig and non-default R (Unix)
         if: runner.os != 'Windows'
         run: |
           # Keep the GitHub setup actions above for Rust/Python/Quarto/default R
@@ -82,6 +86,17 @@ jobs:
             --skip quarto \
             --skip r-release
           echo "IR_TEST_R_VERSION=4.4.3" >> "$GITHUB_ENV"
+
+      - name: Install rig and non-default R (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Keep the GitHub setup actions above for Rust/Python/Quarto/default R
+          # caching and environment setup. Use this script here only for rig and
+          # the second R needed by the version-selection tests.
+          .\scripts\install-dev-deps.ps1 `
+            -Skip rust, python, quarto, r-release
+          Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=4.4.3"
 
       - run: cargo build --verbose
       - run: cargo test --verbose
