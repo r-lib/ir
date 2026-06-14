@@ -1,20 +1,16 @@
 name: docs
 
 # Publish the website after CI completes on main. Runs as a separate workflow
-# (rather than a `needs:`-gated job in ci.yml) so it can publish even while the
-# Windows test leg is expected to fail (#32): a single matrix leg failing turns
-# the whole CI run red, but docs only requires the non-Windows jobs to pass.
+# rather than a `needs:`-gated job in ci.yml so the docs publish job can use its
+# own permissions and deployment setup.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
-  # Manual publish, e.g. to ship docs while CI is red on Windows (#32). The
-  # CI-jobs gate below is skipped for manual runs: dispatching is the decision
-  # to publish.
-  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -22,35 +18,29 @@ jobs:
     name: docs
     runs-on: ubuntu-22.04
     steps:
-      - name: Require non-Windows CI jobs to have succeeded
-        if: github.event_name == 'workflow_run'
+      - name: Require CI jobs to have succeeded
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Publish only when every CI job except the (known-broken, #32) Windows
-          # test leg succeeded. Inspect the triggering run's jobs directly; the
-          # overall run conclusion is red whenever Windows fails, so it cannot be
-          # the gate.
+          # Inspect the triggering run's jobs directly so failures are reported by
+          # job name instead of only through the workflow conclusion.
           failed=$(gh api \
             "repos/${GITHUB_REPOSITORY}/actions/runs/${{ github.event.workflow_run.id }}/jobs" \
             --paginate \
             --jq '.jobs[]
-              | select((.name | test("windows"; "i")) | not)
               | select(.conclusion != "success")
               | .name')
           if [ -n "$failed" ]; then
-            echo "Not publishing: these non-Windows CI jobs did not succeed:"
+            echo "Not publishing: these CI jobs did not succeed:"
             echo "$failed"
             exit 1
           fi
-          echo "All non-Windows CI jobs succeeded; proceeding to publish."
+          echo "All CI jobs succeeded; proceeding to publish."
 
       - uses: actions/checkout@v4
         with:
-          # workflow_run: the commit that triggered CI. workflow_dispatch: the
-          # ref the run was dispatched from (github.sha).
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

@@ -136,6 +136,23 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow.contains("pak::pkg_install(c(\"pak\", \"renv\", \"secretbase\"))"));
 }
 
+#[test]
+fn docs_workflow_requires_all_ci_jobs() {
+    let path = repo_root().join(".github/workflows/docs.yml");
+    let workflow = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+
+    assert!(workflow.contains("actions: read"));
+    assert!(workflow.contains("Require CI jobs to have succeeded"));
+    assert!(workflow.contains("All CI jobs succeeded; proceeding to publish."));
+    assert!(!workflow.contains("workflow_dispatch"));
+    assert!(!workflow.contains("github.event_name == 'workflow_run'"));
+    assert!(!workflow.contains("github.sha"));
+    assert!(!workflow.contains("non-Windows"));
+    assert!(!workflow.contains("known-broken"));
+    assert!(!workflow.contains(r#"test("windows"; "i")"#));
+}
+
 #[cfg(windows)]
 #[test]
 fn install_dev_deps_ps1_prints_windows_plan() {
