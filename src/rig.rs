@@ -129,6 +129,13 @@ struct AvailableRCache {
     versions: Vec<AvailableR>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum AvailableRCacheFile {
+    Current(AvailableRCache),
+    Legacy(Vec<AvailableR>),
+}
+
 #[derive(Debug)]
 struct InstalledR {
     name: String,
@@ -341,8 +348,15 @@ fn read_cached_rig_available(
 
     let json = fs::read_to_string(&path)
         .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
-    let mut cache: AvailableRCache = serde_json::from_str(&json)
+    let cache_file: AvailableRCacheFile = serde_json::from_str(&json)
         .map_err(|e| format!("failed to parse `{}`: {e}", path.display()))?;
+    let mut cache = match cache_file {
+        AvailableRCacheFile::Current(cache) => cache,
+        AvailableRCacheFile::Legacy(versions) => {
+            drop(versions);
+            return Ok(None);
+        }
+    };
     let stored_known_through =
         parse_iso_date_field("rig available cache known_through", &cache.known_through)?;
     let checked_on = parse_iso_date_field("rig available cache checked_on", &cache.checked_on)?;

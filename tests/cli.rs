@@ -477,6 +477,7 @@ struct FakeRigAvailableCache<'a> {
 struct FakeRigSelectionOptions<'a> {
     available: Option<&'a [(&'a str, &'a str, &'a str)]>,
     cache: Option<FakeRigAvailableCache<'a>>,
+    legacy_cache: Option<&'a [(&'a str, &'a str, &'a str)]>,
     include_broken_entry: bool,
 }
 
@@ -512,6 +513,7 @@ fn run_fake_rig_exclude_newer_selection(
         FakeRigSelectionOptions {
             available,
             cache: None,
+            legacy_cache: None,
             include_broken_entry: false,
         },
     )
@@ -531,6 +533,7 @@ fn run_fake_rig_exclude_newer_selection_with_broken_entry(
         FakeRigSelectionOptions {
             available,
             cache: None,
+            legacy_cache: None,
             include_broken_entry,
         },
     )
@@ -566,6 +569,7 @@ fn run_fake_rig_exclude_newer_selection_with_cache_result(
         FakeRigSelectionOptions {
             available,
             cache: Some(cache),
+            legacy_cache: None,
             include_broken_entry: false,
         },
     )
@@ -633,6 +637,13 @@ fn run_fake_rig_exclude_newer_selection_with_options(
             "versions": fake_available_json(cache.available),
         });
         fs::write(&cache_path, serde_json::to_string(&cache_json).unwrap()).unwrap();
+    } else if let Some(cache) = options.legacy_cache {
+        fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+        fs::write(
+            &cache_path,
+            serde_json::to_string(&fake_available_json(cache)).unwrap(),
+        )
+        .unwrap();
     }
 
     write_executable(
@@ -3023,6 +3034,7 @@ fn run_script_exclude_newer_does_not_write_future_cutoff_as_cache_coverage() {
         FakeRigSelectionOptions {
             available: Some(&available),
             cache: None,
+            legacy_cache: None,
             include_broken_entry: false,
         },
     );
@@ -3037,6 +3049,38 @@ fn run_script_exclude_newer_does_not_write_future_cutoff_as_cache_coverage() {
     let cache: serde_json::Value = serde_json::from_str(&cache_json).unwrap();
     assert_eq!(cache["known_through"], "2026-07-01");
     assert_eq!(cache["checked_on"], current_utc_date());
+}
+
+#[cfg(unix)]
+#[test]
+fn run_script_exclude_newer_refreshes_legacy_available_cache() {
+    let _guard = e2e_lock();
+    let legacy_available = [("4.6.0", "4.6.0", "2026-04-24")];
+    let refreshed_available = [
+        ("4.6.0", "4.6.0", "2026-04-24"),
+        ("4.7.0", "4.7.0", "2026-07-01"),
+    ];
+    let result = run_fake_rig_exclude_newer_selection_with_options(
+        "2026-07-15",
+        &[("4.6.0", "4.6.0"), ("4.7.0", "4.7.0")],
+        FakeRigSelectionOptions {
+            available: Some(&refreshed_available),
+            cache: None,
+            legacy_cache: Some(&legacy_available),
+            include_broken_entry: false,
+        },
+    );
+
+    assert_success(&result.output);
+    assert_stdout_contains(&result.output, "ir.fixture=fake-r-selection");
+    assert_stdout_contains(&result.output, "version.r_version=[4.7.0]");
+
+    let cache_json = result
+        .cache_json
+        .expect("rig available cache should be refreshed");
+    let cache: serde_json::Value = serde_json::from_str(&cache_json).unwrap();
+    assert_eq!(cache["known_through"], "2026-07-01");
+    assert_eq!(cache["versions"][1]["version"], "4.7.0");
 }
 
 #[cfg(unix)]
