@@ -4,8 +4,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const EMBEDDED_AVAILABLE_BUILD_DATE: &str = "2026-06-03";
+const RIG_AVAILABLE_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const EMBEDDED_AVAILABLE: &[AvailableCandidate<'static>] = &[
     AvailableCandidate {
         name: "4.1.0",
@@ -124,7 +126,7 @@ struct AvailableR {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct AvailableRCache {
     known_through: String,
-    checked_on: String,
+    checked_at: u64,
     versions: Vec<AvailableR>,
 }
 
@@ -348,16 +350,12 @@ fn read_cached_rig_available(
         .map_err(|e| format!("failed to parse `{}`: {e}", path.display()))?;
     let stored_known_through =
         parse_iso_date_field("rig available cache known_through", &cache.known_through)?;
-    let checked_on = parse_iso_date_field("rig available cache checked_on", &cache.checked_on)?;
     normalize_available_release_dates(&mut cache.versions)?;
     let release_known_through =
         latest_available_release_date(&cache.versions).unwrap_or(EMBEDDED_AVAILABLE_BUILD_DATE);
     let known_through = stored_known_through.as_str().min(release_known_through);
-    let cache_coverage = known_through.max(checked_on.as_str());
-    let today = current_utc_date();
-    let required_coverage = exclude_newer.min(today.as_str());
 
-    if cache_coverage < required_coverage {
+    if known_through < exclude_newer && !checked_recently(cache.checked_at)? {
         return Ok(None);
     }
 
@@ -374,7 +372,7 @@ fn write_cached_rig_available(versions: &[AvailableR]) -> Result<(), Box<dyn Err
         known_through: latest_available_release_date(versions)
             .unwrap_or(EMBEDDED_AVAILABLE_BUILD_DATE)
             .to_string(),
-        checked_on: current_utc_date(),
+        checked_at: current_utc_seconds()?,
         versions: versions.to_vec(),
     };
     let json = serde_json::to_string_pretty(&cache)
@@ -536,8 +534,20 @@ fn latest_available_release_date(versions: &[AvailableR]) -> Option<&str> {
         .max()
 }
 
-fn current_utc_date() -> String {
-    time::OffsetDateTime::now_utc().date().to_string()
+fn checked_recently(checked_at: u64) -> Result<bool, Box<dyn Error>> {
+    let now = current_utc_seconds()?;
+    if checked_at > now {
+        return Ok(false);
+    }
+
+    Ok(now - checked_at <= RIG_AVAILABLE_MAX_AGE_SECONDS)
+}
+
+fn current_utc_seconds() -> Result<u64, Box<dyn Error>> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("system clock is before the Unix epoch: {e}"))?
+        .as_secs())
 }
 
 fn released_before_or_on(version: &AvailableCandidate<'_>, exclude_newer: Option<&str>) -> bool {

@@ -185,10 +185,6 @@ fn current_utc_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-fn current_utc_date() -> String {
-    time::OffsetDateTime::now_utc().date().to_string()
-}
-
 fn e2e_lock() -> MutexGuard<'static, ()> {
     E2E_LOCK
         .lock()
@@ -2841,7 +2837,11 @@ fn run_script_exclude_newer_reuses_real_available_cache_for_future_date() {
     let cache_json = fs::read_to_string(&cache_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", cache_path.display()));
     let cache: serde_json::Value = serde_json::from_str(&cache_json).unwrap();
-    assert_eq!(cache["checked_on"], current_utc_date());
+    let checked_at = cache["checked_at"]
+        .as_u64()
+        .expect("rig available cache should record checked_at seconds");
+    assert!(checked_at <= current_utc_seconds());
+    assert!(current_utc_seconds() - checked_at <= 1);
 
     let first_modified = fs::metadata(&cache_path)
         .unwrap_or_else(|e| panic!("failed to stat {}: {e}", cache_path.display()))
