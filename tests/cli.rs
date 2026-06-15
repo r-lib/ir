@@ -41,30 +41,9 @@ fn rx_bin_name() -> String {
 }
 
 fn rscript() -> OsString {
-    if let Some(rscript) = std::env::var_os("IR_RSCRIPT").filter(|value| !value.is_empty()) {
-        return rscript;
-    }
-
-    if let Some(rscript) = rig_default_rscript() {
-        return rscript.into_os_string();
-    }
-
-    "Rscript".into()
-}
-
-fn rig_default_rscript() -> Option<PathBuf> {
-    let output = Command::new("rig").args(["list", "--json"]).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let versions: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    let default = versions
-        .as_array()?
-        .iter()
-        .find(|version| version.get("default").and_then(|value| value.as_bool()) == Some(true))?;
-    let rscript = rscript_from_r_binary(Path::new(default.get("binary")?.as_str()?));
-    rscript.exists().then_some(rscript)
+    std::env::var_os("IR_RSCRIPT")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Rscript".into())
 }
 
 fn rscript_from_r_binary(binary: &Path) -> PathBuf {
@@ -74,6 +53,23 @@ fn rscript_from_r_binary(binary: &Path) -> PathBuf {
         name.push(ext);
     }
     binary.with_file_name(name)
+}
+
+fn rig_list() -> Result<Vec<InstalledRigR>, String> {
+    let output = Command::new("rig")
+        .args(["--quiet", "list", "--json"])
+        .output()
+        .map_err(|e| format!("failed to run `rig --quiet list --json`: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "`rig --quiet list --json` failed: {}",
+            stderr.trim()
+        ));
+    }
+
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("failed to parse `rig --quiet list --json` JSON: {e}"))
 }
 
 fn normalize_cli_output(output: &[u8]) -> String {
@@ -91,6 +87,7 @@ fn renviron_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+#[cfg(unix)]
 fn r_string(path: &Path) -> String {
     serde_json::to_string(&renviron_path(path)).unwrap()
 }
@@ -323,6 +320,71 @@ fn default_r_version() -> Option<String> {
     }
     let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!version.is_empty()).then_some(version)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct InstalledRigR {
+    name: String,
+    version: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    binary: Option<PathBuf>,
+}
+
+impl InstalledRigR {
+    fn matches(&self, req: &str) -> bool {
+        self.name == req
+            || self.version.as_deref() == Some(req)
+            || self.aliases.iter().any(|alias| alias == req)
+    }
+}
+
+#[test]
+fn rig_test_prerequisites_match_ir_test_r_version() {
+    let _ = rig_test_r_version("rig_test_prerequisites_match_ir_test_r_version");
+}
+
+fn rig_test_r_version(test_name: &str) -> Option<String> {
+    let target = match std::env::var("IR_TEST_R_VERSION") {
+        Ok(target) if !target.is_empty() => target,
+        _ => {
+            eprintln!("SKIP {test_name}: set IR_TEST_R_VERSION to a rig-installed R version");
+            return None;
+        }
+    };
+
+    let rig =
+        rig_list().unwrap_or_else(|e| panic!("IR_TEST_R_VERSION={target} requires rig state: {e}"));
+    let target_r = rig
+        .iter()
+        .find(|version| version.matches(&target))
+        .unwrap_or_else(|| panic!("IR_TEST_R_VERSION={target} is not installed by rig"));
+    let target_version = target_r
+        .version
+        .as_ref()
+        .unwrap_or_else(|| panic!("IR_TEST_R_VERSION={target} has no version in rig state"));
+    let ambient_r = default_r_version()
+        .unwrap_or_else(|| panic!("IR_TEST_R_VERSION={target} requires a runnable ambient R"));
+    assert_ne!(
+        ambient_r.as_str(),
+        target_version,
+        "IR_TEST_R_VERSION={target} resolves to R {}, which matches the R used without --r-version",
+        target_version
+    );
+
+    let binary = target_r
+        .binary
+        .as_ref()
+        .unwrap_or_else(|| panic!("IR_TEST_R_VERSION={target} has no binary in rig state"));
+    let rscript = rscript_from_r_binary(binary);
+    assert!(
+        rscript.exists(),
+        "rig reports R {target} at `{}`, but `{}` does not exist",
+        binary.display(),
+        rscript.display()
+    );
+
+    Some(target)
 }
 
 #[test]
@@ -2280,23 +2342,9 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 fn render_quarto_selects_requested_r_version() {
     let _guard = e2e_lock();
 
-    // Opt-in: needs rig plus a non-default R installed (CI provisions both).
-    // `ir`'s `--r-version` path resolves through rig unconditionally, so with a
-    // single R there is nothing to select.
-    let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
-        eprintln!(
-            "SKIP render_quarto_selects_requested_r_version: set IR_TEST_R_VERSION to a rig-installed, non-default R version"
-        );
+    let Some(target) = rig_test_r_version("render_quarto_selects_requested_r_version") else {
         return;
     };
-
-    // Selecting the version the default path already uses would prove nothing.
-    if default_r_version().as_deref() == Some(target.as_str()) {
-        eprintln!(
-            "SKIP render_quarto_selects_requested_r_version: IR_TEST_R_VERSION ({target}) matches the default R; pick a different installed version"
-        );
-        return;
-    }
 
     let fixture_dir = fixture("run");
 
@@ -2329,22 +2377,18 @@ fn render_quarto_selects_requested_r_version() {
 fn run_script_frontmatter_selects_r_version() {
     let _guard = e2e_lock();
 
+    let Some(target) = rig_test_r_version("run_script_frontmatter_selects_r_version") else {
+        return;
+    };
+
     // The fixture pins `#| r-version` to this version, so the test only runs
     // when CI has provisioned that exact R through rig (signalled by
     // IR_TEST_R_VERSION). Unlike the flag, the frontmatter value can't come from
     // the environment because it lives in the static fixture.
     const FIXTURE_R_VERSION: &str = "4.4.3";
-    if std::env::var("IR_TEST_R_VERSION").ok().as_deref() != Some(FIXTURE_R_VERSION) {
+    if target != FIXTURE_R_VERSION {
         eprintln!(
             "SKIP run_script_frontmatter_selects_r_version: set IR_TEST_R_VERSION={FIXTURE_R_VERSION} (rig plus that R) to match the fixture's `#| r-version`"
-        );
-        return;
-    }
-
-    // Selecting the version the default path already uses would prove nothing.
-    if default_r_version().as_deref() == Some(FIXTURE_R_VERSION) {
-        eprintln!(
-            "SKIP run_script_frontmatter_selects_r_version: the fixture's R ({FIXTURE_R_VERSION}) matches the default R; nothing to select"
         );
         return;
     }
@@ -2362,6 +2406,535 @@ fn run_script_frontmatter_selects_r_version() {
     assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
     assert_stdout_contains(&out, "version.lib_in_cache=true");
     assert_stdout_contains(&out, "version.jsonlite_in_cache=true");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_without_r_version_uses_rscript_on_path_when_rig_has_default() {
+    let cache_dir = unique_dir("ir-path-rscript-cache");
+    let bin_dir = unique_dir("ir-path-rscript-bin");
+    let rig_dir = unique_dir("ir-path-rscript-rig");
+
+    let path_rscript = bin_dir.join("Rscript");
+    write_executable(
+        &path_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=path\n",
+        ),
+    );
+
+    let rig_binary = rig_dir.join("R");
+    let rig_rscript = rig_dir.join("Rscript");
+    write_executable(
+        &rig_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=rig\n",
+        ),
+    );
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"rig-default","version":"4.4.3","aliases":[],"default":true,"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            rig_binary.display()
+        ),
+    );
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=path");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rig_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_without_r_version_skips_non_executable_rscript_on_path() {
+    let cache_dir = unique_dir("ir-path-rscript-executable-cache");
+    let stale_dir = unique_dir("ir-path-rscript-stale-bin");
+    let bin_dir = unique_dir("ir-path-rscript-valid-bin");
+
+    fs::write(stale_dir.join("Rscript"), "not executable\n").unwrap();
+    write_executable(
+        &bin_dir.join("Rscript"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=path\n",
+        ),
+    );
+
+    let path = std::env::join_paths(
+        [
+            stale_dir.as_os_str().to_owned(),
+            bin_dir.as_os_str().to_owned(),
+        ]
+        .into_iter()
+        .chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=path");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&stale_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_without_r_version_pins_quarto_to_rscript_on_path() {
+    let cache_dir = unique_dir("ir-render-path-rscript-cache");
+    let bin_dir = unique_dir("ir-render-path-rscript-bin");
+    let doc = unique_path("ir-render-path-rscript", "qmd");
+
+    let rscript = bin_dir.join("Rscript");
+    write_executable(
+        &rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=path\n",
+        ),
+    );
+    write_executable(
+        &bin_dir.join("quarto"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"${QUARTO_R:-}\" != \"$IR_EXPECTED_QUARTO_R\" ]; then\n",
+            "  echo \"QUARTO_R=${QUARTO_R:-}\"\n",
+            "  echo \"expected=$IR_EXPECTED_QUARTO_R\"\n",
+            "  exit 2\n",
+            "fi\n",
+            "echo quarto_r=$QUARTO_R\n",
+        ),
+    );
+    fs::write(&doc, "---\ntitle: render path rscript\n---\n").unwrap();
+    let expected_rscript = fs::canonicalize(&rscript).unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env("IR_EXPECTED_QUARTO_R", &expected_rscript)
+        .env_remove("IR_RSCRIPT")
+        .arg("render")
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, &format!("quarto_r={}", expected_rscript.display()));
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn run_without_r_version_uses_rscript_bat_on_path() {
+    let cache_dir = unique_dir("ir-path-rscript-bat-cache");
+    let bin_dir = unique_dir("ir-path-rscript-bat-bin");
+
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo selected=bat\r\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=bat");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn run_without_r_version_ignores_extensionless_rscript_on_path() {
+    let cache_dir = unique_dir("ir-path-rscript-extensionless-cache");
+    let stale_dir = unique_dir("ir-path-rscript-extensionless-stale");
+    let bin_dir = unique_dir("ir-path-rscript-extensionless-valid");
+
+    fs::write(stale_dir.join("Rscript"), "extensionless stub\r\n").unwrap();
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo selected=bat\r\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        [
+            stale_dir.as_os_str().to_owned(),
+            bin_dir.as_os_str().to_owned(),
+        ]
+        .into_iter()
+        .chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=bat");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&stale_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn run_without_r_version_skips_unsupported_pathext_rscript_on_path() {
+    let cache_dir = unique_dir("ir-path-rscript-unsupported-pathext-cache");
+    let stale_dir = unique_dir("ir-path-rscript-unsupported-pathext-stale");
+    let bin_dir = unique_dir("ir-path-rscript-unsupported-pathext-valid");
+
+    fs::write(stale_dir.join("Rscript.JS"), "WScript.Echo('stale')\r\n").unwrap();
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo selected=bat\r\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        [
+            stale_dir.as_os_str().to_owned(),
+            bin_dir.as_os_str().to_owned(),
+        ]
+        .into_iter()
+        .chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env("PATHEXT", ".JS;.BAT")
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=bat");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&stale_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn run_with_extended_rscript_command_skips_pathext_expansion() {
+    let cache_dir = unique_dir("ir-extended-rscript-command-cache");
+    let stale_dir = unique_dir("ir-extended-rscript-command-stale");
+    let bin_dir = unique_dir("ir-extended-rscript-command-valid");
+
+    fs::write(
+        stale_dir.join("Rscript.bat.CMD"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo selected=cmd\r\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo selected=bat\r\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        [
+            stale_dir.as_os_str().to_owned(),
+            bin_dir.as_os_str().to_owned(),
+        ]
+        .into_iter()
+        .chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", "Rscript.bat")
+        .env("PATH", path)
+        .env("PATHEXT", ".CMD")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=bat");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&stale_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn run_without_r_version_does_not_cache_unresolved_rscript_bat() {
+    let cache_dir = unique_dir("ir-path-rscript-bat-cache-miss");
+    let bin_dir = unique_dir("ir-path-rscript-bat-bin");
+    let library = unique_dir("ir-path-rscript-bat-library");
+    let resolver_marker = unique_path("ir-path-rscript-bat-resolver", "txt");
+    let resolver_script = bin_dir.join("resolve.ps1");
+
+    fs::write(
+        &resolver_script,
+        concat!(
+            "$library = $env:IR_TEST_LIBRARY\n",
+            "New-Item -ItemType Directory -Force -Path $library | Out-Null\n",
+            "Add-Content -Path $env:IR_TEST_RESOLVER_MARKER -Value 'resolve'\n",
+            "if ($env:IR_RESOLUTION_MARKER) {\n",
+            "  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:IR_RESOLUTION_MARKER) | Out-Null\n",
+            "  $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()\n",
+            "  Set-Content -Path $env:IR_RESOLUTION_MARKER -Value @(\"latest: $now\", $library)\n",
+            "}\n",
+            "Set-Content -Path $env:IR_RESOLVE_RESULT_FILE -Value $library\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+            "  powershell -NoProfile -ExecutionPolicy Bypass -File \"%IR_TEST_RESOLVER_SCRIPT%\"\r\n",
+            "  exit /B %ERRORLEVEL%\r\n",
+            ")\r\n",
+            "echo selected=bat\r\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    for _ in 0..2 {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("PATH", &path)
+            .env("IR_TEST_LIBRARY", &library)
+            .env("IR_TEST_RESOLVER_MARKER", &resolver_marker)
+            .env("IR_TEST_RESOLVER_SCRIPT", &resolver_script)
+            .env_remove("IR_RSCRIPT")
+            .args(["run", "--with", "cli", "-e", "cat('ignored')"])
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=bat");
+    }
+
+    let resolver_runs = fs::read_to_string(&resolver_marker).unwrap();
+    assert_eq!(
+        resolver_runs.lines().count(),
+        2,
+        "unresolved batch Rscript wrappers should not key the warm resolution cache"
+    );
+
+    let _ = fs::remove_file(&resolver_marker);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn render_without_r_version_pins_quarto_to_rscript_bat_target() {
+    let cache_dir = unique_dir("ir-render-rscript-bat-target-cache");
+    let bin_dir = unique_dir("ir-render-rscript-bat-target-bin");
+    let doc = unique_path("ir-render-rscript-bat-target", "qmd");
+    let target_rscript = PathBuf::from(rscript());
+
+    if !target_rscript.is_file() {
+        eprintln!(
+            "SKIP render_without_r_version_pins_quarto_to_rscript_bat_target: default test Rscript is not a path"
+        );
+        return;
+    }
+    let expected_rscript = std::path::absolute(&target_rscript).unwrap();
+
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        format!(
+            "::test\r\n@echo off\r\n@\"{}\" %*\r\n",
+            target_rscript.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        bin_dir.join("quarto.bat"),
+        concat!(
+            "@echo off\r\n",
+            "if \"%QUARTO_R%\"==\"%IR_EXPECTED_QUARTO_R%\" (\r\n",
+            "  echo quarto_r=%QUARTO_R%\r\n",
+            "  exit /B 0\r\n",
+            ")\r\n",
+            "echo QUARTO_R=%QUARTO_R%\r\n",
+            "echo expected=%IR_EXPECTED_QUARTO_R%\r\n",
+            "exit /B 2\r\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &doc,
+        "---\ntitle: render batch target\nir:\n  exclude-newer: 2026-06-01\n---\n",
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env("IR_QUARTO", bin_dir.join("quarto.bat"))
+        .env("IR_EXPECTED_QUARTO_R", &expected_rscript)
+        .env_remove("IR_RSCRIPT")
+        .arg("render")
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, &format!("quarto_r={}", expected_rscript.display()));
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[test]
@@ -3301,6 +3874,76 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     assert_stdout_contains(&cached, "Installed");
 
     let _ = fs::remove_file(&profile);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_install_with_path_rscript_symlink_records_target() {
+    let cache_dir = unique_dir("ir-tool-install-rscript-link-cache");
+    let bin_dir = unique_dir("ir-tool-install-rscript-link-bin");
+    let link_dir = unique_dir("ir-tool-install-rscript-link-path");
+    let target_dir = unique_dir("ir-tool-install-rscript-link-target");
+    let library = unique_dir("ir-tool-install-rscript-link-library");
+    let package = library.join("irfake");
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    write_executable(
+        &exec_dir.join("hello.R"),
+        "#!/usr/bin/env Rscript\ncat('hello\\n')\n",
+    );
+
+    let target_rscript = target_dir.join("Rscript");
+    write_executable(
+        &target_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo target-rscript\n",
+        ),
+    );
+    let link_rscript = link_dir.join("Rscript");
+    std::os::unix::fs::symlink(&target_rscript, &link_rscript).unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(link_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irfake")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
+    let target = fs::canonicalize(&target_rscript).unwrap();
+    assert!(
+        launcher.contains(&target.to_string_lossy().into_owned()),
+        "{launcher}"
+    );
+    assert!(
+        !launcher.contains(&link_rscript.to_string_lossy().into_owned()),
+        "{launcher}"
+    );
+
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&target_dir);
+    let _ = fs::remove_dir_all(&link_dir);
     let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&cache_dir);
 }

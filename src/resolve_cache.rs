@@ -241,13 +241,10 @@ fn is_rscript_executable(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(OsStr::to_str) else {
         return false;
     };
-    if !matches!(
+    matches!(
         name.to_ascii_lowercase().as_str(),
         "rscript" | "rscript.exe"
-    ) {
-        return false;
-    }
-    !is_script_launcher(path)
+    ) && !is_script_launcher(path)
 }
 
 fn is_script_launcher(path: &Path) -> bool {

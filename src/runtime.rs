@@ -420,17 +420,122 @@ fn run_script(
 }
 
 /// The Rscript executable to use when no `r-version` is requested: `$IR_RSCRIPT`
-/// if set, else rig's default R install, else bare `Rscript` resolved via `PATH`.
-///
-/// The rig step matters on Windows: `rig system make-links` puts only
-/// `Rscript.bat` on `PATH`, which `std::process::Command` won't spawn. Resolving
-/// the default install's real `Rscript.exe` from `rig list --json` avoids the
-/// shim — the same mechanism the `--r-version` path already uses.
+/// if set, else the `Rscript` found on `PATH`.
 pub(crate) fn rscript_command() -> OsString {
-    if let Some(rscript) = env::var_os("IR_RSCRIPT") {
-        return rscript;
+    let command = nonempty_env("IR_RSCRIPT").unwrap_or_else(|| "Rscript".into());
+    resolve_command_path(&command).unwrap_or(command)
+}
+
+fn resolve_command_path(command: &OsStr) -> Option<OsString> {
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return path.is_file().then(|| absolute_path(path).into_os_string());
     }
-    rig::default_rscript().unwrap_or_else(|| "Rscript".into())
+
+    find_on_path(command).map(PathBuf::into_os_string)
+}
+
+fn find_on_path(command: &OsStr) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        let candidate = dir.join(command);
+        if is_runnable_file(&candidate) {
+            return Some(selected_command_path(&candidate));
+        }
+
+        #[cfg(windows)]
+        if Path::new(command).extension().is_none() {
+            let pathext = env::var_os("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
+            let command = command.to_string_lossy();
+            for ext in pathext.to_string_lossy().split(';') {
+                let candidate = dir.join(format!("{command}{ext}"));
+                if is_runnable_file(&candidate) {
+                    return Some(selected_command_path(&candidate));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(unix)]
+fn is_runnable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_runnable_file(path: &Path) -> bool {
+    path.is_file()
+        && path.extension().and_then(OsStr::to_str).is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "com" | "exe" | "bat" | "cmd"
+            )
+        })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn is_runnable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+#[cfg(unix)]
+fn selected_command_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| absolute_path(path))
+}
+
+#[cfg(windows)]
+fn selected_command_path(path: &Path) -> PathBuf {
+    resolved_windows_rscript_batch_target(path).unwrap_or_else(|| absolute_path(path))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn selected_command_path(path: &Path) -> PathBuf {
+    absolute_path(path)
+}
+
+#[cfg(windows)]
+fn resolved_windows_rscript_batch_target(path: &Path) -> Option<PathBuf> {
+    let ext = path.extension().and_then(OsStr::to_str)?;
+    if !matches!(ext.to_ascii_lowercase().as_str(), "bat" | "cmd") {
+        return None;
+    }
+
+    let contents = fs::read_to_string(path).ok()?;
+    for line in contents.lines() {
+        let line = line.trim_start();
+        if line.is_empty()
+            || line.starts_with("::")
+            || line.to_ascii_lowercase().starts_with("rem ")
+        {
+            continue;
+        }
+        let line = line.strip_prefix('@').unwrap_or(line).trim_start();
+        let Some(rest) = line.strip_prefix('"') else {
+            continue;
+        };
+        let (target, _) = rest.split_once('"')?;
+        return windows_rscript_target(Path::new(target));
+    }
+    None
+}
+
+#[cfg(windows)]
+fn windows_rscript_target(target: &Path) -> Option<PathBuf> {
+    if target.is_file() {
+        return Some(absolute_path(target));
+    }
+    let exe = target.with_extension("exe");
+    exe.is_file().then(|| absolute_path(&exe))
+}
+
+fn absolute_path(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// The Rust-owned `ir` cache root. `IR_CACHE_DIR` overrides it; otherwise it
