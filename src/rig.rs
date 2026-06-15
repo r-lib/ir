@@ -467,6 +467,10 @@ fn required_available_version_from_candidates<'a>(
     candidates
         .into_iter()
         .filter(|version| released_before_or_on(version, exclude_newer))
+        .filter(|version| {
+            stable_release_candidate(version)
+                || requirement.matches_requested_symbolic_candidate(version)
+        })
         .filter(|version| requirement.matches_candidate(version.name, version.version, &[]))
         .max_by(|a, b| compare_versions(a.version, b.version))
         .map(AvailableR::from)
@@ -653,6 +657,14 @@ fn parse_version_requirement(req: &str) -> Result<VersionRequirement, Box<dyn Er
 impl VersionRequirement {
     fn matches_installed(&self, installed: &InstalledR) -> bool {
         self.matches_candidate(&installed.name, &installed.version, &installed.aliases)
+    }
+
+    fn matches_requested_symbolic_candidate(&self, version: &AvailableCandidate<'_>) -> bool {
+        matches!(
+            self,
+            VersionRequirement::Bare(req)
+                if (version.name == "devel" || version.name == "next") && req == version.name
+        )
     }
 
     fn matches_candidate(&self, name: &str, candidate_version: &str, aliases: &[String]) -> bool {

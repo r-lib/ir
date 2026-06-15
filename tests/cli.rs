@@ -348,6 +348,43 @@ fn default_r_version() -> Option<String> {
     (!version.is_empty()).then_some(version)
 }
 
+fn rig_json(args: &[&str], test_name: &str) -> Option<serde_json::Value> {
+    let output = Command::new("rig").args(args).output().ok()?;
+    if !output.status.success() {
+        eprintln!("SKIP {test_name}: `rig {}` failed", args.join(" "));
+        return None;
+    }
+
+    let json = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.starts_with("[INFO]"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&json).ok()
+}
+
+fn real_uninstalled_symbolic_r_version(test_name: &str) -> Option<(String, String)> {
+    let installed = rig_json(&["list", "--json"], test_name)?;
+    let installed = installed
+        .as_array()?
+        .iter()
+        .filter_map(|version| version.get("version")?.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+
+    let available = rig_json(&["available", "--all", "--json"], test_name)?;
+    available.as_array()?.iter().find_map(|version| {
+        let name = version.get("name")?.as_str()?;
+        if name != "devel" && name != "next" {
+            return None;
+        }
+        let version = version.get("version")?.as_str()?;
+        if installed.iter().any(|installed| installed == version) {
+            return None;
+        }
+        Some((name.to_string(), version.to_string()))
+    })
+}
+
 fn test_r_selection_target(test_name: &str) -> Option<(String, String)> {
     let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
         eprintln!(
@@ -2688,6 +2725,40 @@ fn run_script_frontmatter_selects_r_version() {
     assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
     assert_stdout_contains(&out, "version.lib_in_cache=true");
     assert_stdout_contains(&out, "version.jsonlite_in_cache=true");
+}
+
+#[test]
+fn run_script_r_version_install_hint_ignores_symbolic_prereleases() {
+    let _guard = e2e_lock();
+    let test_name = "run_script_r_version_install_hint_ignores_symbolic_prereleases";
+    let Some((name, version)) = real_uninstalled_symbolic_r_version(test_name) else {
+        eprintln!("SKIP {test_name}: rig has no uninstalled symbolic prerelease rows");
+        return;
+    };
+    let script = unique_path("ir-r-version-symbolic-prerelease", "R");
+    let cache_dir = unique_dir("ir-r-version-symbolic-prerelease-cache");
+    fs::write(&script, "cat(\"should not run\\n\")\n")
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", script.display()));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--r-version"])
+        .arg(&version)
+        .arg("--vanilla")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains(&format!("rig install {name}")),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
