@@ -396,7 +396,9 @@ fn available_for_exclude_newer(
     installed: &[InstalledR],
 ) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     if embedded_available_covers_exclude_newer(exclude_newer)
-        && installed.iter().all(embedded_available_includes_installed)
+        && installed
+            .iter()
+            .all(|version| embedded_available_can_decide_installed(version, exclude_newer))
     {
         return Ok(EMBEDDED_AVAILABLE.iter().map(AvailableR::from).collect());
     }
@@ -406,9 +408,27 @@ fn available_for_exclude_newer(
 
 fn embedded_available_covers_exclude_newer(exclude_newer: &str) -> bool {
     exclude_newer <= EMBEDDED_AVAILABLE_BUILD_DATE
-        && EMBEDDED_AVAILABLE
-            .iter()
-            .any(|version| released_before_or_on(version, Some(exclude_newer)))
+        && latest_embedded_available_for_exclude_newer(exclude_newer).is_some()
+}
+
+fn latest_embedded_available_for_exclude_newer(
+    exclude_newer: &str,
+) -> Option<AvailableCandidate<'static>> {
+    EMBEDDED_AVAILABLE
+        .iter()
+        .copied()
+        .filter(|version| released_before_or_on(version, Some(exclude_newer)))
+        .max_by(|a, b| compare_versions(a.version, b.version))
+}
+
+fn embedded_available_can_decide_installed(installed: &InstalledR, exclude_newer: &str) -> bool {
+    if embedded_available_includes_installed(installed) {
+        return true;
+    }
+
+    latest_embedded_available_for_exclude_newer(exclude_newer)
+        .map(|version| compare_versions(&installed.version, version.version).is_gt())
+        .unwrap_or(false)
 }
 
 fn embedded_available_includes_installed(installed: &InstalledR) -> bool {
@@ -494,7 +514,7 @@ fn available_name_is_concrete(value: &str) -> bool {
 fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let path = crate::runtime::ir_cache_dir()?
         .join("rig")
-        .join("available.json");
+        .join("available-all.json");
     if path.exists() {
         let json = fs::read_to_string(&path)
             .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
@@ -514,7 +534,7 @@ fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
 
 fn parse_rig_available_json(json: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let mut versions: Vec<AvailableR> = serde_json::from_str(json)
-        .map_err(|e| format!("failed to parse `rig available --json` JSON: {e}"))?;
+        .map_err(|e| format!("failed to parse `rig available --all --json` JSON: {e}"))?;
 
     for version in &mut versions {
         if let Some(date) = version.date.as_deref() {
