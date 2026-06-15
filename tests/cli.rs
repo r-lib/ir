@@ -339,7 +339,7 @@ fn rig_json(args: &[&str], test_name: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&json).ok()
 }
 
-fn real_uninstalled_symbolic_r_version(test_name: &str) -> Option<(String, String)> {
+fn real_uninstalled_symbolic_available_r_version(test_name: &str) -> Option<(String, String)> {
     let installed = rig_json(&["list", "--json"], test_name)?;
     let installed = installed
         .as_array()?
@@ -349,11 +349,12 @@ fn real_uninstalled_symbolic_r_version(test_name: &str) -> Option<(String, Strin
 
     let available = rig_json(&["available", "--all", "--json"], test_name)?;
     available.as_array()?.iter().find_map(|version| {
-        let name = version.get("name")?.as_str()?;
-        if name != "devel" && name != "next" {
+        if !rig_available_record_is_symbolic(version) {
             return None;
         }
+        let name = version.get("name")?.as_str()?;
         let version = version.get("version")?.as_str()?;
+        parse_version_parts_for_test(version)?;
         if installed.iter().any(|installed| installed == version) {
             return None;
         }
@@ -366,20 +367,27 @@ fn real_installed_symbolic_r_with_stable_peer(test_name: &str) -> Option<(String
     let installed = installed.as_array()?;
     installed
         .iter()
-        .filter(|version| rig_record_is_symbolic(version))
+        .filter(|version| rig_installed_record_is_prerelease(version))
         .find_map(|symbolic| {
             let version = symbolic.get("version")?.as_str()?;
             let symbolic_path = symbolic.get("path")?.as_str()?.replace('\\', "/");
             let stable = installed.iter().find(|candidate| {
                 candidate.get("version").and_then(|value| value.as_str()) == Some(version)
-                    && !rig_record_is_symbolic(candidate)
+                    && !rig_installed_record_is_prerelease(candidate)
             })?;
             let stable_path = stable.get("path")?.as_str()?.replace('\\', "/");
             Some((version.to_string(), stable_path, symbolic_path))
         })
 }
 
-fn rig_record_is_symbolic(record: &serde_json::Value) -> bool {
+fn rig_available_record_is_symbolic(record: &serde_json::Value) -> bool {
+    record
+        .get("name")
+        .and_then(|value| value.as_str())
+        .is_some_and(|name| !concrete_rig_name_for_test(name))
+}
+
+fn rig_installed_record_is_prerelease(record: &serde_json::Value) -> bool {
     let name = record.get("name").and_then(|value| value.as_str());
     let aliases = record
         .get("aliases")
@@ -435,7 +443,7 @@ fn real_installed_test_r_version(test_name: &str) -> Option<String> {
 fn real_available_release_date(test_name: &str, target: &str) -> Option<String> {
     let available = rig_json_array(&["available", "--all", "--json"], test_name)?;
     available.iter().find_map(|version| {
-        if rig_record_is_symbolic(version)
+        if rig_available_record_is_symbolic(version)
             || version.get("version").and_then(|value| value.as_str()) != Some(target)
         {
             return None;
@@ -461,7 +469,7 @@ fn test_r_selection_target(test_name: &str) -> Option<(String, String)> {
 
     installed
         .iter()
-        .filter(|version| !rig_record_is_symbolic(version))
+        .filter(|version| !rig_installed_record_is_prerelease(version))
         .filter_map(|installed| {
             let version = installed.get("version")?.as_str()?;
             parse_version_parts_for_test(version)?;
@@ -469,7 +477,7 @@ fn test_r_selection_target(test_name: &str) -> Option<(String, String)> {
                 return None;
             }
             let date = available.iter().find_map(|available| {
-                if rig_record_is_symbolic(available)
+                if rig_available_record_is_symbolic(available)
                     || !rig_records_match_for_test(installed, available)
                 {
                     return None;
@@ -499,12 +507,12 @@ fn real_latest_installed_stable_r_version_for_date(
 
     installed
         .iter()
-        .filter(|version| !rig_record_is_symbolic(version))
+        .filter(|version| !rig_installed_record_is_prerelease(version))
         .filter_map(|installed| {
             let version = installed.get("version")?.as_str()?;
             parse_version_parts_for_test(version)?;
             if available.iter().any(|available| {
-                !rig_record_is_symbolic(available)
+                !rig_available_record_is_symbolic(available)
                     && rig_records_match_for_test(installed, available)
                     && available
                         .get("date")
@@ -590,6 +598,13 @@ fn compare_versions_for_test(left: &str, right: &str) -> std::cmp::Ordering {
     }
 
     std::cmp::Ordering::Equal
+}
+
+fn concrete_rig_name_for_test(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_digit())
 }
 
 fn write_r_version_probe(
@@ -2664,11 +2679,12 @@ fn run_script_frontmatter_selects_r_version() {
 }
 
 #[test]
-fn run_script_r_version_install_hint_ignores_symbolic_prereleases() {
+fn run_script_r_version_install_hint_ignores_unrequested_symbolic_available_names() {
     let _guard = e2e_lock();
-    let test_name = "run_script_r_version_install_hint_ignores_symbolic_prereleases";
-    let Some((name, version)) = real_uninstalled_symbolic_r_version(test_name) else {
-        eprintln!("SKIP {test_name}: rig has no uninstalled symbolic prerelease rows");
+    let test_name =
+        "run_script_r_version_install_hint_ignores_unrequested_symbolic_available_names";
+    let Some((name, version)) = real_uninstalled_symbolic_available_r_version(test_name) else {
+        eprintln!("SKIP {test_name}: rig has no uninstalled symbolic availability rows");
         return;
     };
     let script = unique_path("ir-r-version-symbolic-prerelease", "R");
@@ -2818,12 +2834,14 @@ fn run_script_exclude_newer_reuses_real_available_cache_for_future_date() {
     let cache_dir = unique_dir("ir-exclude-newer-real-cache");
     let cache_path = cache_dir.join("rig").join("available.json");
 
+    let started_at = current_utc_seconds();
     let first = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--vanilla"])
         .arg(&script)
         .output()
         .unwrap();
+    let finished_at = current_utc_seconds();
 
     assert_success(&first);
     assert_stdout_contains(&first, "ir.fixture=exclude-newer-real-cache");
@@ -2840,8 +2858,10 @@ fn run_script_exclude_newer_reuses_real_available_cache_for_future_date() {
     let checked_at = cache["checked_at"]
         .as_u64()
         .expect("rig available cache should record checked_at seconds");
-    assert!(checked_at <= current_utc_seconds());
-    assert!(current_utc_seconds() - checked_at <= 1);
+    assert!(
+        (started_at..=finished_at).contains(&checked_at),
+        "checked_at {checked_at} should be between {started_at} and {finished_at}"
+    );
 
     let first_modified = fs::metadata(&cache_path)
         .unwrap_or_else(|e| panic!("failed to stat {}: {e}", cache_path.display()))

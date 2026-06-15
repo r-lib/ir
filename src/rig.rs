@@ -561,12 +561,11 @@ fn released_before_or_on(version: &AvailableCandidate<'_>, exclude_newer: Option
 }
 
 fn stable_release_candidate(version: &AvailableCandidate<'_>) -> bool {
-    version.name != "devel" && version.name != "next" && parse_version(version.version).is_some()
+    concrete_rig_name(version.name) && parse_version(version.version).is_some()
 }
 
 fn stable_installed_release_candidate(version: &InstalledR) -> bool {
-    version.name != "devel"
-        && version.name != "next"
+    concrete_rig_name(&version.name)
         && !version
             .aliases
             .iter()
@@ -656,7 +655,7 @@ impl VersionRequirement {
         matches!(
             self,
             VersionRequirement::Bare(req)
-                if (version.name == "devel" || version.name == "next") && req == version.name
+                if !concrete_rig_name(version.name) && req == version.name
         )
     }
 
@@ -728,6 +727,13 @@ impl InstalledR {
 
         Ok(rscript.into_os_string())
     }
+}
+
+fn concrete_rig_name(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_digit())
 }
 
 fn parse_version(value: &str) -> Option<Vec<u64>> {
