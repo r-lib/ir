@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const EMBEDDED_AVAILABLE_BUILD_DATE: &str = "2026-06-03";
 const EMBEDDED_AVAILABLE: &[AvailableCandidate<'static>] = &[
@@ -124,6 +125,7 @@ struct AvailableR {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct AvailableRCache {
     known_through: String,
+    checked_on: String,
     versions: Vec<AvailableR>,
 }
 
@@ -341,12 +343,16 @@ fn read_cached_rig_available(
         .map_err(|e| format!("failed to parse `{}`: {e}", path.display()))?;
     let stored_known_through =
         parse_iso_date_field("rig available cache known_through", &cache.known_through)?;
+    let checked_on = parse_iso_date_field("rig available cache checked_on", &cache.checked_on)?;
     normalize_available_release_dates(&mut cache.versions)?;
     let release_known_through =
         latest_available_release_date(&cache.versions).unwrap_or(EMBEDDED_AVAILABLE_BUILD_DATE);
     let known_through = stored_known_through.as_str().min(release_known_through);
+    let cache_coverage = known_through.max(checked_on.as_str());
+    let today = current_utc_date()?;
+    let required_coverage = exclude_newer.min(today.as_str());
 
-    if known_through < exclude_newer {
+    if cache_coverage < required_coverage {
         return Ok(None);
     }
 
@@ -363,6 +369,7 @@ fn write_cached_rig_available(versions: &[AvailableR]) -> Result<(), Box<dyn Err
         known_through: latest_available_release_date(versions)
             .unwrap_or(EMBEDDED_AVAILABLE_BUILD_DATE)
             .to_string(),
+        checked_on: current_utc_date()?,
         versions: versions.to_vec(),
     };
     let json = serde_json::to_string_pretty(&cache)
@@ -516,6 +523,30 @@ fn latest_available_release_date(versions: &[AvailableR]) -> Option<&str> {
         .iter()
         .filter_map(|version| version.date.as_deref())
         .max()
+}
+
+fn current_utc_date() -> Result<String, Box<dyn Error>> {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("failed to determine current time: {e}"))?
+        .as_secs()
+        / 86_400;
+    Ok(unix_days_to_ymd(days as i64))
+}
+
+fn unix_days_to_ymd(days: i64) -> String {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let y = y + if m <= 2 { 1 } else { 0 };
+
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 fn released_before_or_on(version: &AvailableCandidate<'_>, exclude_newer: Option<&str>) -> bool {

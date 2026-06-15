@@ -186,6 +186,29 @@ fn current_utc_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+fn current_utc_date() -> String {
+    unix_days_to_ymd((current_utc_seconds() / 86_400) as i64)
+}
+
+fn yesterday_utc_date() -> String {
+    unix_days_to_ymd((current_utc_seconds() / 86_400) as i64 - 1)
+}
+
+fn unix_days_to_ymd(days: i64) -> String {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let y = y + if m <= 2 { 1 } else { 0 };
+
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 fn e2e_lock() -> MutexGuard<'static, ()> {
     E2E_LOCK
         .lock()
@@ -409,6 +432,7 @@ fn write_fake_r_install(root: &Path, name: &str, version: &str) -> PathBuf {
 #[cfg(unix)]
 struct FakeRigAvailableCache<'a> {
     known_through: &'a str,
+    checked_on: String,
     available: &'a [(&'a str, &'a str, &'a str)],
 }
 
@@ -568,6 +592,7 @@ fn run_fake_rig_exclude_newer_selection_with_options(
         fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
         let cache_json = serde_json::json!({
             "known_through": cache.known_through,
+            "checked_on": cache.checked_on,
             "versions": fake_available_json(cache.available),
         });
         fs::write(&cache_path, serde_json::to_string(&cache_json).unwrap()).unwrap();
@@ -2885,6 +2910,7 @@ fn run_script_exclude_newer_reuses_cached_available_releases_for_known_dates() {
         None,
         FakeRigAvailableCache {
             known_through: "2026-07-01",
+            checked_on: current_utc_date(),
             available: &cached_available,
         },
     );
@@ -2921,22 +2947,45 @@ fn run_script_exclude_newer_does_not_write_future_cutoff_as_cache_coverage() {
         .expect("rig available cache should be written");
     let cache: serde_json::Value = serde_json::from_str(&cache_json).unwrap();
     assert_eq!(cache["known_through"], "2026-07-01");
+    assert_eq!(cache["checked_on"], current_utc_date());
 }
 
 #[cfg(unix)]
 #[test]
-fn run_script_exclude_newer_refreshes_cache_with_future_cutoff_but_old_release_data() {
+fn run_script_exclude_newer_refreshes_cache_when_stored_coverage_exceeds_release_data() {
     let _guard = e2e_lock();
-    let cached_available = [("4.6.0", "4.6.0", "2026-04-24")];
+    let cached_available = [("4.0.4", "4.0.4", "2021-02-15")];
     let out = run_fake_rig_exclude_newer_selection_with_cache(
-        "2026-07-15",
-        &[("4.6.0", "4.6.0"), ("4.7.0", "4.7.0")],
+        "2021-04-01",
+        &[("4.0.5", "4.0.5")],
         Some(&[
-            ("4.6.0", "4.6.0", "2026-04-24"),
-            ("4.7.0", "4.7.0", "2026-07-01"),
+            ("4.0.4", "4.0.4", "2021-02-15"),
+            ("4.0.5", "4.0.5", "2021-03-31"),
         ]),
         FakeRigAvailableCache {
             known_through: "2027-01-01",
+            checked_on: "2021-03-01".to_string(),
+            available: &cached_available,
+        },
+    );
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=fake-r-selection");
+    assert_stdout_contains(&out, "version.r_version=[4.0.5]");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_script_exclude_newer_reuses_today_cache_for_future_cutoff() {
+    let _guard = e2e_lock();
+    let cached_available = [("4.7.0", "4.7.0", "2026-07-01")];
+    let out = run_fake_rig_exclude_newer_selection_with_cache(
+        "9999-01-01",
+        &[("4.7.0", "4.7.0")],
+        None,
+        FakeRigAvailableCache {
+            known_through: "2026-07-01",
+            checked_on: current_utc_date(),
             available: &cached_available,
         },
     );
@@ -2948,18 +2997,19 @@ fn run_script_exclude_newer_refreshes_cache_with_future_cutoff_but_old_release_d
 
 #[cfg(unix)]
 #[test]
-fn run_script_exclude_newer_refreshes_old_cached_available_releases() {
+fn run_script_exclude_newer_refreshes_future_cutoff_cache_checked_before_today() {
     let _guard = e2e_lock();
     let cached_available = [("4.6.0", "4.6.0", "2026-04-24")];
     let out = run_fake_rig_exclude_newer_selection_with_cache(
-        "2026-07-15",
+        "9999-01-01",
         &[("4.6.0", "4.6.0"), ("4.7.0", "4.7.0")],
         Some(&[
             ("4.6.0", "4.6.0", "2026-04-24"),
             ("4.7.0", "4.7.0", "2026-07-01"),
         ]),
         FakeRigAvailableCache {
-            known_through: "2026-06-30",
+            known_through: "1970-01-01",
+            checked_on: yesterday_utc_date(),
             available: &cached_available,
         },
     );
