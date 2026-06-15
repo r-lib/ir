@@ -353,7 +353,11 @@ fn required_available_version(
             );
         }
 
-        let available = cached_rig_available()?;
+        let available = if exclude_newer > EMBEDDED_AVAILABLE_BUILD_DATE {
+            refresh_cached_rig_available()?
+        } else {
+            cached_rig_available()?
+        };
         return required_available_version_from_candidates(
             req,
             requirement,
@@ -401,6 +405,10 @@ fn available_for_exclude_newer(
             .all(|version| embedded_available_can_decide_installed(version, exclude_newer))
     {
         return Ok(EMBEDDED_AVAILABLE.iter().map(AvailableR::from).collect());
+    }
+
+    if exclude_newer > EMBEDDED_AVAILABLE_BUILD_DATE {
+        return refresh_cached_rig_available();
     }
 
     cached_rig_available()
@@ -521,6 +529,17 @@ fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
         return parse_rig_available_json(&json);
     }
 
+    refresh_rig_available_cache(&path)
+}
+
+fn refresh_cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    let path = crate::runtime::ir_cache_dir()?
+        .join("rig")
+        .join("available-all.json");
+    refresh_rig_available_cache(&path)
+}
+
+fn refresh_rig_available_cache(path: &Path) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let available = rig_available()?;
     let json = serde_json::to_string_pretty(&available)
         .map_err(|e| format!("failed to serialize cached rig available JSON: {e}"))?;
