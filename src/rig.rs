@@ -234,7 +234,7 @@ pub fn resolve_rscript(req: &str, exclude_newer: Option<&str>) -> Result<OsStrin
 pub fn resolve_rscript_for_exclude_newer(exclude_newer: &str) -> Result<OsString, Box<dyn Error>> {
     let exclude_newer = parse_iso_date_field("exclude-newer", exclude_newer)?;
     let installed = rig_list()?;
-    let available = available_for_exclude_newer(&exclude_newer)?;
+    let available = available_for_exclude_newer(&exclude_newer, &installed)?;
 
     if let Some(installed) = installed
         .iter()
@@ -391,8 +391,13 @@ fn required_available_version_from_candidates<'a>(
         })
 }
 
-fn available_for_exclude_newer(exclude_newer: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    if embedded_available_covers_exclude_newer(exclude_newer) {
+fn available_for_exclude_newer(
+    exclude_newer: &str,
+    installed: &[InstalledR],
+) -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    if embedded_available_covers_exclude_newer(exclude_newer)
+        && installed.iter().all(embedded_available_includes_installed)
+    {
         return Ok(EMBEDDED_AVAILABLE.iter().map(AvailableR::from).collect());
     }
 
@@ -404,6 +409,13 @@ fn embedded_available_covers_exclude_newer(exclude_newer: &str) -> bool {
         && EMBEDDED_AVAILABLE
             .iter()
             .any(|version| released_before_or_on(version, Some(exclude_newer)))
+}
+
+fn embedded_available_includes_installed(installed: &InstalledR) -> bool {
+    installed_is_symbolic_prerelease(installed)
+        || EMBEDDED_AVAILABLE
+            .iter()
+            .any(|version| available_candidate_matches_installed(version, installed))
 }
 
 fn installed_released_before_or_on(
@@ -430,6 +442,18 @@ fn available_matches_installed(available: &AvailableR, installed: &InstalledR) -
             .aliases
             .iter()
             .any(|alias| alias == &available.name)
+}
+
+fn available_candidate_matches_installed(
+    available: &AvailableCandidate<'_>,
+    installed: &InstalledR,
+) -> bool {
+    available.version == installed.version
+        || available.name == installed.name
+        || installed
+            .aliases
+            .iter()
+            .any(|alias| alias == available.name)
 }
 
 fn required_available_version_for_date(
