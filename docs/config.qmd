@@ -4,8 +4,8 @@ title: Install and Configuration
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, a rig default R install, or `IR_RSCRIPT` when `r-version` is not set.
-- `rig` on `PATH` when `r-version` is set.
+- `R` / `Rscript` on `PATH`, a rig default R install, or `IR_RSCRIPT` when neither `r-version` nor `exclude-newer` is set.
+- `rig` on `PATH` when `r-version` or `exclude-newer` is set.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
@@ -38,7 +38,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
-| `IR_RSCRIPT` | runs without `r-version` | rig's default R install, then `Rscript` on `PATH` |
+| `IR_RSCRIPT` | runs without `r-version` or `exclude-newer` | rig's default R install, then `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override |
 | `IR_NO_MODIFY_PATH` | install scripts, `ir tool install` | disables automatic PATH setup when nonempty |
@@ -53,7 +53,7 @@ The default cache directory is computed before launching R.
 `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`.
 The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
 
-`IR_RSCRIPT` is ignored when `r-version` is set, because version selection is resolved through `rig`.
+`IR_RSCRIPT` is ignored when `r-version` or `exclude-newer` is set, because version selection is resolved through `rig`.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected launcher directory to the user `Path`.

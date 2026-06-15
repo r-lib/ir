@@ -281,6 +281,33 @@ fn write_executable(path: &Path, contents: &str) {
     make_executable(path);
 }
 
+#[cfg(unix)]
+fn write_fake_r_install(root: &Path, name: &str, version: &str) -> PathBuf {
+    let bin_dir = root.join(name).join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let r = bin_dir.join("R");
+    let rscript = bin_dir.join("Rscript");
+
+    write_executable(&r, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &rscript,
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "printf 'ir.fixture=fake-r-selection\\n'\n",
+                "printf 'version.r_version=[{}]\\n'\n",
+            ),
+            version
+        ),
+    );
+
+    r
+}
+
 fn python_executable() -> PathBuf {
     for command in ["python3", "python"] {
         let output = Command::new(command)
@@ -2362,6 +2389,110 @@ fn run_script_frontmatter_selects_r_version() {
     assert_stdout_contains(&out, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
     assert_stdout_contains(&out, "version.lib_in_cache=true");
     assert_stdout_contains(&out, "version.jsonlite_in_cache=true");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_script_exclude_newer_selects_latest_installed_r_released_before_date() {
+    let _guard = e2e_lock();
+    let bin_dir = unique_dir("ir-exclude-newer-r-bin");
+    let installs_dir = unique_dir("ir-exclude-newer-r-installs");
+    let cache_dir = unique_dir("ir-exclude-newer-r-cache");
+    let script = unique_path("ir-exclude-newer-r-selection", "R");
+    let list_json = unique_path("ir-exclude-newer-r-list", "json");
+    let rig = bin_dir.join("rig");
+    let fallback_rscript = bin_dir.join("wrong-Rscript");
+    let old_r = write_fake_r_install(&installs_dir, "4.1", "4.1.3");
+    let cutoff_r = write_fake_r_install(&installs_dir, "4.2", "4.2.0");
+    let future_r = write_fake_r_install(&installs_dir, "4.3", "4.3.3");
+
+    fs::write(
+        &script,
+        concat!(
+            "#!/usr/bin/env -S ir run\n",
+            "#| isolated: true\n",
+            "#| exclude-newer: \"2023-12-31\"\n",
+            "\n",
+            "cat(\"script body should be handled by fake Rscript\\n\")\n",
+        ),
+    )
+    .unwrap_or_else(|e| panic!("failed to write {}: {e}", script.display()));
+    fs::write(
+        &list_json,
+        serde_json::to_string(&vec![
+            serde_json::json!({
+                "name": "4.1",
+                "default": false,
+                "version": "4.1.3",
+                "aliases": [],
+                "binary": old_r.to_string_lossy(),
+            }),
+            serde_json::json!({
+                "name": "4.3",
+                "default": false,
+                "version": "4.3.3",
+                "aliases": [],
+                "binary": future_r.to_string_lossy(),
+            }),
+            serde_json::json!({
+                "name": "4.2",
+                "default": false,
+                "version": "4.2.0",
+                "aliases": [],
+                "binary": cutoff_r.to_string_lossy(),
+            }),
+        ])
+        .unwrap(),
+    )
+    .unwrap();
+    write_executable(
+        &rig,
+        concat!(
+            "#!/bin/sh\n",
+            "case \"$*\" in\n",
+            "  \"list --json\") printf '[INFO] fake rig\\n'; cat \"$IR_FAKE_RIG_LIST\" ;;\n",
+            "  *) echo \"unexpected rig args: $*\" >&2; exit 2 ;;\n",
+            "esac\n",
+        ),
+    );
+    write_executable(
+        &fallback_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "printf 'version.r_version=[9.9.9]\\n'\n",
+        ),
+    );
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+    let out = ir()
+        .env("PATH", path)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &fallback_rscript)
+        .env("IR_FAKE_RIG_LIST", &list_json)
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=fake-r-selection");
+    assert_stdout_contains(&out, "version.r_version=[4.2.0]");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_file(&list_json);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&installs_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
