@@ -503,15 +503,22 @@ fn available_for_exclude_newer(
     exclude_newer: &str,
     installed: &[InstalledR],
 ) -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    if exclude_newer <= EMBEDDED_AVAILABLE_BUILD_DATE {
-        return Ok(EMBEDDED_AVAILABLE
-            .iter()
-            .copied()
-            .map(AvailableR::from)
-            .collect());
+    let embedded = embedded_available();
+    if exclude_newer <= EMBEDDED_AVAILABLE_BUILD_DATE
+        || available_covers_installed_releases(&embedded, installed)
+    {
+        return Ok(embedded);
     }
 
     cached_rig_available_all_refreshing_for_installed(installed)
+}
+
+fn embedded_available() -> Vec<AvailableR> {
+    EMBEDDED_AVAILABLE
+        .iter()
+        .copied()
+        .map(AvailableR::from)
+        .collect()
 }
 
 fn installed_released_before_or_on(

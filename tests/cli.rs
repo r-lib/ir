@@ -2595,6 +2595,85 @@ fn exclude_newer_selects_installed_intermediate_r_release() {
 
 #[cfg(unix)]
 #[test]
+fn exclude_newer_uses_embedded_available_for_installed_release() {
+    let cache_dir = unique_dir("ir-exclude-newer-embedded-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-embedded-bin");
+    let rig_dir = unique_dir("ir-exclude-newer-embedded-rig");
+    let script = unique_path("ir-exclude-newer-embedded", "R");
+
+    let rig_binary = rig_dir.join("R");
+    let rig_rscript = rig_dir.join("Rscript");
+    write_executable(
+        &rig_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=4.5.0\n",
+        ),
+    );
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ \"$1\" = list ] && [ \"$2\" = --json ]; then\n",
+                "  cat <<'JSON'\n",
+                r#"[{{"name":"4.5.0","version":"4.5.0","aliases":[],"binary":"{}"}}]"#,
+                "\nJSON\n",
+                "  exit 0\n",
+                "fi\n",
+                "if [ \"$1\" = available ] && [ \"$2\" = --all ] && [ \"$3\" = --json ]; then\n",
+                "  echo offline >&2\n",
+                "  exit 2\n",
+                "fi\n",
+                "echo unexpected rig command: \"$@\" >&2\n",
+                "exit 2\n",
+            ),
+            rig_binary.display()
+        ),
+    );
+    fs::write(
+        &script,
+        concat!(
+            "#!/usr/bin/env -S ir run\n",
+            "#| exclude-newer: 2026-06-16\n",
+            "\n",
+            "cat(\"ignored\\n\")\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=4.5.0");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rig_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn exclude_newer_refreshes_stale_available_cache_for_installed_r_release() {
     let cache_dir = unique_dir("ir-exclude-newer-stale-cache");
     let bin_dir = unique_dir("ir-exclude-newer-stale-bin");
