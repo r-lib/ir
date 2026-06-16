@@ -3050,11 +3050,7 @@ fn render_without_r_version_pins_quarto_to_rscript_bat_target() {
         ),
     )
     .unwrap();
-    fs::write(
-        &doc,
-        "---\ntitle: render batch target\nir:\n  exclude-newer: 2026-06-01\n---\n",
-    )
-    .unwrap();
+    fs::write(&doc, "---\ntitle: render batch target\n---\n").unwrap();
 
     let path = std::env::join_paths(
         std::iter::once(bin_dir.as_os_str().to_owned()).chain(
@@ -4040,6 +4036,7 @@ fn tool_install_with_path_rscript_symlink_records_target() {
             "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
             "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
             "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+            "  while IFS= read -r _; do :; done\n",
             "  exit 0\n",
             "fi\n",
             "echo target-rscript\n",
