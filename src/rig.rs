@@ -461,7 +461,7 @@ fn required_available_version(
             );
         }
 
-        let available = cached_rig_available()?;
+        let available = cached_rig_available_all()?;
         return required_available_version_from_candidates(
             req,
             requirement,
@@ -508,7 +508,7 @@ fn available_for_exclude_newer(exclude_newer: &str) -> Result<Vec<AvailableR>, B
             .collect());
     }
 
-    cached_rig_available()
+    cached_rig_available_all()
 }
 
 fn installed_released_before_or_on(
@@ -563,18 +563,18 @@ fn symbolic_prerelease_name(value: &str) -> bool {
     matches!(value, "devel" | "next")
 }
 
-fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
+fn cached_rig_available_all() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let path = crate::runtime::ir_cache_dir()?
         .join("rig")
-        .join("available.json");
+        .join("available-all.json");
     if path.exists() {
         let json = fs::read_to_string(&path)
             .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
         return parse_rig_available_json(&json);
     }
 
-    let json = String::from_utf8(rig_output(&["available", "--json"])?)
-        .map_err(|e| format!("`rig available --json` returned non-UTF-8 output: {e}"))?;
+    let json = String::from_utf8(rig_output(&["available", "--all", "--json"])?)
+        .map_err(|e| format!("`rig available --all --json` returned non-UTF-8 output: {e}"))?;
     let available = parse_rig_available_json(&json)?;
     let json = serde_json::to_string_pretty(&available)
         .map_err(|e| format!("failed to serialize cached rig available JSON: {e}"))?;
@@ -588,7 +588,7 @@ fn cached_rig_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
 
 fn parse_rig_available_json(json: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let mut versions: Vec<AvailableR> = serde_json::from_str(json)
-        .map_err(|e| format!("failed to parse `rig available --json` JSON: {e}"))?;
+        .map_err(|e| format!("failed to parse `rig available --all --json` JSON: {e}"))?;
 
     for version in &mut versions {
         if let Some(date) = version.date.as_deref() {
