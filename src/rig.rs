@@ -346,6 +346,7 @@ fn available_covers_installed_releases(available: &[AvailableR], installed: &[In
     installed
         .iter()
         .filter(|version| !installed_is_symbolic_prerelease(version))
+        .filter(|version| version.rscript_path().exists())
         .all(|installed| {
             available
                 .iter()

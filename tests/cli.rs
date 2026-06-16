@@ -2934,6 +2934,89 @@ fn exclude_newer_skips_installed_r_without_rscript() {
 
 #[cfg(unix)]
 #[test]
+fn exclude_newer_ignores_broken_rscript_before_refreshing_available() {
+    let cache_dir = unique_dir("ir-exclude-newer-broken-refresh-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-broken-refresh-bin");
+    let rig_dir = unique_dir("ir-exclude-newer-broken-refresh-rig");
+    let script = unique_path("ir-exclude-newer-broken-refresh", "R");
+
+    let r453_dir = rig_dir.join("4.5.3");
+    let r470_dir = rig_dir.join("4.7.0");
+    fs::create_dir_all(&r453_dir).unwrap();
+    fs::create_dir_all(&r470_dir).unwrap();
+    write_executable(
+        &r453_dir.join("Rscript"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=4.5.3\n",
+        ),
+    );
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ \"$1\" = list ] && [ \"$2\" = --json ]; then\n",
+                "  cat <<'JSON'\n",
+                r#"[{{"name":"4.5.3","version":"4.5.3","aliases":[],"binary":"{}/R"}},{{"name":"4.7.0","version":"4.7.0","aliases":[],"binary":"{}/R"}}]"#,
+                "\nJSON\n",
+                "  exit 0\n",
+                "fi\n",
+                "if [ \"$1\" = available ] && [ \"$2\" = --all ] && [ \"$3\" = --json ]; then\n",
+                "  echo offline >&2\n",
+                "  exit 2\n",
+                "fi\n",
+                "echo unexpected rig command: \"$@\" >&2\n",
+                "exit 2\n",
+            ),
+            r453_dir.display(),
+            r470_dir.display()
+        ),
+    );
+    fs::write(
+        &script,
+        concat!(
+            "#!/usr/bin/env -S ir run\n",
+            "#| exclude-newer: 2026-06-16\n",
+            "\n",
+            "cat(\"ignored\\n\")\n",
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=4.5.3");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rig_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_without_r_version_uses_rscript_on_path_when_rig_has_default() {
     let cache_dir = unique_dir("ir-path-rscript-cache");
     let bin_dir = unique_dir("ir-path-rscript-bin");
