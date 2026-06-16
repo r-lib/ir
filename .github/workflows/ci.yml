@@ -100,6 +100,15 @@ jobs:
             -Skip rust, python, quarto, r-release
           Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=4.4.3"
 
+      - name: Warm default R package cache
+        shell: bash
+        run: |
+          "$IR_RSCRIPT" scripts/warm-renv-cache.R \
+            cli glue jsonlite dplyr tidyr reticulate fansi htmltools knitr rmarkdown quarto \
+            btw Rapp docopt pkgsearch prettyunits
+        env:
+          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+
       - run: cargo nextest run --verbose --no-fail-fast
         env:
           GITHUB_PAT: ${{ github.token }}

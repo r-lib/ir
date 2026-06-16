@@ -153,10 +153,11 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
     assert!(workflow.contains("any::bookdown"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
+    assert!(workflow.contains("Warm default R package cache"));
+    assert!(workflow.contains("shell: bash"));
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
-    assert!(!workflow.contains("Warm default R package cache"));
-    assert!(!workflow.contains("scripts/warm-renv-cache.R"));
+    assert!(workflow.contains("scripts/warm-renv-cache.R"));
     assert!(!workflow.contains("bookdown btw Rapp"));
     assert!(!workflow.contains("Warm default R package cache (Unix)"));
     assert!(!workflow.contains("Warm default R package cache (Windows)"));
