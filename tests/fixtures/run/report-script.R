@@ -4,6 +4,7 @@
 #' ir:
 #'   packages:
 #'     - glue
+#'   exclude-newer: 2026-06-01
 #' ---
 
 #' ## Rendered script

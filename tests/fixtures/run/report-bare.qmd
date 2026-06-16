@@ -1,6 +1,8 @@
 ---
 title: ir fixture bare quarto
 format: html
+ir:
+  exclude-newer: 2026-06-01
 ---
 
 ```{r}

@@ -6,6 +6,7 @@ ir:
     - dplyr
     - tidyr
     - glue
+  exclude-newer: 2026-06-01
 ---
 
 ```{r}

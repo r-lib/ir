@@ -101,7 +101,7 @@ caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to inspect the plan.
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, a rig default R install, or `IR_RSCRIPT` when neither `r-version` nor `exclude-newer` is set.
+- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT` when neither `r-version` nor `exclude-newer` is set.
 - `rig` on `PATH` when using `r-version` or `exclude-newer`.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 
