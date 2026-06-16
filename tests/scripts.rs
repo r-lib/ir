@@ -151,6 +151,22 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("scripts/install-dev-deps.sh"));
     assert!(workflow.contains("Keep the GitHub setup actions above"));
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
+    assert!(workflow.contains("any::bookdown"));
+    assert!(workflow.contains("taiki-e/install-action@nextest"));
+    assert!(workflow.contains("Warm default R package cache"));
+    assert!(workflow.contains("shell: bash"));
+    assert!(workflow.contains("R_PROFILE_USER"));
+    assert!(workflow.contains("scripts/ci-rprofile.R"));
+    assert!(workflow.contains("scripts/warm-renv-cache.R"));
+    assert!(!workflow.contains("bookdown btw Rapp"));
+    assert!(!workflow.contains("Warm default R package cache (Unix)"));
+    assert!(!workflow.contains("Warm default R package cache (Windows)"));
+    assert!(workflow.contains("cargo nextest run --verbose --no-fail-fast"));
+    assert!(!workflow.contains("cargo build --verbose"));
+    assert!(!workflow.contains("Warm non-default R package cache"));
+    assert!(!workflow.contains("scripts/warm-r-version-cache.R"));
+    assert!(!workflow.contains("cargo run --bin ir -- run --isolated --vanilla"));
+    assert!(!workflow.contains("--r-version \"$IR_TEST_R_VERSION\""));
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
     assert!(workflow.contains("-Skip rust, python, quarto, r-release"));
@@ -164,6 +180,16 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow.contains("Install rig (macOS)"));
     assert!(!workflow.contains("Warm resolver tooling for the non-default R"));
     assert!(!workflow.contains("pak::pkg_install(c(\"pak\", \"renv\", \"secretbase\"))"));
+}
+
+#[test]
+fn cli_tests_do_not_use_global_e2e_lock() {
+    let path = repo_root().join("tests/cli.rs");
+    let tests = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+
+    assert!(!tests.contains("static E2E_LOCK"), "use per-test isolation");
+    assert!(!tests.contains("e2e_lock()"), "use per-test isolation");
 }
 
 #[test]

@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
@@ -48,6 +49,7 @@ jobs:
             any::knitr
             any::rmarkdown
             any::quarto
+            any::bookdown
             any::btw
             any::Rapp
             any::docopt
@@ -98,10 +100,19 @@ jobs:
             -Skip rust, python, quarto, r-release
           Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=4.4.3"
 
-      - run: cargo build --verbose
-      - run: cargo test --verbose
+      - name: Warm default R package cache
+        shell: bash
+        run: |
+          "$IR_RSCRIPT" scripts/warm-renv-cache.R \
+            cli glue jsonlite dplyr tidyr reticulate fansi htmltools knitr rmarkdown quarto \
+            btw Rapp docopt pkgsearch prettyunits
+        env:
+          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+
+      - run: cargo nextest run --verbose --no-fail-fast
         env:
           GITHUB_PAT: ${{ github.token }}
+          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
 
   lint:
     name: rustfmt + clippy
