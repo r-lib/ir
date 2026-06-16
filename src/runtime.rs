@@ -527,11 +527,23 @@ fn resolved_windows_rscript_batch_target(path: &Path) -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn windows_rscript_target(target: &Path) -> Option<PathBuf> {
-    if target.is_file() {
+    if target.is_file() && is_windows_rscript_target(target) {
         return Some(absolute_path(target));
     }
     let exe = target.with_extension("exe");
-    exe.is_file().then(|| absolute_path(&exe))
+    (exe.is_file() && is_windows_rscript_target(&exe)).then(|| absolute_path(&exe))
+}
+
+#[cfg(windows)]
+fn is_windows_rscript_target(path: &Path) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "rscript" | "rscript.exe"
+            )
+        })
 }
 
 fn absolute_path(path: &Path) -> PathBuf {

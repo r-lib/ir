@@ -2794,6 +2794,54 @@ fn run_with_extended_rscript_command_skips_pathext_expansion() {
 
 #[cfg(windows)]
 #[test]
+fn run_without_r_version_ignores_non_rscript_batch_targets() {
+    let cache_dir = unique_dir("ir-path-rscript-helper-target-cache");
+    let bin_dir = unique_dir("ir-path-rscript-helper-target-bin");
+    let helper = bin_dir.join("helper.exe");
+
+    fs::write(&helper, "not an executable\r\n").unwrap();
+    fs::write(
+        bin_dir.join("Rscript.bat"),
+        format!(
+            concat!(
+                "@echo off\r\n",
+                "\"{}\"\r\n",
+                "if not \"%IR_RESOLVE_RESULT_FILE%\"==\"\" (\r\n",
+                "  type NUL > \"%IR_RESOLVE_RESULT_FILE%\"\r\n",
+                "  exit /B 0\r\n",
+                ")\r\n",
+                "echo selected=bat\r\n",
+            ),
+            helper.display()
+        ),
+    )
+    .unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=bat");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(windows)]
+#[test]
 fn run_without_r_version_does_not_cache_unresolved_rscript_bat() {
     let cache_dir = unique_dir("ir-path-rscript-bat-cache-miss");
     let bin_dir = unique_dir("ir-path-rscript-bat-bin");
