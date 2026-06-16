@@ -336,14 +336,20 @@ fn cached_rig_available_all_refreshing_if(
 }
 
 fn available_covers_installed_releases(available: &[AvailableR], installed: &[InstalledR]) -> bool {
-    installed
+    let mut has_installed_release = false;
+    for installed in installed
         .iter()
         .filter(|version| !installed_is_symbolic_prerelease(version))
-        .all(|installed| {
-            available.iter().any(|available| {
-                available.date.is_some() && available_matches_installed(available, installed)
-            })
-        })
+    {
+        has_installed_release = true;
+        if !available.iter().any(|available| {
+            available.date.is_some() && available_matches_installed(available, installed)
+        }) {
+            return false;
+        }
+    }
+
+    has_installed_release
 }
 
 fn refresh_cached_rig_available_all(path: &Path) -> Result<Vec<AvailableR>, Box<dyn Error>> {

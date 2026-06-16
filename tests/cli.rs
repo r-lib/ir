@@ -2715,6 +2715,91 @@ fn exclude_newer_refreshes_cached_undated_installed_release() {
 
 #[cfg(unix)]
 #[test]
+fn exclude_newer_refreshes_available_before_install_suggestion_without_installed_release() {
+    let script = unique_path("ir-exclude-newer-refresh-empty", "R");
+    let cache_dir = test_cache("ir-exclude-newer-refresh-empty-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-refresh-empty-bin");
+    let called_available = unique_path("ir-exclude-newer-refresh-empty-called", "txt");
+
+    fs::write(
+        &script,
+        concat!(
+            "#!/usr/bin/env -S ir run\n",
+            "#| isolated: true\n",
+            "#| exclude-newer: \"2026-06-16\"\n",
+            "\n",
+            "cat(\"ignored\\n\")\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  'list --json')\n",
+                "    echo '[]'\n",
+                "    ;;\n",
+                "  'available --all --json')\n",
+                "    : > '{}'\n",
+                "    cat <<'JSON'\n",
+                "[\n",
+                r#"  {{"name":"4.6.0","version":"4.6.0","date":"2026-04-24"}},"#,
+                "\n",
+                r#"  {{"name":"4.7.0","version":"4.7.0","date":"2026-06-10"}}"#,
+                "\n",
+                "]\n",
+                "JSON\n",
+                "    ;;\n",
+                "  *)\n",
+                "    echo \"unexpected rig args: $*\" >&2\n",
+                "    exit 43\n",
+                "    ;;\n",
+                "esac\n",
+            ),
+            called_available.display()
+        ),
+    );
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        called_available.exists(),
+        "empty rig installs should refresh `rig available --all` before suggesting an install"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("Run `rig install 4.7.0` to install R 4.7.0."),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_file(&called_available);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_without_r_version_uses_rscript_on_path_when_rig_has_default() {
     let cache_dir = unique_dir("ir-path-rscript-cache");
     let bin_dir = unique_dir("ir-path-rscript-bin");
