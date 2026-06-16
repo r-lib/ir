@@ -36,7 +36,7 @@ The script frontmatter supports:
 - `packages`: package refs resolved with pak.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig.
 - `isolated`: `true` disables the user library for the run.
-- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When `r-version` is omitted, `ir` also selects the newest installed R version released on or before that date.
+- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When `r-version` is omitted, `ir` also selects the latest installed patch from the newest installed R minor line available by that date.
 
 Supported version specs include `pkg`, `pkg>=1.0`, and `pkg==1.2`.
 Source refs are resolved with pak and then passed through to renv, including GitHub, GitLab, Bitbucket, git, URL, and local package refs in forms both tools accept.

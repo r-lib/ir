@@ -2450,25 +2450,25 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
 }
 
 #[test]
-fn exclude_newer_selects_r_version_from_real_rig() {
+fn exclude_newer_selects_latest_installed_patch_from_real_rig() {
     const FIXTURE_R_VERSION: &str = "4.4.3";
-    const FIXTURE_R_RELEASE_DATE: &str = "2025-02-28";
+    const FIXTURE_EXCLUDE_NEWER: &str = "2024-12-01";
 
     let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
         eprintln!(
-            "SKIP exclude_newer_selects_r_version_from_real_rig: set IR_TEST_R_VERSION={FIXTURE_R_VERSION}"
+            "SKIP exclude_newer_selects_latest_installed_patch_from_real_rig: set IR_TEST_R_VERSION={FIXTURE_R_VERSION}"
         );
         return;
     };
     if target != FIXTURE_R_VERSION {
         eprintln!(
-            "SKIP exclude_newer_selects_r_version_from_real_rig: IR_TEST_R_VERSION ({target}) must be {FIXTURE_R_VERSION}"
+            "SKIP exclude_newer_selects_latest_installed_patch_from_real_rig: IR_TEST_R_VERSION ({target}) must be {FIXTURE_R_VERSION}"
         );
         return;
     }
     if default_r_version().as_deref() == Some(FIXTURE_R_VERSION) {
         eprintln!(
-            "SKIP exclude_newer_selects_r_version_from_real_rig: default R already matches {FIXTURE_R_VERSION}"
+            "SKIP exclude_newer_selects_latest_installed_patch_from_real_rig: default R already matches {FIXTURE_R_VERSION}"
         );
         return;
     }
@@ -2486,7 +2486,7 @@ fn exclude_newer_selects_r_version_from_real_rig() {
                 "cat(\"ir.fixture=exclude-newer-r-selection\\n\")\n",
                 "cat(\"version.r_version=[\", as.character(getRversion()), \"]\\n\", sep = \"\")\n",
             ),
-            FIXTURE_R_RELEASE_DATE
+            FIXTURE_EXCLUDE_NEWER
         ),
     )
     .unwrap();

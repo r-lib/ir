@@ -31,7 +31,7 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 
 - **The file explains itself.** Package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use `r-version` to select an installed R, or `exclude-newer` to resolve packages and select the newest installed R released on or before a specific date.
+- **Reproducibility is explicit.** Use `r-version` to select an installed R, or `exclude-newer` to resolve packages and select the latest installed patch from the newest installed R minor line available by that date.
 - **It works with normal R habits.** Forward `Rscript` options, render Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers for R, Rapp, and direct executable scripts without setting up a project by hand.
 

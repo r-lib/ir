@@ -80,7 +80,9 @@ pub fn resolve_rscript_for_exclude_newer(exclude_newer: &str) -> Result<OsString
     if let Some(installed) = installed
         .iter()
         .filter(|version| !installed_is_symbolic_prerelease(version))
-        .filter(|version| installed_released_before_or_on(version, &available, &exclude_newer))
+        .filter(|version| {
+            installed_minor_released_before_or_on(version, &available, &exclude_newer)
+        })
         .max_by(|a, b| compare_versions(&a.version, &b.version))
     {
         return installed.rscript();
@@ -237,13 +239,20 @@ fn embedded_available_candidates() -> impl Iterator<Item = AvailableCandidate<'s
         })
 }
 
-fn installed_released_before_or_on(
+fn installed_minor_released_before_or_on(
     installed: &InstalledR,
     available: &[AvailableR],
     exclude_newer: &str,
 ) -> bool {
+    let Some(installed_minor) = minor_version(&installed.version) else {
+        return false;
+    };
+
     available.iter().any(|version| {
-        available_matches_installed(version, installed)
+        let Some(available_minor) = minor_version(&version.version) else {
+            return false;
+        };
+        available_minor == installed_minor
             && version
                 .date
                 .as_deref()
@@ -498,6 +507,11 @@ fn parse_version(value: &str) -> Option<Vec<u64>> {
     } else {
         Some(parts)
     }
+}
+
+fn minor_version(value: &str) -> Option<[u64; 2]> {
+    let version = parse_version(value)?;
+    Some([*version.first()?, *version.get(1)?])
 }
 
 fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
