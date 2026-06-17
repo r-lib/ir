@@ -20,8 +20,8 @@
 # The helpers below are pure and side-effect free. The pipeline runs only when
 # this file is executed as a script -- `sys.nframe() == 0L` is false when the
 # file is sourced. End-to-end coverage lives in the Rust CLI tests
-# (tests/cli.rs), which drive this resolver through real renders and package
-# executions.
+# (tests/run.rs, tests/render.rs, and tests/tool.rs), which drive this resolver
+# through real renders and package executions.
 
 ## --- resolver input ---------------------------------------------------------
 

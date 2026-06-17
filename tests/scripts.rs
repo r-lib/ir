@@ -154,6 +154,9 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("any::bookdown"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(workflow.contains("Warm default R package cache"));
+    assert!(workflow.contains("Warm snapshot R package cache"));
+    assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
+    assert!(workflow.contains("rmarkdown bookdown tinytex"));
     assert!(workflow.contains("shell: bash"));
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
@@ -184,9 +187,20 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
 
 #[test]
 fn cli_tests_do_not_use_global_e2e_lock() {
-    let path = repo_root().join("tests/cli.rs");
-    let tests = fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let tests = [
+        "tests/run.rs",
+        "tests/rig_selection.rs",
+        "tests/render.rs",
+        "tests/tool.rs",
+        "tests/support/mod.rs",
+    ]
+    .into_iter()
+    .map(|path| {
+        let path = repo_root().join(path);
+        fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    })
+    .collect::<String>();
 
     assert!(!tests.contains("static E2E_LOCK"), "use per-test isolation");
     assert!(!tests.contains("e2e_lock()"), "use per-test isolation");
