@@ -216,7 +216,7 @@ fn fetch_available_into_cache(
         fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create `{}`: {e}", parent.display()))?;
     }
-    fs::write(&path, json).map_err(|e| format!("failed to write `{}`: {e}", path.display()))?;
+    fs::write(path, json).map_err(|e| format!("failed to write `{}`: {e}", path.display()))?;
     Ok(available)
 }
 
