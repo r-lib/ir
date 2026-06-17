@@ -1462,6 +1462,40 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
     .unwrap();
 }
 
+fn append_tooling_stale_unlink_barrier(profile: &Path, lock: &Path, barrier: &Path) {
+    let mut profile_code = fs::read_to_string(profile).unwrap();
+    profile_code.push_str(&format!(
+        r#"
+ir_test_unlink <- base::unlink
+unlink <- function(x, recursive = FALSE, force = FALSE, ...) {{
+  target <- normalizePath({lock}, winslash = "/", mustWork = FALSE)
+  actual <- normalizePath(x, winslash = "/", mustWork = FALSE)
+  if (identical(actual, target)) {{
+    barrier <- {barrier}
+    dir.create(barrier, recursive = TRUE, showWarnings = FALSE)
+    marker <- file.path(barrier, paste0(Sys.getpid(), ".unlink"))
+    if (!file.exists(marker)) {{
+      writeLines("entered", marker)
+      deadline <- Sys.time() + 0.8
+      while (length(list.files(barrier, pattern = "\\\\.unlink$")) < 2 &&
+             Sys.time() < deadline) {{
+        Sys.sleep(0.02)
+      }}
+      delay <- suppressWarnings(
+        as.numeric(Sys.getenv("IR_TEST_STALE_UNLINK_DELAY_SECONDS"))
+      )
+      if (!is.na(delay) && delay > 0) Sys.sleep(delay)
+    }}
+  }}
+  ir_test_unlink(x, recursive = recursive, force = force, ...)
+}}
+"#,
+        lock = r_string(lock),
+        barrier = r_string(barrier),
+    ));
+    fs::write(profile, profile_code).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
@@ -1537,6 +1571,73 @@ fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn concurrent_resolvers_do_not_remove_reclaimed_tooling_bootstrap_lock() {
+    let cache_dir = unique_dir("ir-tooling-bootstrap-stale-race-cache");
+    let user_library = unique_dir("ir-tooling-bootstrap-stale-race-user-library");
+    let profile = unique_path("ir-tooling-bootstrap-stale-race-profile", "R");
+    let active = unique_path("ir-tooling-bootstrap-stale-race-active", "");
+    let overlap = unique_path("ir-tooling-bootstrap-stale-race-overlap", "txt");
+    let barrier = unique_dir("ir-tooling-bootstrap-stale-race-barrier");
+    let lock = cache_dir.join("locks").join("tooling-bootstrap.lock");
+
+    fs::create_dir_all(&lock).unwrap();
+    fs::write(lock.join("owner.pid"), "999999999\n").unwrap();
+    write_tooling_install_lock_profile(&profile, &active, &overlap);
+    append_tooling_stale_unlink_barrier(&profile, &lock, &barrier);
+
+    let mut first = ir();
+    first
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_STALE_UNLINK_DELAY_SECONDS", "0")
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=stale-race-one\\n')",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let first = first.spawn().unwrap();
+
+    let second = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_STALE_UNLINK_DELAY_SECONDS", "0.25")
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=stale-race-two\\n')",
+        ])
+        .output()
+        .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=stale-race-one");
+    assert_stdout_contains(&second, "ir.fixture=stale-race-two");
+    assert!(!overlap.exists(), "tooling install should not overlap");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&barrier);
+    let _ = fs::remove_dir_all(&user_library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
 #[test]
 fn resolver_reclaims_stale_tooling_bootstrap_lock() {
     let cache_dir = unique_dir("ir-tooling-bootstrap-stale-lock-cache");
@@ -1571,6 +1672,66 @@ fn resolver_reclaims_stale_tooling_bootstrap_lock() {
     assert_stdout_contains(&out, "ir.fixture=stale-tooling-lock");
     assert!(!lock.exists(), "tooling bootstrap lock should be released");
 
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&user_library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn resolver_waits_for_live_tooling_bootstrap_lock_owner_on_windows() {
+    let cache_dir = unique_dir("ir-tooling-bootstrap-live-owner-cache");
+    let user_library = unique_dir("ir-tooling-bootstrap-live-owner-user-library");
+    let profile = unique_path("ir-tooling-bootstrap-live-owner-profile", "R");
+    let active = unique_path("ir-tooling-bootstrap-live-owner-active", "");
+    let overlap = unique_path("ir-tooling-bootstrap-live-owner-overlap", "txt");
+    let lock = cache_dir.join("locks").join("tooling-bootstrap.lock");
+
+    let mut owner = Command::new(rscript())
+        .args(["--vanilla", "-e", "Sys.sleep(30)"])
+        .spawn()
+        .unwrap();
+
+    fs::create_dir_all(&lock).unwrap();
+    fs::write(lock.join("owner.pid"), format!("{}\n", owner.id())).unwrap();
+    write_tooling_install_lock_profile(&profile, &active, &overlap);
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TOOLING_LOCK_TIMEOUT_SECONDS", "0.3")
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=live-tooling-owner\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "live tooling owner should keep the lock\n{}",
+        output_text(&out)
+    );
+    assert!(
+        output_text(&out).contains("timed out waiting for resolver tooling lock"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        owner.try_wait().unwrap().is_none(),
+        "lock owner process should still be alive after the resolver checks it"
+    );
+
+    let _ = owner.kill();
+    let _ = owner.wait();
     let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&overlap);
     let _ = fs::remove_dir_all(&active);

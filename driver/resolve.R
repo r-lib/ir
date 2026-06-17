@@ -174,6 +174,9 @@ ir_tooling_lock_path <- function(cache_dir = ir_cache_dir())
 ir_dir_lock_owner_path <- function(path)
   file.path(path, "owner.pid")
 
+ir_dir_lock_reclaim_path <- function(path)
+  paste0(path, ".reclaim")
+
 ir_tooling_lock_timeout_seconds <- function() {
   env <- Sys.getenv("IR_TOOLING_LOCK_TIMEOUT_SECONDS")
   if (!nzchar(env)) return(3600)
@@ -186,9 +189,36 @@ ir_tooling_lock_timeout_seconds <- function() {
   seconds
 }
 
+ir_windows_process_alive <- function(pid) {
+  out <- tryCatch(
+    system2("tasklist",
+            c("/FI", sprintf("PID eq %d", pid), "/FO", "CSV", "/NH"),
+            stdout = TRUE, stderr = TRUE),
+    error = function(e) {
+      stop("could not query process liveness with tasklist: ",
+           conditionMessage(e), call. = FALSE)
+    }
+  )
+
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0)
+    stop("could not query process liveness with tasklist", call. = FALSE)
+
+  rows <- tryCatch(
+    utils::read.csv(text = paste(out, collapse = "\n"), header = FALSE,
+                    stringsAsFactors = FALSE),
+    error = function(e) NULL
+  )
+  if (is.null(rows) || ncol(rows) < 2L) return(FALSE)
+
+  any(suppressWarnings(as.integer(rows[[2L]])) == pid)
+}
+
 ir_process_alive <- function(pid) {
   pid <- suppressWarnings(as.integer(pid))
   if (length(pid) != 1L || is.na(pid) || pid <= 0L) return(FALSE)
+
+  if (.Platform$OS.type == "windows") return(ir_windows_process_alive(pid))
 
   isTRUE(tryCatch(tools::pskill(pid, 0), error = function(e) FALSE))
 }
@@ -202,19 +232,30 @@ ir_dir_lock_owner_pid <- function(path) {
   pid
 }
 
-ir_dir_lock_age_seconds <- function(path) {
+ir_dir_lock_state <- function(path) {
   info <- file.info(path)
-  if (is.na(info$mtime)) return(NA_real_)
+  mtime <- if (is.na(info$mtime)) NA_real_ else as.numeric(info$mtime)
 
-  as.numeric(difftime(Sys.time(), info$mtime, units = "secs"))
+  list(
+    exists = dir.exists(path),
+    owner_pid = ir_dir_lock_owner_pid(path),
+    mtime = mtime
+  )
 }
 
-ir_dir_lock_stale <- function(path) {
-  pid <- ir_dir_lock_owner_pid(path)
-  if (!is.na(pid)) return(!ir_process_alive(pid))
+ir_dir_lock_state_stale <- function(state) {
+  if (!state$exists) return(FALSE)
+  if (!is.na(state$owner_pid)) return(!ir_process_alive(state$owner_pid))
 
-  age <- ir_dir_lock_age_seconds(path)
-  !is.na(age) && age >= 5
+  if (is.na(state$mtime)) return(FALSE)
+  (as.numeric(Sys.time()) - state$mtime) >= 5
+}
+
+ir_dir_lock_same_state <- function(path, state) {
+  current <- ir_dir_lock_state(path)
+  identical(current$exists, state$exists) &&
+    identical(current$owner_pid, state$owner_pid) &&
+    identical(current$mtime, state$mtime)
 }
 
 ir_dir_lock_write_owner <- function(path, label) {
@@ -229,6 +270,25 @@ ir_dir_lock_write_owner <- function(path, label) {
   )
 }
 
+ir_dir_lock_reclaim_stale <- function(path, state) {
+  if (!ir_dir_lock_state_stale(state)) return(FALSE)
+
+  reclaim <- ir_dir_lock_reclaim_path(path)
+  if (!dir.create(reclaim, showWarnings = FALSE)) return(FALSE)
+  on.exit(unlink(reclaim, recursive = TRUE, force = TRUE), add = TRUE)
+
+  if (!ir_dir_lock_same_state(path, state)) return(FALSE)
+  if (!ir_dir_lock_state_stale(ir_dir_lock_state(path))) return(FALSE)
+
+  unlink(path, recursive = TRUE, force = TRUE)
+  TRUE
+}
+
+ir_dir_lock_release <- function(path) {
+  if (identical(ir_dir_lock_owner_pid(path), as.integer(Sys.getpid())))
+    unlink(path, recursive = TRUE, force = TRUE)
+}
+
 ir_dir_lock_acquire <- function(path, timeout_seconds, label) {
   stopifnot(length(path) == 1L, length(timeout_seconds) == 1L,
             length(label) == 1L)
@@ -241,10 +301,9 @@ ir_dir_lock_acquire <- function(path, timeout_seconds, label) {
       return(invisible())
     }
 
-    if (ir_dir_lock_stale(path)) {
-      unlink(path, recursive = TRUE, force = TRUE)
+    state <- ir_dir_lock_state(path)
+    if (ir_dir_lock_reclaim_stale(path, state))
       next
-    }
 
     if ((proc.time()[["elapsed"]] - started) >= timeout_seconds)
       stop("timed out waiting for ", label, " lock: ", path, call. = FALSE)
@@ -257,7 +316,7 @@ ir_with_tooling_lock <- function(expr, cache_dir = ir_cache_dir()) {
   lock <- ir_tooling_lock_path(cache_dir)
   ir_dir_lock_acquire(lock, ir_tooling_lock_timeout_seconds(),
                       "resolver tooling")
-  on.exit(unlink(lock, recursive = TRUE, force = TRUE), add = TRUE)
+  on.exit(ir_dir_lock_release(lock), add = TRUE)
 
   force(expr)
 }
