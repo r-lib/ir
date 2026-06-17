@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -145,6 +145,14 @@ fn resolve_library_inner(
         });
     }
 
+    let _resolver_lock = FileLock::acquire(&cache_dir.join("locks").join("resolver.lock"))?;
+    if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
+        return Ok(ResolvedLibrary {
+            library: Some(resolved.library),
+            primary_package: resolved.primary_package,
+        });
+    }
+
     let tmp = env::temp_dir();
     let driver = unique_path(&tmp, "ir-resolve", "R");
     let result_file = unique_path(&tmp, "ir-libpath", "txt");
@@ -226,6 +234,27 @@ fn resolve_library_inner(
         library,
         primary_package,
     })
+}
+
+struct FileLock {
+    _file: fs::File,
+}
+
+impl FileLock {
+    fn acquire(path: &Path) -> Result<Self, Box<dyn Error>> {
+        fs::create_dir_all(path.parent().ok_or("resolver lock path has no parent")?)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .map_err(|e| format!("failed to open resolver lock `{}`: {e}", path.display()))?;
+        file.lock()
+            .map_err(|e| format!("failed to lock resolver cache `{}`: {e}", path.display()))?;
+
+        Ok(Self { _file: file })
+    }
 }
 
 fn normalized_dependencies(dependencies: &[String]) -> Vec<String> {

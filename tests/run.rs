@@ -6,7 +6,9 @@ use support::*;
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[test]
 fn ci_dependencies_are_available() {
@@ -1239,6 +1241,197 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
     let _ = fs::remove_file(&renviron);
     let _ = fs::remove_dir_all(&renviron_cache);
     let _ = fs::remove_dir_all(&xdg_cache_home);
+}
+
+fn write_resolver_lock_profile(profile: &Path) {
+    fs::write(
+        profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  local({
+    active <- Sys.getenv("IR_TEST_ACTIVE")
+    if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {
+      writeLines("overlap", Sys.getenv("IR_TEST_OVERLAP"))
+      stop("resolve.R overlapped", call. = FALSE)
+    }
+    on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)
+    cat(Sys.getpid(), "\n", file = Sys.getenv("IR_TEST_ENTERED"), append = TRUE)
+    Sys.sleep(as.numeric(Sys.getenv("IR_TEST_SLEEP", "0")))
+  })
+}
+"#,
+    )
+    .unwrap();
+}
+
+fn resolver_lock_command(
+    cache_dir: &Path,
+    profile: &Path,
+    active: &Path,
+    overlap: &Path,
+    entered: &Path,
+    package: Option<&str>,
+    label: &str,
+) -> Command {
+    let mut cmd = ir();
+    cmd.env("IR_CACHE_DIR", cache_dir)
+        .env("R_PROFILE_USER", profile)
+        .env("IR_TEST_ACTIVE", active)
+        .env("IR_TEST_OVERLAP", overlap)
+        .env("IR_TEST_ENTERED", entered)
+        .env("IR_TEST_SLEEP", "1")
+        .args(["run", "--isolated"]);
+    if let Some(package) = package {
+        cmd.args(["--with", package]);
+    }
+    cmd.args(["--vanilla", "-e"])
+        .arg(format!("cat('ir.fixture={label}\\n')"));
+    cmd
+}
+
+fn spawn_resolver_for_lock_test(
+    cache_dir: &Path,
+    profile: &Path,
+    active: &Path,
+    overlap: &Path,
+    entered: &Path,
+    package: Option<&str>,
+    label: &str,
+) -> std::process::Child {
+    let mut cmd =
+        resolver_lock_command(cache_dir, profile, active, overlap, entered, package, label);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.spawn().unwrap()
+}
+
+fn wait_for_resolver_probe(mut child: std::process::Child, active: &Path) -> std::process::Child {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !active.exists() && Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "resolver exited before the test profile probe\n{}",
+                output_text(&output)
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        active.exists(),
+        "resolver should enter the test profile probe before the second run starts"
+    );
+    child
+}
+
+fn resolver_probe_count(entered: &Path) -> usize {
+    fs::read_to_string(entered)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()))
+        .lines()
+        .count()
+}
+
+#[test]
+fn concurrent_resolvers_serialize_same_dependency_resolution() {
+    let cache_dir = unique_dir("ir-same-resolution-lock-cache");
+    let profile = unique_path("ir-same-resolution-lock-profile", "R");
+    let active = unique_path("ir-same-resolution-lock-active", "");
+    let entered = unique_path("ir-same-resolution-lock-entered", "txt");
+    let overlap = unique_path("ir-same-resolution-lock-overlap", "txt");
+
+    write_resolver_lock_profile(&profile);
+
+    let first = spawn_resolver_for_lock_test(
+        &cache_dir,
+        &profile,
+        &active,
+        &overlap,
+        &entered,
+        None,
+        "resolution-lock-one",
+    );
+    let first = wait_for_resolver_probe(first, &active);
+
+    let second = resolver_lock_command(
+        &cache_dir,
+        &profile,
+        &active,
+        &overlap,
+        &entered,
+        None,
+        "resolution-lock-two",
+    )
+    .output()
+    .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=resolution-lock-one");
+    assert_stdout_contains(&second, "ir.fixture=resolution-lock-two");
+    assert!(!overlap.exists(), "resolve.R should not overlap");
+    assert_eq!(
+        resolver_probe_count(&entered),
+        1,
+        "second resolver should reuse the completed resolution marker"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn concurrent_resolvers_serialize_different_dependency_resolution() {
+    let cache_dir = unique_dir("ir-resolution-overlap-cache");
+    let profile = unique_path("ir-resolution-overlap-profile", "R");
+    let active = unique_path("ir-resolution-overlap-active", "");
+    let entered = unique_path("ir-resolution-overlap-entered", "txt");
+    let overlap = unique_path("ir-resolution-overlap", "txt");
+
+    write_resolver_lock_profile(&profile);
+
+    let first = spawn_resolver_for_lock_test(
+        &cache_dir,
+        &profile,
+        &active,
+        &overlap,
+        &entered,
+        None,
+        "resolution-one",
+    );
+    let first = wait_for_resolver_probe(first, &active);
+
+    let second = resolver_lock_command(
+        &cache_dir,
+        &profile,
+        &active,
+        &overlap,
+        &entered,
+        Some("cli"),
+        "resolution-two",
+    )
+    .output()
+    .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=resolution-one");
+    assert_stdout_contains(&second, "ir.fixture=resolution-two");
+    assert!(!overlap.exists(), "resolve.R should not overlap");
+    assert_eq!(
+        resolver_probe_count(&entered),
+        2,
+        "different dependencies should both resolve, but not concurrently"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
