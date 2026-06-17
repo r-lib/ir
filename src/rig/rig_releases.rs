@@ -7,9 +7,6 @@ use super::rig_client::{self, AvailableR};
 
 include!(concat!(env!("OUT_DIR"), "/r_version_releases.rs"));
 
-// Older neutral source releases are not uniformly available through rig binaries.
-const EMBEDDED_INSTALL_HINT_MIN_VERSION: [u64; 3] = [4, 1, 0];
-
 pub(crate) fn required_available_version(
     req: &str,
     requirement: &VersionRequirement,
@@ -22,19 +19,14 @@ pub(crate) fn required_available_version(
                 requirement,
                 Some(exclude_newer),
                 EMBEDDED_R_RELEASES.iter().map(AvailableCandidate::from),
-            )?;
-            if embedded_install_hint_is_safe(&embedded.version) {
-                return Ok(embedded);
+            );
+            if embedded.is_ok() || requirement_uses_symbolic_name(requirement) {
+                return required_available_version_from_host(req, requirement, Some(exclude_newer));
             }
+            return embedded;
         }
 
-        let available = cached_release_metadata()?;
-        return required_available_version_from_candidates(
-            req,
-            requirement,
-            Some(exclude_newer),
-            available.iter().map(AvailableCandidate::from),
-        );
+        return required_available_version_from_host(req, requirement, Some(exclude_newer));
     }
 
     let available = rig_client::available()?;
@@ -54,6 +46,30 @@ fn required_available_version_from_candidates<'a>(
 ) -> Result<AvailableR, Box<dyn Error>> {
     r_selection::select_available_candidate(req, requirement, exclude_newer, candidates)
         .map(AvailableR::from)
+}
+
+fn required_available_version_from_host(
+    req: &str,
+    requirement: &VersionRequirement,
+    exclude_newer: Option<&str>,
+) -> Result<AvailableR, Box<dyn Error>> {
+    if requirement_uses_symbolic_name(requirement) {
+        let available = rig_client::available()?;
+        return required_available_version_from_candidates(
+            req,
+            requirement,
+            exclude_newer,
+            available.iter().map(AvailableCandidate::from),
+        );
+    }
+
+    let available = cached_release_metadata()?;
+    required_available_version_from_candidates(
+        req,
+        requirement,
+        exclude_newer,
+        available.iter().map(AvailableCandidate::from),
+    )
 }
 
 fn cached_release_metadata() -> Result<Vec<ReleaseMetadata<'static>>, Box<dyn Error>> {
@@ -88,11 +104,8 @@ fn download_available_json() -> Result<String, Box<dyn Error>> {
     Ok(json)
 }
 
-fn embedded_install_hint_is_safe(version: &str) -> bool {
-    let Some(version) = parse_version(version) else {
-        return false;
-    };
-    compare_version_parts(&version, &EMBEDDED_INSTALL_HINT_MIN_VERSION).is_ge()
+fn requirement_uses_symbolic_name(requirement: &VersionRequirement) -> bool {
+    matches!(requirement, VersionRequirement::Bare(req) if parse_version(req).is_none())
 }
 
 fn parse_version(value: &str) -> Option<Vec<u64>> {
@@ -108,19 +121,6 @@ fn parse_version(value: &str) -> Option<Vec<u64>> {
     } else {
         Some(parts)
     }
-}
-
-fn compare_version_parts(a: &[u64], b: &[u64]) -> std::cmp::Ordering {
-    let len = a.len().max(b.len());
-    for idx in 0..len {
-        let left = a.get(idx).copied().unwrap_or(0);
-        let right = b.get(idx).copied().unwrap_or(0);
-        match left.cmp(&right) {
-            std::cmp::Ordering::Equal => {}
-            other => return other,
-        }
-    }
-    std::cmp::Ordering::Equal
 }
 
 impl<'a> From<&'a AvailableR> for AvailableCandidate<'a> {

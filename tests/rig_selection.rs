@@ -174,16 +174,17 @@ fn run_with_r_version_selects_highest_matching_installed_r() {
 
 #[cfg(unix)]
 #[test]
-fn run_with_exclude_newer_uses_embedded_neutral_metadata_without_refresh() {
-    let cache_dir = unique_dir("ir-r-version-embedded-common-cache");
-    let bin_dir = unique_dir("ir-r-version-embedded-common-bin");
-    let script = unique_path("ir-r-version-embedded-common", "R");
+fn run_with_exclude_newer_verifies_embedded_releases_with_rig_available() {
+    let cache_dir = unique_dir("ir-r-version-embedded-verify-cache");
+    let bin_dir = unique_dir("ir-r-version-embedded-verify-bin");
+    let script = unique_path("ir-r-version-embedded-verify", "R");
+    let metadata_calls = unique_path("ir-r-version-embedded-verify-calls", "txt");
 
     fs::write(
         &script,
         concat!(
-            "#| r-version: \"4.4.3\"\n",
-            "#| exclude-newer: 2025-03-01\n",
+            "#| r-version: \"4.5.1\"\n",
+            "#| exclude-newer: 2025-06-14\n",
             "cat('unused')\n",
         ),
     )
@@ -197,6 +198,11 @@ fn run_with_exclude_newer_uses_embedded_neutral_metadata_without_refresh() {
             "  printf '[]\\n'\n",
             "  exit 0\n",
             "fi\n",
+            "if [ \"$1\" = \"available\" ] && [ \"$2\" = \"--json\" ] && [ \"$3\" = \"--all\" ]; then\n",
+            "  printf 'metadata\\n' >> \"$IR_TEST_R_VERSION_METADATA_CALLS\"\n",
+            "  printf '%s\\n' '[{\"name\":\"4.3.1\",\"version\":\"4.3.1\",\"date\":\"2023-06-16T00:00:00Z\"}]'\n",
+            "  exit 0\n",
+            "fi\n",
             "echo \"unexpected rig args: $*\" >&2\n",
             "exit 43\n",
         ),
@@ -206,6 +212,74 @@ fn run_with_exclude_newer_uses_embedded_neutral_metadata_without_refresh() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("PATH", path)
+        .env("IR_TEST_R_VERSION_METADATA_CALLS", &metadata_calls)
+        .env_remove("IR_RSCRIPT")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        output_text(&out).contains(
+            "could not resolve R version `4.5.1` with available R versions before or on 2025-06-14"
+        ),
+        "{}",
+        output_text(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(&metadata_calls).unwrap().lines().count(),
+        1,
+        "embedded releases should be verified against rig availability"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_file(&metadata_calls);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_exclude_newer_falls_back_for_symbolic_rig_specs() {
+    let cache_dir = unique_dir("ir-r-version-symbolic-cache");
+    let bin_dir = unique_dir("ir-r-version-symbolic-bin");
+    let script = unique_path("ir-r-version-symbolic", "R");
+    let metadata_calls = unique_path("ir-r-version-symbolic-calls", "txt");
+
+    fs::write(
+        &script,
+        concat!(
+            "#| r-version: \"release\"\n",
+            "#| exclude-newer: 2026-06-10\n",
+            "cat('unused')\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"list\" ] && [ \"$2\" = \"--json\" ]; then\n",
+            "  printf '[]\\n'\n",
+            "  exit 0\n",
+            "fi\n",
+            "if [ \"$1\" = \"available\" ] && [ \"$2\" = \"--json\" ] && [ $# -eq 2 ]; then\n",
+            "  printf 'metadata\\n' >> \"$IR_TEST_R_VERSION_METADATA_CALLS\"\n",
+            "  printf '%s\\n' '[{\"name\":\"release\",\"version\":\"4.6.0\",\"date\":\"2026-04-24T00:00:00Z\"}]'\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo \"unexpected rig args: $*\" >&2\n",
+            "exit 43\n",
+        ),
+    );
+    let path = std::env::join_paths([bin_dir.as_os_str().to_owned()]).unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env("IR_TEST_R_VERSION_METADATA_CALLS", &metadata_calls)
         .env_remove("IR_RSCRIPT")
         .arg("run")
         .arg(&script)
@@ -215,12 +289,18 @@ fn run_with_exclude_newer_uses_embedded_neutral_metadata_without_refresh() {
     assert!(!out.status.success(), "{}", output_text(&out));
     assert!(
         output_text(&out)
-            .contains("R 4.4.3 is required but is not installed. Run `rig install 4.4.3`."),
+            .contains("R 4.6.0 is required but is not installed. Run `rig install release`."),
         "{}",
         output_text(&out)
     );
+    assert_eq!(
+        fs::read_to_string(&metadata_calls).unwrap().lines().count(),
+        1,
+        "symbolic rig specs should be resolved by rig availability"
+    );
 
     let _ = fs::remove_file(&script);
+    let _ = fs::remove_file(&metadata_calls);
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&bin_dir);
 }
