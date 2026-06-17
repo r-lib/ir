@@ -298,6 +298,26 @@ ir_install_specs <- function(res) {
                      character(1))))
 }
 
+# Concurrent resolver runs share renv's binary and package caches.
+ir_with_renv_cache_lock <- function(expr) {
+  root <- tools::R_user_dir("renv", "cache")
+  dir.create(root, recursive = TRUE, showWarnings = FALSE)
+  lock <- file.path(root, "ir-renv-cache.lock")
+  deadline <- Sys.time() + 10 * 60
+
+  repeat {
+    if (dir.create(lock, showWarnings = FALSE)) {
+      on.exit(unlink(lock, recursive = TRUE, force = TRUE), add = TRUE)
+      return(force(expr))
+    }
+
+    if (Sys.time() >= deadline)
+      stop("could not acquire renv cache lock at ", lock, call. = FALSE)
+
+    Sys.sleep(0.25)
+  }
+}
+
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
@@ -424,17 +444,19 @@ ir_resolve_main <- function() {
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
-    do.call(renv::use, c(
-      as.list(install_specs),
-      list(
-        library = library_path,
-        repos   = repos,
-        attach  = FALSE,
-        sandbox = FALSE,
-        isolate = TRUE,
-        verbose = TRUE
-      )
-    ))
+    ir_with_renv_cache_lock(
+      do.call(renv::use, c(
+        as.list(install_specs),
+        list(
+          library = library_path,
+          repos   = repos,
+          attach  = FALSE,
+          sandbox = FALSE,
+          isolate = TRUE,
+          verbose = TRUE
+        )
+      ))
+    )
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
