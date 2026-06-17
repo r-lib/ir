@@ -156,7 +156,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
     assert!(workflow.contains("any::bookdown"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
-    assert!(workflow.contains("Install rig for build metadata"));
+    assert!(!workflow.contains("Install rig for build metadata"));
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
@@ -219,7 +219,7 @@ fn docs_workflow_requires_all_ci_jobs() {
     assert!(workflow.contains("actions: read"));
     assert!(workflow.contains("Require CI jobs to have succeeded"));
     assert!(workflow.contains("All CI jobs succeeded; proceeding to publish."));
-    assert!(workflow.contains("Install rig for build metadata"));
+    assert!(!workflow.contains("Install rig for build metadata"));
     assert!(!workflow.contains("workflow_dispatch"));
     assert!(!workflow.contains("github.event_name == 'workflow_run'"));
     assert!(!workflow.contains("github.sha"));
@@ -229,51 +229,38 @@ fn docs_workflow_requires_all_ci_jobs() {
 }
 
 #[test]
-fn release_workflow_installs_rig_before_building_binaries() {
+fn release_workflow_builds_without_rig_metadata_install() {
     let path = repo_root().join(".github/workflows/release.yml");
     let workflow = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
-    assert!(workflow.contains("Install rig for build metadata (macOS)"));
-    assert!(workflow.contains("Install rig for build metadata (Linux)"));
-    assert!(workflow.contains("Install rig for build metadata (Windows)"));
-    assert!(workflow.contains("brew install --cask rig"));
-    assert!(workflow.contains("apt-get install -y --no-install-recommends r-rig"));
-    assert!(workflow.contains("choco install rig -y --no-progress"));
+    assert!(!workflow.contains("r-lib/actions/setup-r@v2"));
+    assert!(!workflow.contains("Install rig for build metadata"));
+    assert!(!workflow.contains("brew install --cask rig"));
+    assert!(!workflow.contains("apt-get install -y --no-install-recommends r-rig"));
+    assert!(!workflow.contains("choco install rig -y --no-progress"));
 }
 
 #[cfg(unix)]
 #[test]
-fn cargo_build_date_rscript_uses_vanilla() {
+fn cargo_build_uses_checked_in_r_version_metadata() {
     let bin_dir = support::unique_dir("ir-build-date-bin");
     let target_dir = support::unique_dir("ir-build-date-target");
-    let rscript_args = support::unique_path("ir-build-date-rscript-args", "txt");
 
-    support::write_executable(
-        &bin_dir.join("rig"),
-        concat!(
-            "#!/bin/sh\n",
-            "if [ \"$1\" = \"available\" ] && [ \"$2\" = \"--all\" ] && [ \"$3\" = \"--json\" ]; then\n",
-            "  printf '[{\"name\":\"4.6.0\",\"date\":\"2026-04-24T00:00:00Z\",\"version\":\"4.6.0\",\"type\":\"release\",\"url\":\"https://example.invalid/R-4.6.0.pkg\"}]\\n'\n",
-            "  exit 0\n",
-            "fi\n",
-            "echo \"unexpected rig args: $*\" >&2\n",
-            "exit 43\n",
-        ),
-    );
     support::write_executable(
         &bin_dir.join("Rscript"),
         concat!(
             "#!/bin/sh\n",
-            "printf '%s\\n' \"$@\" > \"$IR_TEST_RSCRIPT_ARGS\"\n",
-            "for arg in \"$@\"; do\n",
-            "  if [ \"$arg\" = \"--vanilla\" ]; then\n",
-            "    printf '2026-06-17'\n",
-            "    exit 0\n",
-            "  fi\n",
-            "done\n",
-            "echo 'Rscript must be invoked with --vanilla' >&2\n",
+            "echo \"build should not invoke Rscript: $*\" >&2\n",
             "exit 64\n",
+        ),
+    );
+    support::write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"build should not invoke rig: $*\" >&2\n",
+            "exit 65\n",
         ),
     );
 
@@ -288,7 +275,6 @@ fn cargo_build_date_rscript_uses_vanilla() {
     let out = Command::new(cargo)
         .current_dir(repo_root())
         .env("PATH", path)
-        .env("IR_TEST_RSCRIPT_ARGS", &rscript_args)
         .arg("check")
         .arg("--quiet")
         .arg("--locked")
@@ -300,12 +286,7 @@ fn cargo_build_date_rscript_uses_vanilla() {
         .unwrap();
 
     assert_success(&out);
-    assert_eq!(
-        fs::read_to_string(&rscript_args).unwrap(),
-        "--vanilla\n-e\ncat(as.character(Sys.Date()))\n"
-    );
 
-    let _ = fs::remove_file(&rscript_args);
     let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&target_dir);
 }

@@ -1,12 +1,14 @@
 use std::error::Error;
 use std::fs;
+use std::process::Command;
 
 use super::r_selection::{self, AvailableCandidate, VersionRequirement};
 use super::rig_client::{self, AvailableR};
 
-const EMBEDDED_AVAILABLE_BUILD_DATE: &str = env!("IR_RIG_AVAILABLE_BUILD_DATE");
-const EMBEDDED_AVAILABLE_JSON: &str =
-    include_str!(concat!(env!("OUT_DIR"), "/rig_available_all.json"));
+const EMBEDDED_AVAILABLE_JSON: &str = include_str!("r-versions.json");
+const R_VERSIONS_URL: &str = "https://api.r-hub.io/rversions/r-versions";
+// Keep this date in sync with `r-versions.json` when refreshing the embedded metadata.
+const EMBEDDED_AVAILABLE_METADATA_DATE: &str = "2026-06-17";
 
 pub(crate) fn required_available_version(
     req: &str,
@@ -35,7 +37,7 @@ pub(crate) fn required_available_version(
 pub(crate) fn available_before_or_on(
     exclude_newer: &str,
 ) -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    let mut available = if exclude_newer <= EMBEDDED_AVAILABLE_BUILD_DATE {
+    let mut available = if exclude_newer <= EMBEDDED_AVAILABLE_METADATA_DATE {
         embedded_available()?
     } else {
         cached_available_all()?
@@ -58,9 +60,9 @@ fn required_available_version_from_candidates<'a>(
 fn embedded_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let mut available = parse_available_json(
         EMBEDDED_AVAILABLE_JSON,
-        "embedded `rig available --all --json`",
+        "embedded R version availability metadata",
     )?;
-    retain_released_before_or_on(&mut available, EMBEDDED_AVAILABLE_BUILD_DATE);
+    retain_released_before_or_on(&mut available, EMBEDDED_AVAILABLE_METADATA_DATE);
     Ok(available)
 }
 
@@ -75,19 +77,16 @@ fn retain_released_before_or_on(available: &mut Vec<AvailableR>, exclude_newer: 
 
 fn cached_available_all() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let path = crate::runtime::ir_cache_dir()?
-        .join("rig")
-        .join("available-all.json");
+        .join("r-versions")
+        .join("available.json");
     if path.exists() {
         let json = fs::read_to_string(&path)
             .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
-        return parse_available_json(&json, "`rig available --all --json` cache");
+        return parse_available_json(&json, "R version availability metadata cache");
     }
 
-    let json = String::from_utf8(rig_client::output(&["available", "--all", "--json"])?)
-        .map_err(|e| format!("`rig available --all --json` returned non-UTF-8 output: {e}"))?;
-    let available = parse_available_json(&json, "`rig available --all --json`")?;
-    let json = serde_json::to_string_pretty(&available)
-        .map_err(|e| format!("failed to serialize cached rig available --all JSON: {e}"))?;
+    let json = download_available_json()?;
+    let available = parse_available_json(&json, "R version availability metadata")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create `{}`: {e}", parent.display()))?;
@@ -96,17 +95,50 @@ fn cached_available_all() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     Ok(available)
 }
 
+fn download_available_json() -> Result<String, Box<dyn Error>> {
+    let output = Command::new("Rscript")
+        .args([
+            "--vanilla",
+            "-e",
+            "cat(readLines(commandArgs(TRUE)[[1]], warn = FALSE), sep = \"\\n\")",
+            R_VERSIONS_URL,
+        ])
+        .output()
+        .map_err(|e| {
+            format!("failed to launch `Rscript` for R version availability metadata: {e}")
+        })?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "`Rscript --vanilla -e <read R version availability metadata>` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+
+    let json = String::from_utf8(output.stdout)
+        .map_err(|e| format!("R version availability metadata response was not UTF-8: {e}"))?;
+    if json.trim().is_empty() {
+        return Err("R version availability metadata response was empty".into());
+    }
+
+    Ok(json)
+}
+
 fn parse_available_json(json: &str, source: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let mut versions: Vec<AvailableR> =
         serde_json::from_str(json).map_err(|e| format!("failed to parse {source} JSON: {e}"))?;
 
     for version in &mut versions {
+        if version.name.is_empty() {
+            version.name = version.version.clone();
+        }
         if let Some(date) = version.date.as_deref() {
             version.date = Some(
                 r_selection::iso_date_prefix(date)
                     .ok_or_else(|| {
                         format!(
-                            "rig available returned invalid release date `{}` for R {}",
+                            "R version availability metadata returned invalid release date `{}` for R {}",
                             date, version.version
                         )
                     })?

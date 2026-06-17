@@ -65,49 +65,6 @@ jobs:
           # The lint job owns `-D warnings`; release builds should not fail on warnings.
           rustflags: ""
 
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          use-public-rspm: true
-
-      - name: Install rig for build metadata (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v rig >/dev/null 2>&1; then
-            rig --version
-            exit 0
-          fi
-          brew tap r-lib/rig
-          brew install --cask rig
-          rig --version
-
-      - name: Install rig for build metadata (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v rig >/dev/null 2>&1; then
-            rig --version
-            exit 0
-          fi
-          curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o /tmp/ir-rig.gpg
-          sudo install -m 0644 /tmp/ir-rig.gpg /etc/apt/trusted.gpg.d/rig.gpg
-          echo "deb http://rig.r-pkg.org/deb rig main" | sudo tee /etc/apt/sources.list.d/rig.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends r-rig
-          rig --version
-
-      - name: Install rig for build metadata (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (-not (Get-Command rig -ErrorAction SilentlyContinue)) {
-            choco install rig -y --no-progress
-            $env:Path = "C:\Program Files\rig;C:\Program Files\rig\bin;C:\Program Files\R\rig\bin;$env:Path"
-          }
-          rig --version
-
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 

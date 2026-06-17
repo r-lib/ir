@@ -72,7 +72,7 @@ On Linux, the installer tells you if the install directory is not on `PATH`.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 
-You can also build from source with Rust and `rig` on `PATH`:
+You can also build from source with Rust:
 
 ```console
 $ cargo build --release

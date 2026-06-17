@@ -4,8 +4,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize)]
 pub(crate) struct AvailableR {
+    #[serde(default)]
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) date: Option<String>,

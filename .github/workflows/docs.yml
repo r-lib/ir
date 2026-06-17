@@ -45,21 +45,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install rig for build metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v rig >/dev/null 2>&1; then
-            rig --version
-            exit 0
-          fi
-          curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o /tmp/ir-rig.gpg
-          sudo install -m 0644 /tmp/ir-rig.gpg /etc/apt/trusted.gpg.d/rig.gpg
-          echo "deb http://rig.r-pkg.org/deb rig main" | sudo tee /etc/apt/sources.list.d/rig.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends r-rig
-          rig --version
-
       - uses: quarto-dev/quarto-actions/setup@v2
 
       - uses: r-lib/actions/setup-r@v2

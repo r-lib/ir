@@ -242,7 +242,7 @@ fn run_with_future_exclude_newer_caches_available_all_json() {
     let cache_dir = unique_dir("ir-r-version-future-available-cache");
     let bin_dir = unique_dir("ir-r-version-future-available-bin");
     let script = unique_path("ir-r-version-future-available", "R");
-    let available_calls = unique_path("ir-r-version-future-available-calls", "txt");
+    let metadata_calls = unique_path("ir-r-version-future-available-calls", "txt");
 
     fs::write(
         &script,
@@ -262,15 +262,23 @@ fn run_with_future_exclude_newer_caches_available_all_json() {
             "  printf '[]\\n'\n",
             "  exit 0\n",
             "fi\n",
-            "if [ \"$1\" = \"available\" ] && [ \"$2\" = \"--all\" ] && [ \"$3\" = \"--json\" ]; then\n",
-            "  printf 'available\\n' >> \"$IR_TEST_RIG_AVAILABLE_CALLS\"\n",
+            "echo \"unexpected rig args: $*\" >&2\n",
+            "exit 43\n",
+        ),
+    );
+    write_executable(
+        &bin_dir.join("Rscript"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"${4:-}\" = \"https://api.r-hub.io/rversions/r-versions\" ]; then\n",
+            "  printf 'metadata\\n' >> \"$IR_TEST_R_VERSION_METADATA_CALLS\"\n",
             "  cat <<'JSON'\n",
-            "[{\"name\":\"4.7.0\",\"date\":\"2099-01-01T00:00:00Z\",\"version\":\"4.7.0\",\"type\":\"release\",\"url\":\"https://example.invalid/R-4.7.0.pkg\"}]\n",
+            "[{\"version\":\"4.7.0\",\"date\":\"2099-01-01T00:00:00Z\",\"nickname\":\"Future R\"}]\n",
             "JSON\n",
             "  exit 0\n",
             "fi\n",
-            "echo \"unexpected rig args: $*\" >&2\n",
-            "exit 43\n",
+            "echo \"unexpected Rscript args: $*\" >&2\n",
+            "exit 64\n",
         ),
     );
 
@@ -286,7 +294,7 @@ fn run_with_future_exclude_newer_caches_available_all_json() {
         let out = ir()
             .env("IR_CACHE_DIR", &cache_dir)
             .env("PATH", &path)
-            .env("IR_TEST_RIG_AVAILABLE_CALLS", &available_calls)
+            .env("IR_TEST_R_VERSION_METADATA_CALLS", &metadata_calls)
             .env_remove("IR_RSCRIPT")
             .arg("run")
             .arg(&script)
@@ -302,15 +310,15 @@ fn run_with_future_exclude_newer_caches_available_all_json() {
         );
     }
 
-    let calls = fs::read_to_string(&available_calls).unwrap();
+    let calls = fs::read_to_string(&metadata_calls).unwrap();
     assert_eq!(
         calls.lines().count(),
         1,
-        "`rig available --all --json` should be cached after the first future-dated lookup"
+        "R version metadata should be cached after the first future-dated lookup"
     );
 
     let _ = fs::remove_file(&script);
-    let _ = fs::remove_file(&available_calls);
+    let _ = fs::remove_file(&metadata_calls);
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&bin_dir);
 }
