@@ -53,6 +53,25 @@ fn generated_release_metadata(
         output.push_str("    },\n");
     }
     output.push_str("];\n");
+    output.push_str("const EMBEDDED_MINOR_RELEASES: &[AvailableCandidate<'static>] = &[\n");
+    for release in embedded_minor_releases(releases) {
+        let Some((major, minor, _)) = version_parts(release.version.as_ref()) else {
+            continue;
+        };
+        let version = format!("{major}.{minor}");
+        output.push_str("    AvailableCandidate {\n");
+        output.push_str("        name: ");
+        output.push_str(&format!("{version:?}"));
+        output.push_str(",\n");
+        output.push_str("        version: ");
+        output.push_str(&format!("{version:?}"));
+        output.push_str(",\n");
+        output.push_str("        date: Some(");
+        output.push_str(&format!("{:?}", release.date.as_ref()));
+        output.push_str("),\n");
+        output.push_str("    },\n");
+    }
+    output.push_str("];\n");
     output
 }
 
@@ -80,6 +99,19 @@ fn embedded_available_releases<'a>(
     }
 
     by_minor.into_values().collect()
+}
+
+fn embedded_minor_releases<'a>(
+    releases: &'a [release_metadata::ReleaseMetadata<'a>],
+) -> Vec<&'a release_metadata::ReleaseMetadata<'a>> {
+    releases
+        .iter()
+        .filter(|release| {
+            version_parts(release.version.as_ref())
+                .map(|(_, _, patch)| patch == 0)
+                .unwrap_or(false)
+        })
+        .collect()
 }
 
 fn version_parts(value: &str) -> Option<(u64, u64, u64)> {
