@@ -83,11 +83,15 @@ pub(crate) fn cmd_render(
 }
 
 pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn Error>> {
-    let Some(req) = &spec.r_requirement else {
-        return Ok(rscript_command());
-    };
+    if let Some(req) = &spec.r_requirement {
+        return rig::resolve_rscript(req, spec.exclude_newer.as_deref());
+    }
 
-    rig::resolve_rscript(req, spec.exclude_newer.as_deref())
+    if let Some(exclude_newer) = &spec.exclude_newer {
+        return rig::resolve_rscript_for_exclude_newer(exclude_newer);
+    }
+
+    Ok(rscript_command())
 }
 
 /// Return a cached materialised library path, or run the embedded driver in a

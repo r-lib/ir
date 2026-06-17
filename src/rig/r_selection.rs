@@ -88,6 +88,32 @@ pub(crate) fn select_available_candidate<'a>(
         })
 }
 
+pub(crate) fn select_latest_available_candidate<'a>(
+    exclude_newer: &str,
+    candidates: impl IntoIterator<Item = AvailableCandidate<'a>>,
+) -> Result<AvailableCandidate<'a>, Box<dyn Error>> {
+    candidates
+        .into_iter()
+        .filter(|version| released_before_or_on(version, Some(exclude_newer)))
+        .max_by(|a, b| compare_versions(a.version, b.version))
+        .ok_or_else(|| {
+            format!("could not resolve latest R version available before or on {exclude_newer}")
+                .into()
+        })
+}
+
+pub(crate) fn major_minor_version(version: &str) -> Result<String, Box<dyn Error>> {
+    let parts = parse_version(version)
+        .ok_or_else(|| format!("R version `{version}` is not a numeric version"))?;
+    if parts.len() < 2 {
+        return Err(
+            format!("R version `{version}` does not include a major and minor version").into(),
+        );
+    }
+
+    Ok(format!("{}.{}", parts[0], parts[1]))
+}
+
 pub(crate) fn iso_date_prefix(value: &str) -> Option<&str> {
     let date = value.get(..10)?;
     if is_iso_date(date) {

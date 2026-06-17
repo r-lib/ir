@@ -48,7 +48,7 @@ Arguments after the source path are passed to `quarto render`.
 
 Use `--vanilla` before the source path to run Quarto's knitr R with `--vanilla`.
 
-When an R version is selected by frontmatter or `--r-version`, `ir` pins Quarto's knitr R to that selection.
+When an R version is selected by frontmatter, `--r-version`, or date-only `exclude-newer`, `ir` pins Quarto's knitr R to that selection.
 
 Set `IR_QUARTO` to use a specific Quarto executable.
 

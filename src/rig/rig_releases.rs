@@ -38,6 +38,74 @@ const EMBEDDED_AVAILABLE: &[AvailableCandidate<'static>] = &[
     },
 ];
 
+// R-x-y-0 release dates from upstream R tags. These track when a minor line
+// became available; `rig available` tracks patch releases for installation.
+const EMBEDDED_MINOR_RELEASES_BUILD_DATE: &str = "2026-06-17";
+
+struct MinorRelease {
+    version: &'static str,
+    date: &'static str,
+}
+
+const EMBEDDED_MINOR_RELEASES: &[MinorRelease] = &[
+    MinorRelease {
+        version: "3.0",
+        date: "2013-04-03",
+    },
+    MinorRelease {
+        version: "3.1",
+        date: "2014-04-10",
+    },
+    MinorRelease {
+        version: "3.2",
+        date: "2015-04-16",
+    },
+    MinorRelease {
+        version: "3.3",
+        date: "2016-05-03",
+    },
+    MinorRelease {
+        version: "3.4",
+        date: "2017-04-21",
+    },
+    MinorRelease {
+        version: "3.5",
+        date: "2018-04-23",
+    },
+    MinorRelease {
+        version: "3.6",
+        date: "2019-04-26",
+    },
+    MinorRelease {
+        version: "4.0",
+        date: "2020-04-24",
+    },
+    MinorRelease {
+        version: "4.1",
+        date: "2021-05-18",
+    },
+    MinorRelease {
+        version: "4.2",
+        date: "2022-04-22",
+    },
+    MinorRelease {
+        version: "4.3",
+        date: "2023-04-21",
+    },
+    MinorRelease {
+        version: "4.4",
+        date: "2024-04-24",
+    },
+    MinorRelease {
+        version: "4.5",
+        date: "2025-04-11",
+    },
+    MinorRelease {
+        version: "4.6",
+        date: "2026-04-24",
+    },
+];
+
 pub(crate) fn required_available_version(
     req: &str,
     requirement: &VersionRequirement,
@@ -69,6 +137,23 @@ pub(crate) fn required_available_version(
         None,
         available.iter().map(AvailableCandidate::from),
     )
+}
+
+pub(crate) fn latest_minor_version_on(exclude_newer: &str) -> Result<String, Box<dyn Error>> {
+    if exclude_newer <= EMBEDDED_MINOR_RELEASES_BUILD_DATE {
+        let release = r_selection::select_latest_available_candidate(
+            exclude_newer,
+            EMBEDDED_MINOR_RELEASES.iter().map(AvailableCandidate::from),
+        )?;
+        return Ok(release.version.to_string());
+    }
+
+    let available = cached_available()?;
+    let release = r_selection::select_latest_available_candidate(
+        exclude_newer,
+        available.iter().map(AvailableCandidate::from),
+    )?;
+    r_selection::major_minor_version(release.version)
 }
 
 fn required_available_version_from_candidates<'a>(
@@ -132,6 +217,16 @@ impl<'a> From<&'a AvailableR> for AvailableCandidate<'a> {
             name: &value.name,
             version: &value.version,
             date: value.date.as_deref(),
+        }
+    }
+}
+
+impl<'a> From<&'a MinorRelease> for AvailableCandidate<'a> {
+    fn from(value: &'a MinorRelease) -> Self {
+        Self {
+            name: value.version,
+            version: value.version,
+            date: Some(value.date),
         }
     }
 }

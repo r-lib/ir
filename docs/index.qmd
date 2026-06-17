@@ -28,7 +28,7 @@ library(tidyr)
 - Declare package requirements in script frontmatter and run the file directly with `ir run`.
 - Resolve packages once, then reuse content-addressed cached libraries on later runs.
 - Pin CRAN resolution to a Posit Package Manager snapshot with `exclude-newer`.
-- Select installed R versions with `--r-version` or frontmatter `r-version`.
+- Select installed R versions with `--r-version`, frontmatter `r-version`, or date-only `exclude-newer`.
 - Evaluate inline expressions with `ir run -e` and add command-line packages with `--with`.
 - Render Quarto documents and Quarto-formatted R scripts through `ir render`, using the same package metadata model with `rmarkdown` seeded automatically for the knitr engine.
 - Run executables provided by R packages with `rx` or `ir tool run`.
