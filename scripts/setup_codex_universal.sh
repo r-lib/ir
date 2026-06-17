@@ -136,7 +136,7 @@ options(
   Ncpus = max(1L, parallel::detectCores(logical = TRUE) - 1L)
 )
 packages <- c(
-  "pak", "renv", "secretbase", "filelock", "cli", "glue", "jsonlite",
+  "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
   "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown", "quarto",
   "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
 )
@@ -179,7 +179,7 @@ options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak")
 }
-pak::pkg_install(c("renv", "secretbase", "filelock", "jsonlite", "knitr", "rmarkdown"))
+pak::pkg_install(c("renv", "secretbase", "jsonlite", "knitr", "rmarkdown"))
 prefetch_lib <- file.path(
   Sys.getenv("HOME"),
   ".cache", "ir-codex-renv-prefetch",
@@ -196,8 +196,7 @@ renv::install(
 stopifnot(
   requireNamespace("pak", quietly = TRUE),
   requireNamespace("renv", quietly = TRUE),
-  requireNamespace("secretbase", quietly = TRUE),
-  requireNamespace("filelock", quietly = TRUE)
+  requireNamespace("secretbase", quietly = TRUE)
 )
 EOF
 env -u R_LIBS_USER rig run -r "$rig_name" -f /tmp/ir-rig-setup.R

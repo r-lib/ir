@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
         "pkgs <- c(",
-        "'pak', 'renv', 'secretbase', 'filelock', 'cli', 'glue', 'jsonlite', ",
+        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
         "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
         "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
         "'htmltools'); ",
@@ -1243,120 +1243,17 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
     let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
-fn write_materialize_lock_profile(
-    profile: &Path,
-    active: Option<&Path>,
-    overlap: Option<&Path>,
-    entered: &Path,
-    sleep_seconds: f64,
-) {
-    assert_eq!(active.is_some(), overlap.is_some());
-
-    let pak_code = paste_lines(&[
-        "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
-        "  refs <- as.character(refs)",
-        "  data.frame(",
-        "    status = rep('OK', length(refs)),",
-        "    ref = refs,",
-        "    package = sub('@.*$', '', refs),",
-        "    version = rep('0.0.1', length(refs)),",
-        "    type = rep('standard', length(refs)),",
-        "    priority = NA_character_,",
-        "    direct = TRUE,",
-        "    stringsAsFactors = FALSE",
-        "  )",
-        "}",
-    ]);
-
-    let mut renv_code =
-        String::from("use <- function(..., library, repos, attach, sandbox, isolate, verbose) {\n");
-    if let (Some(active), Some(overlap)) = (active, overlap) {
-        renv_code.push_str(&format!(
-            "  active <- {}\n\
-             if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {{\n\
-               writeLines('overlap', {})\n\
-               stop('renv::use overlapped', call. = FALSE)\n\
-             }}\n\
-             on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)\n",
-            r_string(active),
-            r_string(overlap)
-        ));
-    }
-    renv_code.push_str(&format!(
-        "  cat(Sys.getpid(), '\\n', file = {}, append = TRUE)\n",
-        r_string(entered)
-    ));
-    if sleep_seconds > 0.0 {
-        renv_code.push_str(&format!("  Sys.sleep({sleep_seconds})\n"));
-    }
-    renv_code.push_str(
-        "  specs <- unlist(list(...), use.names = FALSE)\n\
-         for (spec in specs) {\n\
-           pkg <- sub('@.*$', '', spec)\n\
-           dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)\n\
-         }\n\
-         invisible(TRUE)\n\
-         }\n",
-    );
-
-    fs::write(
-        profile,
-        format!(
-            r#"
-ir_test_write_pkg <- function(lib, pkg, namespace, code) {{
-  path <- file.path(lib, pkg)
-  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
-  writeLines(
-    c(
-      paste("Package:", pkg),
-      "Version: 0.0.1",
-      paste("Title:", pkg),
-      paste0("Description: ", pkg, "."),
-      "License: MIT"
-    ),
-    file.path(path, "DESCRIPTION")
-  )
-  writeLines(namespace, file.path(path, "NAMESPACE"))
-  writeLines(code, file.path(path, "R", pkg))
-}}
-
-ir_test_private_lib <- file.path(
-  Sys.getenv("IR_CACHE_DIR"),
-  "tooling",
-  paste0(getRversion(), "-", R.version$platform)
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "secretbase",
-  "export(sha256)",
-  {secretbase_code}
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "pak",
-  "export(pkg_deps)",
-  {pak_code}
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "renv",
-  "export(use)",
-  {renv_code}
-)
-"#,
-            secretbase_code = serde_json::to_string("sha256 <- function(x) 'irlockhash'").unwrap(),
-            pak_code = serde_json::to_string(&pak_code).unwrap(),
-            renv_code = serde_json::to_string(&renv_code).unwrap(),
-        ),
-    )
-    .unwrap();
-}
-
 fn paste_lines(lines: &[&str]) -> String {
     lines.join("\n")
 }
 
-fn write_tooling_install_lock_profile(profile: &Path, active: &Path, overlap: &Path) {
+fn write_resolver_lock_profile(
+    profile: &Path,
+    active: &Path,
+    overlap: &Path,
+    entered: &Path,
+    sleep_seconds: f64,
+) {
     fs::write(
         profile,
         format!(
@@ -1387,7 +1284,7 @@ ir_test_write_pkg(
   ir_test_private_lib,
   "secretbase",
   "export(sha256)",
-  "sha256 <- function(x) 'irtoolinglockhash'"
+  "sha256 <- function(x) 'irresolverlockhash'"
 )
 ir_test_write_pkg(
   ir_test_private_lib,
@@ -1401,35 +1298,20 @@ ir_test_write_pkg(
   "export(use)",
   {renv_code}
 )
-
-utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
-  if (!identical(as.character(pkgs), "filelock")) {{
-    stop("unexpected resolver tooling package: ", paste(pkgs, collapse = ", "),
-         call. = FALSE)
-  }}
-
-  active <- {active}
-  if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {{
-    writeLines("overlap", {overlap})
-    stop("tooling install overlapped", call. = FALSE)
-  }}
-  on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)
-
-  Sys.sleep(1)
-  ir_test_write_pkg(
-    lib,
-    "filelock",
-    "export(lock)\nexport(unlock)",
-    paste(
-      "lock <- function(path, exclusive = TRUE, timeout = Inf) list(path = path)",
-      "unlock <- function(lock) TRUE",
-      sep = "\n"
-    )
-  )
-}}, ns = "utils")
 "#,
             pak_code = serde_json::to_string(&paste_lines(&[
                 "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+                &format!("  active <- {}", r_string(active)),
+                "  if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {",
+                &format!("    writeLines('overlap', {})", r_string(overlap)),
+                "    stop('resolver entered concurrently', call. = FALSE)",
+                "  }",
+                "  on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)",
+                &format!(
+                    "  cat(Sys.getpid(), '\\n', file = {}, append = TRUE)",
+                    r_string(entered)
+                ),
+                &format!("  Sys.sleep({sleep_seconds})"),
                 "  refs <- as.character(refs)",
                 "  data.frame(",
                 "    status = rep('OK', length(refs)),",
@@ -1455,62 +1337,24 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
                 "}",
             ]))
             .unwrap(),
-            active = r_string(active),
-            overlap = r_string(overlap),
         ),
     )
     .unwrap();
 }
 
-fn append_tooling_stale_unlink_barrier(profile: &Path, lock: &Path, barrier: &Path) {
-    let mut profile_code = fs::read_to_string(profile).unwrap();
-    profile_code.push_str(&format!(
-        r#"
-ir_test_unlink <- base::unlink
-unlink <- function(x, recursive = FALSE, force = FALSE, ...) {{
-  target <- normalizePath({lock}, winslash = "/", mustWork = FALSE)
-  actual <- normalizePath(x, winslash = "/", mustWork = FALSE)
-  if (identical(actual, target)) {{
-    barrier <- {barrier}
-    dir.create(barrier, recursive = TRUE, showWarnings = FALSE)
-    marker <- file.path(barrier, paste0(Sys.getpid(), ".unlink"))
-    if (!file.exists(marker)) {{
-      writeLines("entered", marker)
-      deadline <- Sys.time() + 0.8
-      while (length(list.files(barrier, pattern = "\\\\.unlink$")) < 2 &&
-             Sys.time() < deadline) {{
-        Sys.sleep(0.02)
-      }}
-      delay <- suppressWarnings(
-        as.numeric(Sys.getenv("IR_TEST_STALE_UNLINK_DELAY_SECONDS"))
-      )
-      if (!is.na(delay) && delay > 0) Sys.sleep(delay)
-    }}
-  }}
-  ir_test_unlink(x, recursive = recursive, force = force, ...)
-}}
-"#,
-        lock = r_string(lock),
-        barrier = r_string(barrier),
-    ));
-    fs::write(profile, profile_code).unwrap();
-}
-
-#[cfg(unix)]
 #[test]
-fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
-    let cache_dir = unique_dir("ir-tooling-bootstrap-lock-cache");
-    let user_library = unique_dir("ir-tooling-bootstrap-user-library");
-    let profile = unique_path("ir-tooling-bootstrap-lock-profile", "R");
-    let active = unique_path("ir-tooling-bootstrap-active", "");
-    let overlap = unique_path("ir-tooling-bootstrap-overlap", "txt");
+fn concurrent_resolvers_serialize_dependency_resolution() {
+    let cache_dir = unique_dir("ir-resolver-lock-cache");
+    let profile = unique_path("ir-resolver-lock-profile", "R");
+    let active = unique_path("ir-resolver-lock-active", "");
+    let entered = unique_path("ir-resolver-lock-entered", "txt");
+    let overlap = unique_path("ir-resolver-lock-overlap", "txt");
 
-    write_tooling_install_lock_profile(&profile, &active, &overlap);
+    write_resolver_lock_profile(&profile, &active, &overlap, &entered, 1.0);
 
     let mut first = ir();
     first
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
         .env("R_PROFILE_USER", &profile)
         .args([
             "run",
@@ -1519,7 +1363,7 @@ fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=tooling-lock-one\\n')",
+            "cat('ir.fixture=resolver-lock-one\\n')",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1530,7 +1374,7 @@ fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
         if first.try_wait().unwrap().is_some() {
             let first = first.wait_with_output().unwrap();
             panic!(
-                "first resolver exited before fake tooling install\n{}",
+                "first resolver exited before fake pak::pkg_deps\n{}",
                 output_text(&first)
             );
         }
@@ -1538,272 +1382,7 @@ fn concurrent_resolvers_serialize_tooling_bootstrap_install() {
     }
     assert!(
         active.exists(),
-        "first resolver should enter fake tooling install before second starts"
-    );
-
-    let second = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
-        .env("R_PROFILE_USER", &profile)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=tooling-lock-two\\n')",
-        ])
-        .output()
-        .unwrap();
-    let first = first.wait_with_output().unwrap();
-
-    assert_success(&first);
-    assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=tooling-lock-one");
-    assert_stdout_contains(&second, "ir.fixture=tooling-lock-two");
-    assert!(!overlap.exists(), "tooling install should not overlap");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&user_library);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[cfg(unix)]
-#[test]
-fn concurrent_resolvers_do_not_remove_reclaimed_tooling_bootstrap_lock() {
-    let cache_dir = unique_dir("ir-tooling-bootstrap-stale-race-cache");
-    let user_library = unique_dir("ir-tooling-bootstrap-stale-race-user-library");
-    let profile = unique_path("ir-tooling-bootstrap-stale-race-profile", "R");
-    let active = unique_path("ir-tooling-bootstrap-stale-race-active", "");
-    let overlap = unique_path("ir-tooling-bootstrap-stale-race-overlap", "txt");
-    let barrier = unique_dir("ir-tooling-bootstrap-stale-race-barrier");
-    let lock = cache_dir.join("locks").join("tooling-bootstrap.lock");
-
-    fs::create_dir_all(&lock).unwrap();
-    fs::write(lock.join("owner.pid"), "999999999\n").unwrap();
-    write_tooling_install_lock_profile(&profile, &active, &overlap);
-    append_tooling_stale_unlink_barrier(&profile, &lock, &barrier);
-
-    let mut first = ir();
-    first
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_STALE_UNLINK_DELAY_SECONDS", "0")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=stale-race-one\\n')",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let first = first.spawn().unwrap();
-
-    let second = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_STALE_UNLINK_DELAY_SECONDS", "0.25")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=stale-race-two\\n')",
-        ])
-        .output()
-        .unwrap();
-    let first = first.wait_with_output().unwrap();
-
-    assert_success(&first);
-    assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=stale-race-one");
-    assert_stdout_contains(&second, "ir.fixture=stale-race-two");
-    assert!(!overlap.exists(), "tooling install should not overlap");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&barrier);
-    let _ = fs::remove_dir_all(&user_library);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[test]
-fn resolver_reclaims_stale_tooling_bootstrap_lock() {
-    let cache_dir = unique_dir("ir-tooling-bootstrap-stale-lock-cache");
-    let user_library = unique_dir("ir-tooling-bootstrap-stale-user-library");
-    let profile = unique_path("ir-tooling-bootstrap-stale-lock-profile", "R");
-    let active = unique_path("ir-tooling-bootstrap-stale-active", "");
-    let overlap = unique_path("ir-tooling-bootstrap-stale-overlap", "txt");
-    let lock = cache_dir.join("locks").join("tooling-bootstrap.lock");
-
-    fs::create_dir_all(&lock).unwrap();
-    fs::write(lock.join("owner.pid"), "999999999\n").unwrap();
-    write_tooling_install_lock_profile(&profile, &active, &overlap);
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TOOLING_LOCK_TIMEOUT_SECONDS", "0.2")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=stale-tooling-lock\\n')",
-        ])
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=stale-tooling-lock");
-    assert!(!lock.exists(), "tooling bootstrap lock should be released");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&user_library);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[cfg(windows)]
-#[test]
-fn resolver_waits_for_live_tooling_bootstrap_lock_owner_on_windows() {
-    let cache_dir = unique_dir("ir-tooling-bootstrap-live-owner-cache");
-    let user_library = unique_dir("ir-tooling-bootstrap-live-owner-user-library");
-    let profile = unique_path("ir-tooling-bootstrap-live-owner-profile", "R");
-    let active = unique_path("ir-tooling-bootstrap-live-owner-active", "");
-    let overlap = unique_path("ir-tooling-bootstrap-live-owner-overlap", "txt");
-    let lock = cache_dir.join("locks").join("tooling-bootstrap.lock");
-
-    let mut owner = Command::new(rscript())
-        .args(["--vanilla", "-e", "Sys.sleep(30)"])
-        .spawn()
-        .unwrap();
-
-    fs::create_dir_all(&lock).unwrap();
-    fs::write(lock.join("owner.pid"), format!("{}\n", owner.id())).unwrap();
-    write_tooling_install_lock_profile(&profile, &active, &overlap);
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_LIBS_USER", &user_library)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TOOLING_LOCK_TIMEOUT_SECONDS", "0.3")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=live-tooling-owner\\n')",
-        ])
-        .output()
-        .unwrap();
-
-    assert!(
-        !out.status.success(),
-        "live tooling owner should keep the lock\n{}",
-        output_text(&out)
-    );
-    assert!(
-        output_text(&out).contains("timed out waiting for resolver tooling lock"),
-        "{}",
-        output_text(&out)
-    );
-    assert!(
-        owner.try_wait().unwrap().is_none(),
-        "lock owner process should still be alive after the resolver checks it"
-    );
-
-    let _ = owner.kill();
-    let _ = owner.wait();
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&user_library);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-fn spawn_materialize_lock_holder(cache_dir: &Path, marker: &Path) -> std::process::Child {
-    let lock = cache_dir.join("locks").join("renv-materialize.lock");
-    let r_expr = concat!(
-        "args <- commandArgs(TRUE); ",
-        "lock <- args[[1]]; ",
-        "marker <- args[[2]]; ",
-        "dir.create(dirname(lock), recursive = TRUE, showWarnings = FALSE); ",
-        "handle <- filelock::lock(lock, timeout = 5000); ",
-        "if (is.null(handle)) stop('could not acquire test lock', call. = FALSE); ",
-        "writeLines('locked', marker); ",
-        "Sys.sleep(30)"
-    );
-    let mut r = Command::new(rscript());
-    r.args(["--vanilla", "-e", r_expr])
-        .arg(&lock)
-        .arg(marker)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap()
-}
-
-#[cfg(unix)]
-#[test]
-fn concurrent_resolvers_serialize_renv_materialization() {
-    let cache_dir = unique_dir("ir-renv-materialize-lock-cache");
-    let profile = unique_path("ir-renv-materialize-lock-profile", "R");
-    let active = unique_path("ir-renv-materialize-active", "");
-    let entered = unique_path("ir-renv-materialize-entered", "txt");
-    let overlap = unique_path("ir-renv-materialize-overlap", "txt");
-
-    write_materialize_lock_profile(&profile, Some(&active), Some(&overlap), &entered, 1.0);
-
-    let mut first = ir();
-    first
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_PROFILE_USER", &profile)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=lock-one\\n')",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut first = first.spawn().unwrap();
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !active.exists() && Instant::now() < deadline {
-        if first.try_wait().unwrap().is_some() {
-            let first = first.wait_with_output().unwrap();
-            panic!(
-                "first resolver exited before fake renv::use\n{}",
-                output_text(&first)
-            );
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(
-        active.exists(),
-        "first resolver should enter fake renv::use before second starts"
+        "first resolver should enter fake pak::pkg_deps before second starts"
     );
 
     let second = ir()
@@ -1816,7 +1395,7 @@ fn concurrent_resolvers_serialize_renv_materialization() {
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=lock-two\\n')",
+            "cat('ir.fixture=resolver-lock-two\\n')",
         ])
         .output()
         .unwrap();
@@ -1824,16 +1403,19 @@ fn concurrent_resolvers_serialize_renv_materialization() {
 
     assert_success(&first);
     assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=lock-one");
-    assert_stdout_contains(&second, "ir.fixture=lock-two");
-    assert!(!overlap.exists(), "renv::use should not overlap");
+    assert_stdout_contains(&first, "ir.fixture=resolver-lock-one");
+    assert_stdout_contains(&second, "ir.fixture=resolver-lock-two");
+    assert!(
+        !overlap.exists(),
+        "dependency resolution should not overlap"
+    );
 
     let entered = fs::read_to_string(&entered)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()));
     assert_eq!(
         entered.lines().count(),
         1,
-        "second resolver should reuse the completed materialized library"
+        "second resolver should reuse the cache after waiting for the first"
     );
 
     let _ = fs::remove_file(&profile);
@@ -1841,110 +1423,6 @@ fn concurrent_resolvers_serialize_renv_materialization() {
     let _ = fs::remove_file(&overlap);
     let _ = fs::remove_dir_all(&active);
     let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[test]
-fn resolver_ignores_leftover_materialization_lock_file() {
-    let cache_dir = unique_dir("ir-renv-materialize-leftover-lock-cache");
-    let profile = unique_path("ir-renv-materialize-leftover-lock-profile", "R");
-    let entered = unique_path("ir-renv-materialize-leftover-lock-entered", "txt");
-    let lock = cache_dir.join("locks").join("renv-materialize.lock");
-
-    fs::create_dir_all(lock.parent().unwrap()).unwrap();
-    fs::write(&lock, "leftover\n").unwrap();
-    write_materialize_lock_profile(&profile, None, None, &entered, 0.0);
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_MATERIALIZE_LOCK_TIMEOUT_SECONDS", "0.2")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=leftover-lock\\n')",
-        ])
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=leftover-lock");
-
-    let entered = fs::read_to_string(&entered)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()));
-    assert_eq!(entered.lines().count(), 1);
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[test]
-fn resolver_times_out_when_materialization_lock_is_held() {
-    let cache_dir = unique_dir("ir-renv-materialize-live-lock-cache");
-    let profile = unique_path("ir-renv-materialize-live-lock-profile", "R");
-    let entered = unique_path("ir-renv-materialize-live-lock-entered", "txt");
-    let locked = unique_path("ir-renv-materialize-live-lock-held", "txt");
-
-    write_materialize_lock_profile(&profile, None, None, &entered, 0.0);
-
-    let mut owner = spawn_materialize_lock_holder(&cache_dir, &locked);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !locked.exists() && Instant::now() < deadline {
-        if owner.try_wait().unwrap().is_some() {
-            let owner = owner.wait_with_output().unwrap();
-            panic!(
-                "lock holder exited before acquiring lock\n{}",
-                output_text(&owner)
-            );
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(locked.exists(), "lock holder should acquire the test lock");
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_MATERIALIZE_LOCK_TIMEOUT_SECONDS", "0.2")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=live-lock\\n')",
-        ])
-        .output()
-        .unwrap();
-
-    let owner_alive = owner.try_wait().unwrap().is_none();
-    if owner_alive {
-        let _ = owner.kill();
-    }
-    let _ = owner.wait();
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&locked);
-    let _ = fs::remove_dir_all(&cache_dir);
-
-    assert!(
-        !out.status.success(),
-        "live materialization lock should time out\n{}",
-        output_text(&out)
-    );
-    assert!(
-        output_text(&out).contains("timed out waiting for resolver materialization lock"),
-        "{}",
-        output_text(&out)
-    );
-    assert!(
-        owner_alive,
-        "lock owner process should still be alive after the resolver checks it"
-    );
 }
 
 #[cfg(unix)]
@@ -2043,16 +1521,6 @@ ir_test_write_pkg(
     "  }}",
     "  invisible(TRUE)",
     "}}",
-    sep = "\n"
-  )
-)
-ir_test_write_pkg(
-  Sys.getenv("R_LIBS_USER"),
-  "filelock",
-  "export(lock)\nexport(unlock)",
-  paste(
-    "lock <- function(path, exclusive = TRUE, timeout = Inf) list(path = path)",
-    "unlock <- function(lock) TRUE",
     sep = "\n"
   )
 )
@@ -2218,16 +1686,6 @@ ir_test_write_pkg(
     "  }}",
     "  invisible(TRUE)",
     "}}",
-    sep = "\n"
-  )
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "filelock",
-  "export(lock)\nexport(unlock)",
-  paste(
-    "lock <- function(path, exclusive = TRUE, timeout = Inf) list(path = path)",
-    "unlock <- function(lock) TRUE",
     sep = "\n"
   )
 )

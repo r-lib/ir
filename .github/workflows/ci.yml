@@ -38,7 +38,6 @@ jobs:
             any::pak
             any::renv
             any::secretbase
-            any::filelock
             any::cli
             any::glue
             any::jsonlite
@@ -105,7 +104,7 @@ jobs:
         shell: bash
         run: |
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
-            filelock cli glue jsonlite dplyr tidyr reticulate fansi htmltools knitr rmarkdown quarto \
+            cli glue jsonlite dplyr tidyr reticulate fansi htmltools knitr rmarkdown quarto \
             btw Rapp docopt pkgsearch prettyunits
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R

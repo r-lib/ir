@@ -105,7 +105,7 @@ caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to inspect the plan.
 - `rig` on `PATH` when using `r-version`.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 
-On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak, renv, secretbase, or filelock.
+On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak, renv, or secretbase.
 
 ## Learn more
 

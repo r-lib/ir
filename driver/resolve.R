@@ -67,10 +67,9 @@ ir_cache_dir <- function() {
 ## --- resolver tooling bootstrap ---------------------------------------------
 
 # Packages the resolver itself needs. pak resolves dependencies, renv
-# materialises the library, secretbase hashes the cache keys, and filelock
-# serializes materialization. They are installed into a dedicated tooling library
-# so users need not pre-install them.
-ir_tooling_packages <- function() c("pak", "renv", "secretbase", "filelock")
+# materialises the library, and secretbase hashes the cache keys. They are
+# installed into a dedicated tooling library so users need not pre-install them.
+ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
@@ -168,159 +167,6 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
   missing
 }
 
-ir_tooling_lock_path <- function(cache_dir = ir_cache_dir())
-  file.path(cache_dir, "locks", "tooling-bootstrap.lock")
-
-ir_dir_lock_owner_path <- function(path)
-  file.path(path, "owner.pid")
-
-ir_dir_lock_reclaim_path <- function(path)
-  paste0(path, ".reclaim")
-
-ir_tooling_lock_timeout_seconds <- function() {
-  env <- Sys.getenv("IR_TOOLING_LOCK_TIMEOUT_SECONDS")
-  if (!nzchar(env)) return(3600)
-
-  seconds <- suppressWarnings(as.numeric(env))
-  if (is.na(seconds) || seconds <= 0)
-    stop("IR_TOOLING_LOCK_TIMEOUT_SECONDS must be a positive number",
-         call. = FALSE)
-
-  seconds
-}
-
-ir_windows_process_alive <- function(pid) {
-  out <- tryCatch(
-    system2("tasklist",
-            c("/FI", sprintf("PID eq %d", pid), "/FO", "CSV", "/NH"),
-            stdout = TRUE, stderr = TRUE),
-    error = function(e) {
-      stop("could not query process liveness with tasklist: ",
-           conditionMessage(e), call. = FALSE)
-    }
-  )
-
-  status <- attr(out, "status")
-  if (!is.null(status) && status != 0)
-    stop("could not query process liveness with tasklist", call. = FALSE)
-
-  rows <- tryCatch(
-    utils::read.csv(text = paste(out, collapse = "\n"), header = FALSE,
-                    stringsAsFactors = FALSE),
-    error = function(e) NULL
-  )
-  if (is.null(rows) || ncol(rows) < 2L) return(FALSE)
-
-  any(suppressWarnings(as.integer(rows[[2L]])) == pid)
-}
-
-ir_process_alive <- function(pid) {
-  pid <- suppressWarnings(as.integer(pid))
-  if (length(pid) != 1L || is.na(pid) || pid <= 0L) return(FALSE)
-
-  if (.Platform$OS.type == "windows") return(ir_windows_process_alive(pid))
-
-  isTRUE(tryCatch(tools::pskill(pid, 0), error = function(e) FALSE))
-}
-
-ir_dir_lock_owner_pid <- function(path) {
-  owner <- ir_dir_lock_owner_path(path)
-  if (!file.exists(owner)) return(NA_integer_)
-
-  pid <- suppressWarnings(as.integer(readLines(owner, n = 1L, warn = FALSE)))
-  if (length(pid) != 1L) return(NA_integer_)
-  pid
-}
-
-ir_dir_lock_state <- function(path) {
-  info <- file.info(path)
-  mtime <- if (is.na(info$mtime)) NA_real_ else as.numeric(info$mtime)
-
-  list(
-    exists = dir.exists(path),
-    owner_pid = ir_dir_lock_owner_pid(path),
-    mtime = mtime
-  )
-}
-
-ir_dir_lock_state_stale <- function(state) {
-  if (!state$exists) return(FALSE)
-  if (!is.na(state$owner_pid)) return(!ir_process_alive(state$owner_pid))
-
-  if (is.na(state$mtime)) return(FALSE)
-  (as.numeric(Sys.time()) - state$mtime) >= 5
-}
-
-ir_dir_lock_same_state <- function(path, state) {
-  current <- ir_dir_lock_state(path)
-  identical(current$exists, state$exists) &&
-    identical(current$owner_pid, state$owner_pid) &&
-    identical(current$mtime, state$mtime)
-}
-
-ir_dir_lock_write_owner <- function(path, label) {
-  owner <- ir_dir_lock_owner_path(path)
-  tryCatch(
-    writeLines(as.character(Sys.getpid()), owner),
-    error = function(e) {
-      unlink(path, recursive = TRUE, force = TRUE)
-      stop("could not write ", label, " lock owner: ", conditionMessage(e),
-           call. = FALSE)
-    }
-  )
-}
-
-ir_dir_lock_reclaim_stale <- function(path, state) {
-  if (!ir_dir_lock_state_stale(state)) return(FALSE)
-
-  reclaim <- ir_dir_lock_reclaim_path(path)
-  if (!dir.create(reclaim, showWarnings = FALSE)) return(FALSE)
-  on.exit(unlink(reclaim, recursive = TRUE, force = TRUE), add = TRUE)
-
-  if (!ir_dir_lock_same_state(path, state)) return(FALSE)
-  if (!ir_dir_lock_state_stale(ir_dir_lock_state(path))) return(FALSE)
-
-  unlink(path, recursive = TRUE, force = TRUE)
-  TRUE
-}
-
-ir_dir_lock_release <- function(path) {
-  if (identical(ir_dir_lock_owner_pid(path), as.integer(Sys.getpid())))
-    unlink(path, recursive = TRUE, force = TRUE)
-}
-
-ir_dir_lock_acquire <- function(path, timeout_seconds, label) {
-  stopifnot(length(path) == 1L, length(timeout_seconds) == 1L,
-            length(label) == 1L)
-
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  started <- proc.time()[["elapsed"]]
-  repeat {
-    if (dir.create(path, showWarnings = FALSE)) {
-      ir_dir_lock_write_owner(path, label)
-      return(invisible())
-    }
-
-    state <- ir_dir_lock_state(path)
-    if (ir_dir_lock_reclaim_stale(path, state))
-      next
-
-    if ((proc.time()[["elapsed"]] - started) >= timeout_seconds)
-      stop("timed out waiting for ", label, " lock: ", path, call. = FALSE)
-
-    Sys.sleep(0.1)
-  }
-}
-
-ir_with_tooling_lock <- function(expr, cache_dir = ir_cache_dir()) {
-  lock <- ir_tooling_lock_path(cache_dir)
-  ir_dir_lock_acquire(lock, ir_tooling_lock_timeout_seconds(),
-                      "resolver tooling")
-  on.exit(ir_dir_lock_release(lock), add = TRUE)
-
-  force(expr)
-}
-
 # Ensure resolver tooling is available. Any packages that are missing are
 # installed into the tooling library, which is then put first on the search path.
 ir_ensure_tooling <- function(cache_dir = ir_cache_dir(),
@@ -332,17 +178,12 @@ ir_ensure_tooling <- function(cache_dir = ir_cache_dir(),
   missing <- ir_missing_tooling(lib = lib)
   if (!length(missing)) return(invisible())
 
-  ir_with_tooling_lock({
-    missing <- ir_missing_tooling(lib = lib)
-    if (length(missing)) {
-      utils::install.packages(missing, lib = lib, repos = repos)
+  utils::install.packages(missing, lib = lib, repos = repos)
 
-      still_missing <- ir_missing_tooling(lib = lib)
-      if (length(still_missing))
-        stop("could not install resolver tooling into ", lib, ": ",
-             paste(still_missing, collapse = ", "), call. = FALSE)
-    }
-  }, cache_dir = cache_dir)
+  still_missing <- ir_missing_tooling(lib = lib)
+  if (length(still_missing))
+    stop("could not install resolver tooling into ", lib, ": ",
+         paste(still_missing, collapse = ", "), call. = FALSE)
   invisible()
 }
 
@@ -455,42 +296,6 @@ ir_install_spec <- function(res, i) {
 ir_install_specs <- function(res) {
   sort(unique(vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
                      character(1))))
-}
-
-## --- materialization lock ----------------------------------------------------
-
-ir_materialize_lock_path <- function(cache_dir = ir_cache_dir())
-  file.path(cache_dir, "locks", "renv-materialize.lock")
-
-ir_materialize_lock_timeout_seconds <- function() {
-  env <- Sys.getenv("IR_MATERIALIZE_LOCK_TIMEOUT_SECONDS")
-  if (!nzchar(env)) return(3600)
-
-  seconds <- suppressWarnings(as.numeric(env))
-  if (is.na(seconds) || seconds <= 0)
-    stop("IR_MATERIALIZE_LOCK_TIMEOUT_SECONDS must be a positive number",
-         call. = FALSE)
-
-  seconds
-}
-
-ir_materialize_lock_acquire <- function(path) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  lock <- filelock::lock(path,
-                         timeout = ir_materialize_lock_timeout_seconds() * 1000)
-  if (is.null(lock))
-    stop("timed out waiting for resolver materialization lock: ", path,
-         call. = FALSE)
-
-  lock
-}
-
-ir_with_materialize_lock <- function(expr, cache_dir = ir_cache_dir()) {
-  lock <- ir_materialize_lock_path(cache_dir)
-  handle <- ir_materialize_lock_acquire(lock)
-  on.exit(filelock::unlock(handle), add = TRUE)
-
-  force(expr)
 }
 
 ir_needs_materialize <- function(library_path, pkgs, has_source_ref) {
@@ -625,22 +430,17 @@ ir_resolve_main <- function() {
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
-    ir_with_materialize_lock({
-      # Another resolver may have populated this library while we waited.
-      if (ir_needs_materialize(library_path, pkgs, has_source_ref)) {
-        do.call(renv::use, c(
-          as.list(install_specs),
-          list(
-            library = library_path,
-            repos   = repos,
-            attach  = FALSE,
-            sandbox = FALSE,
-            isolate = TRUE,
-            verbose = TRUE
-          )
-        ))
-      }
-    }, cache_dir = cache_dir)
+    do.call(renv::use, c(
+      as.list(install_specs),
+      list(
+        library = library_path,
+        repos   = repos,
+        attach  = FALSE,
+        sandbox = FALSE,
+        isolate = TRUE,
+        verbose = TRUE
+      )
+    ))
   }
 
   ## 4b. Record the resolution so an identical request skips pak.

@@ -22,7 +22,7 @@ if (is.null(repos)) {
 
 options(repos = repos, renv.consent = TRUE)
 
-tooling <- c("pak", "renv", "secretbase", "filelock")
+tooling <- c("pak", "renv", "secretbase")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))
   utils::install.packages(missing, repos = tooling_repos)

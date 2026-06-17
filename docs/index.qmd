@@ -35,7 +35,7 @@ library(tidyr)
 - Install persistent launchers for package executables with `ir tool install`.
 - Inspect and clear the cache with `ir cache dir` and `ir cache clean`.
 - Configure cache, Rscript, Quarto, and launcher destinations with environment variables.
-- Bootstrap resolver tooling (`pak`, `renv`, `secretbase`, `filelock`) automatically on first use, with no manual install.
+- Bootstrap resolver tooling (`pak`, `renv`, `secretbase`) automatically on first use, with no manual install.
 
 ## Common commands
 
