@@ -411,6 +411,204 @@ fn run_with_exclude_newer_frontmatter_errors_when_implicit_r_minor_is_missing() 
 
 #[cfg(unix)]
 #[test]
+fn run_with_future_exclude_newer_keeps_embedded_minor_release_candidates() {
+    let cache_dir = unique_dir("ir-exclude-newer-future-minor-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-future-minor-bin");
+    let r45_dir = unique_dir("ir-exclude-newer-future-minor-r45");
+    let r46_dir = unique_dir("ir-exclude-newer-future-minor-r46");
+    let script = unique_path("ir-exclude-newer-future-minor", "R");
+
+    let r45_binary = r45_dir.join("R");
+    let r45_rscript = r45_dir.join("Rscript");
+    write_executable(
+        &r45_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=r45\n",
+        ),
+    );
+
+    let r46_binary = r46_dir.join("R");
+    let r46_rscript = r46_dir.join("Rscript");
+    write_executable(
+        &r46_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=r46\n",
+        ),
+    );
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1 $2\" in\n",
+                "  \"available --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.5.3","version":"4.5.3","date":"2026-03-11"}},
+{{"name":"4.6.1","version":"4.6.1","date":"2026-07-01"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  \"list --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.5.3","version":"4.5.3","aliases":[],"binary":"{}"}},
+{{"name":"4.6.0","version":"4.6.0","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            r45_binary.display(),
+            r46_binary.display(),
+        ),
+    );
+
+    fs::write(&script, "#| exclude-newer: 2026-06-20\ncat('ignored')\n").unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r46");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r45_dir);
+    let _ = fs::remove_dir_all(&r46_dir);
+    let _ = fs::remove_file(&script);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_future_exclude_newer_refreshes_stale_available_cache() {
+    let cache_dir = unique_dir("ir-exclude-newer-stale-available-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-stale-available-bin");
+    let r46_dir = unique_dir("ir-exclude-newer-stale-available-r46");
+    let r47_dir = unique_dir("ir-exclude-newer-stale-available-r47");
+    let script = unique_path("ir-exclude-newer-stale-available", "R");
+
+    let cached_available = cache_dir.join("rig").join("available.json");
+    fs::create_dir_all(cached_available.parent().unwrap()).unwrap();
+    fs::write(
+        &cached_available,
+        r#"[{"name":"4.6.3","version":"4.6.3","date":"2027-03-11"}]"#,
+    )
+    .unwrap();
+
+    let r46_binary = r46_dir.join("R");
+    let r46_rscript = r46_dir.join("Rscript");
+    write_executable(
+        &r46_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=r46\n",
+        ),
+    );
+
+    let r47_binary = r47_dir.join("R");
+    let r47_rscript = r47_dir.join("Rscript");
+    write_executable(
+        &r47_rscript,
+        concat!(
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=r47\n",
+        ),
+    );
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1 $2\" in\n",
+                "  \"available --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6.3","version":"4.6.3","date":"2027-03-11"}},
+{{"name":"4.7.0","version":"4.7.0","date":"2027-04-24"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  \"list --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6.3","version":"4.6.3","aliases":[],"binary":"{}"}},
+{{"name":"4.7.0","version":"4.7.0","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            r46_binary.display(),
+            r47_binary.display(),
+        ),
+    );
+
+    fs::write(&script, "#| exclude-newer: 2027-05-01\ncat('ignored')\n").unwrap();
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r47");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r46_dir);
+    let _ = fs::remove_dir_all(&r47_dir);
+    let _ = fs::remove_file(&script);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_without_r_version_skips_non_executable_rscript_on_path() {
     let cache_dir = unique_dir("ir-path-rscript-executable-cache");
     let stale_dir = unique_dir("ir-path-rscript-stale-bin");

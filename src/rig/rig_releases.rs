@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use super::r_selection::{self, AvailableCandidate, VersionRequirement};
 use super::rig_client::{self, AvailableR};
@@ -148,12 +149,20 @@ pub(crate) fn latest_minor_version_on(exclude_newer: &str) -> Result<String, Box
         return Ok(release.version.to_string());
     }
 
-    let available = cached_available()?;
+    let available = refresh_available_cache()?;
+    let available_minor_releases = available_minor_releases(&available)?;
     let release = r_selection::select_latest_available_candidate(
         exclude_newer,
-        available.iter().map(AvailableCandidate::from),
+        EMBEDDED_MINOR_RELEASES
+            .iter()
+            .map(AvailableCandidate::from)
+            .chain(
+                available_minor_releases
+                    .iter()
+                    .map(AvailableCandidate::from),
+            ),
     )?;
-    r_selection::major_minor_version(release.version)
+    Ok(release.version.to_string())
 }
 
 fn required_available_version_from_candidates<'a>(
@@ -167,15 +176,28 @@ fn required_available_version_from_candidates<'a>(
 }
 
 fn cached_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
-    let path = crate::runtime::ir_cache_dir()?
-        .join("rig")
-        .join("available.json");
+    let path = available_cache_path()?;
     if path.exists() {
         let json = fs::read_to_string(&path)
             .map_err(|e| format!("failed to read `{}`: {e}", path.display()))?;
         return parse_available_json(&json);
     }
 
+    fetch_available_into_cache(&path)
+}
+
+fn refresh_available_cache() -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    let path = available_cache_path()?;
+    fetch_available_into_cache(&path)
+}
+
+fn available_cache_path() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(crate::runtime::ir_cache_dir()?
+        .join("rig")
+        .join("available.json"))
+}
+
+fn fetch_available_into_cache(path: &Path) -> Result<Vec<AvailableR>, Box<dyn Error>> {
     let json = String::from_utf8(rig_client::output(&["available", "--json"])?)
         .map_err(|e| format!("`rig available --json` returned non-UTF-8 output: {e}"))?;
     let available = parse_available_json(&json)?;
@@ -187,6 +209,20 @@ fn cached_available() -> Result<Vec<AvailableR>, Box<dyn Error>> {
     }
     fs::write(&path, json).map_err(|e| format!("failed to write `{}`: {e}", path.display()))?;
     Ok(available)
+}
+
+fn available_minor_releases(available: &[AvailableR]) -> Result<Vec<AvailableR>, Box<dyn Error>> {
+    available
+        .iter()
+        .map(|release| {
+            let version = r_selection::major_minor_version(&release.version)?;
+            Ok(AvailableR {
+                name: version.clone(),
+                version,
+                date: release.date.clone(),
+            })
+        })
+        .collect()
 }
 
 fn parse_available_json(json: &str) -> Result<Vec<AvailableR>, Box<dyn Error>> {
