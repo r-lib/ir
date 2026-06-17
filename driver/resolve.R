@@ -305,6 +305,48 @@ ir_needs_materialize <- function(library_path, pkgs, has_source_ref) {
   has_source_ref || !all(pkgs %in% have)
 }
 
+ir_write_resolution_markers <- function(marker,
+                                        package_marker,
+                                        exclude_newer,
+                                        library_path,
+                                        primary_package) {
+  if (!is.null(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
+  }
+  if (!is.null(primary_package) && !is.null(package_marker)) {
+    writeLines(primary_package, package_marker)
+  }
+}
+
+ir_try_resolution_marker <- function(marker,
+                                     package_marker,
+                                     package_result_file,
+                                     exclude_newer,
+                                     result_file) {
+  if (is.null(marker) || !file.exists(marker)) return(FALSE)
+
+  cached <- readLines(marker, n = 2L, warn = FALSE)
+  if (length(cached) < 2L ||
+      !ir_marker_source_current(cached[[1L]], exclude_newer) ||
+      !nzchar(cached[[2L]]) ||
+      !dir.exists(cached[[2L]])) {
+    return(FALSE)
+  }
+
+  if (!is.null(package_result_file) &&
+      (is.null(package_marker) || !file.exists(package_marker))) {
+    return(FALSE)
+  }
+
+  writeLines(cached[[2L]], result_file)
+  if (!is.null(package_result_file)) {
+    package <- readLines(package_marker, n = 1L, warn = FALSE)
+    writeLines(package, package_result_file)
+  }
+  TRUE
+}
+
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
@@ -348,25 +390,9 @@ ir_resolve_main <- function() {
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!is.null(marker) && file.exists(marker)) {
-    cached <- readLines(marker, n = 2L, warn = FALSE)
-    if (length(cached) >= 2L &&
-        ir_marker_source_current(cached[[1L]], exclude_newer) &&
-        nzchar(cached[[2L]]) &&
-        dir.exists(cached[[2L]])) {
-      if (!is.null(package_result_file) &&
-          (is.null(package_marker) || !file.exists(package_marker))) {
-        # The library is reusable, but this caller needs primary-package
-        # metadata that older cache entries did not record.
-      } else {
-        writeLines(cached[[2L]], result_file)
-        if (!is.null(package_result_file)) {
-          package <- readLines(package_marker, n = 1L, warn = FALSE)
-          writeLines(package, package_result_file)
-        }
-        return(invisible())
-      }
-    }
+  if (ir_try_resolution_marker(marker, package_marker, package_result_file,
+                               exclude_newer, result_file)) {
+    return(invisible())
   }
 
   ## 2. Resolve with pak
@@ -444,13 +470,8 @@ ir_resolve_main <- function() {
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
-  if (!is.null(marker)) {
-    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
-  }
-  if (!is.null(primary_package) && !is.null(package_marker)) {
-    writeLines(primary_package, package_marker)
-  }
+  ir_write_resolution_markers(marker, package_marker, exclude_newer,
+                              library_path, primary_package)
   writeLines(library_path, result_file)
   if (!is.null(package_result_file)) {
     writeLines(primary_package, package_result_file)

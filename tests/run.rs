@@ -1247,7 +1247,7 @@ fn paste_lines(lines: &[&str]) -> String {
     lines.join("\n")
 }
 
-fn write_resolver_lock_profile(
+fn write_materialize_lock_profile(
     profile: &Path,
     active: &Path,
     overlap: &Path,
@@ -1301,10 +1301,105 @@ ir_test_write_pkg(
 "#,
             pak_code = serde_json::to_string(&paste_lines(&[
                 "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+                "  refs <- as.character(refs)",
+                "  data.frame(",
+                "    status = rep('OK', length(refs)),",
+                "    ref = refs,",
+                "    package = sub('@.*$', '', refs),",
+                "    version = rep('0.0.1', length(refs)),",
+                "    type = rep('standard', length(refs)),",
+                "    priority = NA_character_,",
+                "    direct = TRUE,",
+                "    stringsAsFactors = FALSE",
+                "  )",
+                "}",
+            ]))
+            .unwrap(),
+            renv_code = serde_json::to_string(&paste_lines(&[
+                "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
                 &format!("  active <- {}", r_string(active)),
                 "  if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {",
                 &format!("    writeLines('overlap', {})", r_string(overlap)),
-                "    stop('resolver entered concurrently', call. = FALSE)",
+                "    stop('renv::use overlapped', call. = FALSE)",
+                "  }",
+                "  on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)",
+                &format!(
+                    "  cat(Sys.getpid(), '\\n', file = {}, append = TRUE)",
+                    r_string(entered)
+                ),
+                &format!("  Sys.sleep({sleep_seconds})"),
+                "  specs <- unlist(list(...), use.names = FALSE)",
+                "  for (spec in specs) {",
+                "    pkg <- sub('@.*$', '', spec)",
+                "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+                "  }",
+                "  invisible(TRUE)",
+                "}",
+            ]))
+            .unwrap(),
+        ),
+    )
+    .unwrap();
+}
+
+fn write_same_resolution_lock_profile(
+    profile: &Path,
+    active: &Path,
+    overlap: &Path,
+    entered: &Path,
+    sleep_seconds: f64,
+) {
+    fs::write(
+        profile,
+        format!(
+            r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      paste("Package:", pkg),
+      "Version: 0.0.1",
+      paste("Title:", pkg),
+      paste0("Description: ", pkg, "."),
+      "License: MIT"
+    ),
+    file.path(path, "DESCRIPTION")
+  )
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+}}
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "secretbase",
+  "export(sha256)",
+  "sha256 <- function(x) 'irsameresolutionlockhash'"
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "pak",
+  "export(pkg_deps)",
+  {pak_code}
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "renv",
+  "export(use)",
+  {renv_code}
+)
+"#,
+            pak_code = serde_json::to_string(&paste_lines(&[
+                "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+                &format!("  active <- {}", r_string(active)),
+                "  if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {",
+                &format!("    writeLines('overlap', {})", r_string(overlap)),
+                "    stop('pak::pkg_deps overlapped', call. = FALSE)",
                 "  }",
                 "  on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)",
                 &format!(
@@ -1343,14 +1438,14 @@ ir_test_write_pkg(
 }
 
 #[test]
-fn concurrent_resolvers_serialize_dependency_resolution() {
-    let cache_dir = unique_dir("ir-resolver-lock-cache");
-    let profile = unique_path("ir-resolver-lock-profile", "R");
-    let active = unique_path("ir-resolver-lock-active", "");
-    let entered = unique_path("ir-resolver-lock-entered", "txt");
-    let overlap = unique_path("ir-resolver-lock-overlap", "txt");
+fn concurrent_resolvers_serialize_same_library_materialization() {
+    let cache_dir = unique_dir("ir-renv-materialize-lock-cache");
+    let profile = unique_path("ir-renv-materialize-lock-profile", "R");
+    let active = unique_path("ir-renv-materialize-active", "");
+    let entered = unique_path("ir-renv-materialize-entered", "txt");
+    let overlap = unique_path("ir-renv-materialize-overlap", "txt");
 
-    write_resolver_lock_profile(&profile, &active, &overlap, &entered, 1.0);
+    write_materialize_lock_profile(&profile, &active, &overlap, &entered, 1.0);
 
     let mut first = ir();
     first
@@ -1363,7 +1458,87 @@ fn concurrent_resolvers_serialize_dependency_resolution() {
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=resolver-lock-one\\n')",
+            "cat('ir.fixture=lock-one\\n')",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut first = first.spawn().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !active.exists() && Instant::now() < deadline {
+        if first.try_wait().unwrap().is_some() {
+            let first = first.wait_with_output().unwrap();
+            panic!(
+                "first resolver exited before fake renv::use\n{}",
+                output_text(&first)
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        active.exists(),
+        "first resolver should enter fake renv::use before second starts"
+    );
+
+    let second = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=lock-two\\n')",
+        ])
+        .output()
+        .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=lock-one");
+    assert_stdout_contains(&second, "ir.fixture=lock-two");
+    assert!(!overlap.exists(), "renv::use should not overlap");
+
+    let entered = fs::read_to_string(&entered)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()));
+    assert_eq!(
+        entered.lines().count(),
+        1,
+        "second resolver should reuse the completed materialized library"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn concurrent_resolvers_serialize_same_dependency_resolution() {
+    let cache_dir = unique_dir("ir-same-resolution-lock-cache");
+    let profile = unique_path("ir-same-resolution-lock-profile", "R");
+    let active = unique_path("ir-same-resolution-lock-active", "");
+    let entered = unique_path("ir-same-resolution-lock-entered", "txt");
+    let overlap = unique_path("ir-same-resolution-lock-overlap", "txt");
+
+    write_same_resolution_lock_profile(&profile, &active, &overlap, &entered, 1.0);
+
+    let mut first = ir();
+    first
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=resolution-lock-one\\n')",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1395,7 +1570,7 @@ fn concurrent_resolvers_serialize_dependency_resolution() {
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=resolver-lock-two\\n')",
+            "cat('ir.fixture=resolution-lock-two\\n')",
         ])
         .output()
         .unwrap();
@@ -1403,23 +1578,219 @@ fn concurrent_resolvers_serialize_dependency_resolution() {
 
     assert_success(&first);
     assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=resolver-lock-one");
-    assert_stdout_contains(&second, "ir.fixture=resolver-lock-two");
-    assert!(
-        !overlap.exists(),
-        "dependency resolution should not overlap"
-    );
+    assert_stdout_contains(&first, "ir.fixture=resolution-lock-one");
+    assert_stdout_contains(&second, "ir.fixture=resolution-lock-two");
+    assert!(!overlap.exists(), "pak::pkg_deps should not overlap");
 
     let entered = fs::read_to_string(&entered)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()));
     assert_eq!(
         entered.lines().count(),
         1,
-        "second resolver should reuse the cache after waiting for the first"
+        "second resolver should reuse the completed resolution marker"
     );
 
     let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn resolver_lock_accepts_cache_paths_with_spaces() {
+    let cache_dir = unique_dir("ir resolver lock cache with spaces");
+    let profile = unique_path("ir-resolver-lock-spaces-profile", "R");
+    let active = unique_path("ir-resolver-lock-spaces-active", "");
+    let entered = unique_path("ir-resolver-lock-spaces-entered", "txt");
+    let overlap = unique_path("ir-resolver-lock-spaces-overlap", "txt");
+
+    write_materialize_lock_profile(&profile, &active, &overlap, &entered, 0.0);
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=resolver-lock-spaces\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=resolver-lock-spaces");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+fn write_resolution_serialization_profile(
+    profile: &Path,
+    active: &Path,
+    overlap: &Path,
+    sleep_seconds: f64,
+) {
+    fs::write(
+        profile,
+        format!(
+            r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(
+    c(
+      paste("Package:", pkg),
+      "Version: 0.0.1",
+      paste("Title:", pkg),
+      paste0("Description: ", pkg, "."),
+      "License: MIT"
+    ),
+    file.path(path, "DESCRIPTION")
+  )
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+}}
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "secretbase",
+  "export(sha256)",
+  "sha256 <- function(x) paste0('irhash-', nchar(x), '-', sum(utf8ToInt(x)))"
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "pak",
+  "export(pkg_deps)",
+  {pak_code}
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "renv",
+  "export(use)",
+  {renv_code}
+)
+"#,
+            pak_code = serde_json::to_string(&paste_lines(&[
+                "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+                &format!("  active <- {}", r_string(active)),
+                "  active_created <- dir.create(active, recursive = TRUE, showWarnings = FALSE)",
+                &format!(
+                    "  if (!active_created) writeLines('overlap', {})",
+                    r_string(overlap)
+                ),
+                "  if (active_created) on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)",
+                &format!("  Sys.sleep({sleep_seconds})"),
+                "  refs <- as.character(refs)",
+                "  data.frame(",
+                "    status = rep('OK', length(refs)),",
+                "    ref = refs,",
+                "    package = sub('@.*$', '', refs),",
+                "    version = rep('0.0.1', length(refs)),",
+                "    type = rep('standard', length(refs)),",
+                "    priority = NA_character_,",
+                "    direct = TRUE,",
+                "    stringsAsFactors = FALSE",
+                "  )",
+                "}",
+            ]))
+            .unwrap(),
+            renv_code = serde_json::to_string(&paste_lines(&[
+                "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
+                "  specs <- unlist(list(...), use.names = FALSE)",
+                "  for (spec in specs) {",
+                "    pkg <- sub('@.*$', '', spec)",
+                "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+                "  }",
+                "  invisible(TRUE)",
+                "}",
+            ]))
+            .unwrap(),
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn concurrent_resolvers_serialize_different_dependency_resolution() {
+    let cache_dir = unique_dir("ir-resolution-overlap-cache");
+    let profile = unique_path("ir-resolution-overlap-profile", "R");
+    let active = unique_path("ir-resolution-overlap-active", "");
+    let overlap = unique_path("ir-resolution-overlap", "txt");
+
+    write_resolution_serialization_profile(&profile, &active, &overlap, 1.0);
+
+    let mut first = ir();
+    first
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=resolution-one\\n')",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut first = first.spawn().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !active.exists() && Instant::now() < deadline {
+        if first.try_wait().unwrap().is_some() {
+            let first = first.wait_with_output().unwrap();
+            panic!(
+                "first resolver exited before fake pak::pkg_deps\n{}",
+                output_text(&first)
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        active.exists(),
+        "first resolver should enter fake pak::pkg_deps before second starts"
+    );
+
+    let second = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "glue",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=resolution-two\\n')",
+        ])
+        .output()
+        .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=resolution-one");
+    assert_stdout_contains(&second, "ir.fixture=resolution-two");
+    assert!(
+        !overlap.exists(),
+        "different cold resolutions should not overlap"
+    );
+
+    let _ = fs::remove_file(&profile);
     let _ = fs::remove_file(&overlap);
     let _ = fs::remove_dir_all(&active);
     let _ = fs::remove_dir_all(&cache_dir);
