@@ -890,6 +890,348 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
 
 #[cfg(unix)]
 #[test]
+fn resolver_tooling_uses_compatible_user_library_packages() {
+    let cache_dir = unique_dir("ir-compatible-tooling-cache");
+    let user_library = unique_dir("ir-compatible-tooling-user-library");
+    let fake_load_marker = unique_path("ir-compatible-secretbase-loaded", "txt");
+    let profile = unique_path("ir-compatible-tooling-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code,
+                              built = as.character(getRversion())) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+
+  built_field <- paste0(
+    "R ", built, "; ; 2026-01-01 00:00:00 UTC; ", .Platform$OS.type
+  )
+  description <- c(
+    Package = pkg,
+    Version = "0.0.1",
+    Title = pkg,
+    Description = paste0(pkg, "."),
+    License = "MIT",
+    Built = built_field
+  )
+
+  writeLines(paste(names(description), description, sep = ": "),
+             file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+  saveRDS(
+    list(
+      DESCRIPTION = description,
+      Built = list(
+        R = package_version(built),
+        Platform = "",
+        Date = "2026-01-01 00:00:00 UTC",
+        OStype = .Platform$OS.type
+      ),
+      Depends = NULL,
+      Imports = NULL,
+      LinkingTo = NULL,
+      Suggests = NULL
+    ),
+    file.path(path, "Meta", "package.rds")
+  )
+}}
+
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "secretbase",
+  "export(sha256)",
+  paste(
+    paste0(".onLoad <- function(...) writeLines('loaded', ", deparse({}), ")"),
+    "sha256 <- function(x) 'ambienthash'",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "pak",
+  "export(pkg_deps)",
+  paste(
+    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
+    "  refs <- as.character(refs)",
+    "  data.frame(",
+    "    status = rep('OK', length(refs)),",
+    "    ref = refs,",
+    "    package = sub('@.*$', '', refs),",
+    "    version = rep('0.0.1', length(refs)),",
+    "    type = rep('standard', length(refs)),",
+    "    priority = NA_character_,",
+    "    direct = TRUE,",
+    "    stringsAsFactors = FALSE",
+    "  )",
+    "}}",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "renv",
+  "export(use)",
+  paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {{",
+    "  specs <- unlist(list(...), use.names = FALSE)",
+    "  for (spec in specs) {{",
+    "    pkg <- sub('@.*$', '', spec)",
+    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "  }}",
+    "  invisible(TRUE)",
+    "}}",
+    sep = "\n"
+  )
+)
+
+utils::assignInNamespace("install.packages", function(...) {{
+  stop("resolver should use compatible R_LIBS_USER tooling", call. = FALSE)
+}}, ns = "utils")
+"#,
+            r_string(&fake_load_marker)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=compatible-tooling\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=compatible-tooling");
+    assert!(
+        fake_load_marker.exists(),
+        "resolver should load compatible secretbase from R_LIBS_USER"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&fake_load_marker);
+    let _ = fs::remove_dir_all(&user_library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
+    let cache_dir = unique_dir("ir-ambient-tooling-cache");
+    let ambient_library = unique_dir("ir-ambient-tooling-user-library");
+    let fake_secretbase_load_marker = unique_path("ir-ambient-secretbase-loaded", "txt");
+    let fake_pillar_load_marker = unique_path("ir-ambient-pillar-loaded", "txt");
+    let profile = unique_path("ir-tooling-install-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code, built = NULL) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+
+  description <- c(
+    Package = pkg,
+    Version = "0.0.1",
+    Title = pkg,
+    Description = paste0(pkg, "."),
+    License = "MIT"
+  )
+  if (!is.null(built)) {{
+    built_field <- paste0(
+      "R ", built, "; ; 2026-01-01 00:00:00 UTC; ", .Platform$OS.type
+    )
+    description <- c(description, Built = built_field)
+  }}
+
+  writeLines(paste(names(description), description, sep = ": "),
+             file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+
+  if (!is.null(built)) {{
+    dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(
+      list(
+        DESCRIPTION = description,
+        Built = list(
+          R = package_version(built),
+          Platform = "",
+          Date = "2026-01-01 00:00:00 UTC",
+          OStype = .Platform$OS.type
+        ),
+        Depends = NULL,
+        Imports = NULL,
+        LinkingTo = NULL,
+        Suggests = NULL
+      ),
+      file.path(path, "Meta", "package.rds")
+    )
+  }}
+}}
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+ir_test_r_parts <- strsplit(as.character(getRversion()), ".", fixed = TRUE)[[1]]
+ir_test_wrong_minor <- if (identical(ir_test_r_parts[[2]], "0")) "1" else "0"
+ir_test_wrong_r <- paste(ir_test_r_parts[[1]], ir_test_wrong_minor, "0", sep = ".")
+
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "secretbase",
+  "export(sha256)",
+  paste(
+    paste0(".onLoad <- function(...) writeLines('loaded', ", deparse({}), ")"),
+    "sha256 <- function(x) 'ambienthash'",
+    sep = "\n"
+  ),
+  built = ir_test_wrong_r
+)
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "pillar",
+  "export(pillar_shaft)",
+  paste(
+    paste0(".onLoad <- function(...) writeLines('loaded', ", deparse({}), ")"),
+    "pillar_shaft <- function(x, ...) x",
+    sep = "\n"
+  ),
+  built = ir_test_wrong_r
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "pak",
+  "export(pkg_deps)",
+  paste(
+    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
+    "  invisible(requireNamespace('pillar', quietly = TRUE))",
+    "  refs <- as.character(refs)",
+    "  data.frame(",
+    "    status = rep('OK', length(refs)),",
+    "    ref = refs,",
+    "    package = sub('@.*$', '', refs),",
+    "    version = rep('0.0.1', length(refs)),",
+    "    type = rep('standard', length(refs)),",
+    "    priority = NA_character_,",
+    "    direct = TRUE,",
+    "    stringsAsFactors = FALSE",
+    "  )",
+    "}}",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "renv",
+  "export(use)",
+  paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {{",
+    "  specs <- unlist(list(...), use.names = FALSE)",
+    "  for (spec in specs) {{",
+    "    pkg <- sub('@.*$', '', spec)",
+    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "  }}",
+    "  invisible(TRUE)",
+    "}}",
+    sep = "\n"
+  )
+)
+
+utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
+  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  for (pkg in pkgs) {{
+    if (!identical(pkg, "secretbase"))
+      stop("unexpected resolver tooling package: ", pkg, call. = FALSE)
+    ir_test_write_pkg(
+      lib,
+      "secretbase",
+      "export(sha256)",
+      "sha256 <- function(x) 'privatehash'"
+    )
+  }}
+}}, ns = "utils")
+"#,
+            r_string(&fake_secretbase_load_marker),
+            r_string(&fake_pillar_load_marker)
+        ),
+    )
+    .unwrap();
+
+    let first = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &ambient_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=ambient-tooling\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&first);
+    assert_stdout_contains(&first, "ir.fixture=ambient-tooling");
+    assert!(
+        !fake_secretbase_load_marker.exists(),
+        "resolver should not load secretbase from ambient R_LIBS_USER"
+    );
+    assert!(
+        !fake_pillar_load_marker.exists(),
+        "resolver should remove wrong-R-minor R_LIBS_USER before pak loads auxiliary packages"
+    );
+
+    let second = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_LIBS_USER", &ambient_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "glue",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=ambient-tooling-warm\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&second);
+    assert_stdout_contains(&second, "ir.fixture=ambient-tooling-warm");
+    assert!(
+        !fake_pillar_load_marker.exists(),
+        "resolver should prune wrong-R-minor R_LIBS_USER even when private tooling is warm"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&fake_secretbase_load_marker);
+    let _ = fs::remove_file(&fake_pillar_load_marker);
+    let _ = fs::remove_dir_all(&ambient_library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let cache_dir = unique_dir("ir-warm-tool-install-cache");
     let bin_dir = unique_dir("ir-warm-tool-install-bin");
