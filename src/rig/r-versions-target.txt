@@ -1,1 +1,1 @@
-neutral
+macos/arm64

@@ -1,1 +1,163 @@
-[{"version":"0.0","date":"1995-06-20T00:00:00.000000Z","semver":"0.0.0","nickname":null},{"version":"0.1","date":"1996-02-12T03:22:00.000000Z","semver":"0.1.0","nickname":null},{"version":"0.2","date":"1996-03-14T21:59:00.000000Z","semver":"0.2.0","nickname":null},{"version":"0.3","date":"1996-03-22T06:46:00.000000Z","semver":"0.3.0","nickname":null},{"version":"0.4","date":"1996-04-01T23:18:00.000000Z","semver":"0.4.0","nickname":null},{"version":"0.5","date":"1996-05-13T04:06:00.000000Z","semver":"0.5.0","nickname":null},{"version":"0.6","date":"1996-05-17T04:53:00.000000Z","semver":"0.6.0","nickname":null},{"version":"0.7","date":"1996-05-28T03:31:00.000000Z","semver":"0.7.0","nickname":null},{"version":"0.8","date":"1996-05-31T04:51:00.000000Z","semver":"0.8.0","nickname":null},{"version":"0.9","date":"1996-06-07T04:40:00.000000Z","semver":"0.9.0","nickname":null},{"version":"0.10","date":"1996-08-27T05:03:00.000000Z","semver":"0.10.0","nickname":null},{"version":"0.11","date":"1996-09-09T05:14:00.000000Z","semver":"0.11.0","nickname":null},{"version":"0.12","date":"1996-09-20T04:03:00.000000Z","semver":"0.12.0","nickname":null},{"version":"0.13","date":"1996-11-07T04:10:00.000000Z","semver":"0.13.0","nickname":null},{"version":"0.14","date":"1996-11-28T23:42:00.000000Z","semver":"0.14.0","nickname":null},{"version":"0.15","date":"1996-12-19T00:52:00.000000Z","semver":"0.15.0","nickname":null},{"version":"0.16","date":"1997-02-07T02:14:00.000000Z","semver":"0.16.0","nickname":null},{"version":"0.16.1","date":"1997-02-09T22:36:00.000000Z","semver":"0.16.1","nickname":null},{"version":"0.49","date":"1997-04-23T14:53:00.000000Z","semver":"0.49.0","nickname":null},{"version":"0.50-a1","semver":"0.50.1","date":"1997-07-22T16:44:00.000000Z","nickname":null},{"version":"0.50-a4","semver":"0.50.4","date":"1997-09-10T14:31:00.000000Z","nickname":null},{"version":"0.60","date":"1997-12-04T08:47:58.000000Z","semver":"0.60.0","nickname":null},{"version":"0.61","date":"1997-12-21T13:09:22.000000Z","semver":"0.61.0","nickname":null},{"version":"0.61.1","date":"1998-01-10T00:31:55.000000Z","semver":"0.61.1","nickname":null},{"version":"0.61.2","date":"1998-03-14T19:25:55.000000Z","semver":"0.61.2","nickname":null},{"version":"0.61.3","date":"1998-05-02T07:58:17.000000Z","semver":"0.61.3","nickname":null},{"version":"0.62","date":"1998-06-14T12:56:20.000000Z","semver":"0.62.0","nickname":null},{"version":"0.62.1","date":"1998-06-14T22:13:25.000000Z","semver":"0.62.1","nickname":null},{"version":"0.62.2","date":"1998-07-10T11:13:45.000000Z","semver":"0.62.2","nickname":null},{"version":"0.62.3","date":"1998-08-28T09:02:19.000000Z","semver":"0.62.3","nickname":null},{"version":"0.62.4","date":"1998-10-23T12:08:41.000000Z","semver":"0.62.4","nickname":null},{"version":"0.63","date":"1998-11-13T14:37:19.000000Z","semver":"0.63.0","nickname":null},{"version":"0.63.1","date":"1998-12-04T13:06:28.000000Z","semver":"0.63.1","nickname":null},{"version":"0.63.2","date":"1999-01-11T12:55:50.000000Z","semver":"0.63.2","nickname":null},{"version":"0.63.3","date":"1999-03-05T14:27:14.000000Z","semver":"0.63.3","nickname":null},{"version":"0.64","date":"1999-04-07T13:19:41.000000Z","semver":"0.64.0","nickname":null},{"version":"0.64.1","date":"1999-05-07T13:25:43.000000Z","semver":"0.64.1","nickname":null},{"version":"0.64.2","date":"1999-07-02T12:23:15.000000Z","semver":"0.64.2","nickname":null},{"version":"0.65","date":"1999-08-27T10:29:29.000000Z","semver":"0.65.0","nickname":null},{"version":"0.65.1","date":"1999-10-06T12:13:04.000000Z","semver":"0.65.1","nickname":null},{"version":"0.90","date":"1999-11-22T12:25:14.000000Z","semver":"0.90.0","nickname":null},{"version":"0.90.1","date":"1999-12-15T12:29:07.000000Z","semver":"0.90.1","nickname":null},{"version":"0.99","date":"2000-02-07T11:24:50.000000Z","semver":"0.99.0","nickname":null},{"version":"1.0","date":"2000-02-29T08:55:23.000000Z","semver":"1.0.0","nickname":null},{"version":"1.0.1","date":"2000-04-14T08:44:18.000000Z","semver":"1.0.1","nickname":null},{"version":"1.1","date":"2000-06-15T08:43:21.000000Z","semver":"1.1.0","nickname":null},{"version":"1.1.1","date":"2000-08-15T08:54:18.000000Z","semver":"1.1.1","nickname":null},{"version":"1.2","date":"2000-12-15T10:19:25.000000Z","semver":"1.2.0","nickname":null},{"version":"1.2.1","date":"2001-01-15T10:18:01.000000Z","semver":"1.2.1","nickname":null},{"version":"1.2.2","date":"2001-02-26T12:43:25.000000Z","semver":"1.2.2","nickname":null},{"version":"1.2.3","date":"2001-04-26T11:29:47.000000Z","semver":"1.2.3","nickname":null},{"version":"1.3","date":"2001-06-22T10:41:02.000000Z","semver":"1.3.0","nickname":null},{"version":"1.3.1","date":"2001-08-31T12:45:52.000000Z","semver":"1.3.1","nickname":null},{"version":"1.4","date":"2001-12-19T10:14:54.000000Z","semver":"1.4.0","nickname":null},{"version":"1.4.1","date":"2002-01-30T11:57:35.000000Z","semver":"1.4.1","nickname":null},{"version":"1.5.0","date":"2002-04-29T10:01:26.000000Z","semver":"1.5.0","nickname":null},{"version":"1.5.1","date":"2002-06-17T11:20:33.000000Z","semver":"1.5.1","nickname":null},{"version":"1.6.0","date":"2002-10-01T10:06:31.000000Z","semver":"1.6.0","nickname":null},{"version":"1.6.1","date":"2002-11-01T10:33:17.000000Z","semver":"1.6.1","nickname":null},{"version":"1.6.2","date":"2003-01-10T15:34:34.000000Z","semver":"1.6.2","nickname":null},{"version":"1.7.0","date":"2003-04-16T12:58:07.000000Z","semver":"1.7.0","nickname":null},{"version":"1.7.1","date":"2003-06-16T09:54:39.000000Z","semver":"1.7.1","nickname":null},{"version":"1.8.0","date":"2003-10-08T11:13:59.000000Z","semver":"1.8.0","nickname":null},{"version":"1.8.1","date":"2003-11-21T12:00:21.000000Z","semver":"1.8.1","nickname":null},{"version":"1.9.0","date":"2004-04-12T10:36:38.000000Z","semver":"1.9.0","nickname":null},{"version":"1.9.1","date":"2004-06-21T11:09:39.000000Z","semver":"1.9.1","nickname":null},{"version":"2.0.0","date":"2004-10-04T14:24:38.899055Z","semver":"2.0.0","nickname":null},{"version":"2.0.1","date":"2004-11-15T14:16:30.003793Z","semver":"2.0.1","nickname":null},{"version":"2.1.0","date":"2005-04-18T22:26:33.135566Z","semver":"2.1.0","nickname":null},{"version":"2.1.1","date":"2005-06-20T09:27:13.106513Z","semver":"2.1.1","nickname":null},{"version":"2.2.0","date":"2005-10-06T10:22:14.085752Z","semver":"2.2.0","nickname":null},{"version":"2.2.1","date":"2005-12-20T10:35:21.589612Z","semver":"2.2.1","nickname":null},{"version":"2.3.0","date":"2006-04-24T10:37:20.758200Z","semver":"2.3.0","nickname":null},{"version":"2.3.1","date":"2006-06-01T08:25:33.882724Z","semver":"2.3.1","nickname":null},{"version":"2.4.0","date":"2006-10-03T10:15:04.354469Z","semver":"2.4.0","nickname":null},{"version":"2.4.1","date":"2006-12-18T09:49:23.725060Z","semver":"2.4.1","nickname":null},{"version":"2.5.0","date":"2007-04-24T09:41:43.361786Z","semver":"2.5.0","nickname":null},{"version":"2.5.1","date":"2007-06-28T11:17:06.374019Z","semver":"2.5.1","nickname":null},{"version":"2.6.0","date":"2007-10-03T09:02:53.434461Z","semver":"2.6.0","nickname":null},{"version":"2.6.1","date":"2007-11-26T14:14:04.408327Z","semver":"2.6.1","nickname":null},{"version":"2.6.2","date":"2008-02-08T11:10:05.737877Z","semver":"2.6.2","nickname":null},{"version":"2.7.0","date":"2008-04-22T07:45:29.665494Z","semver":"2.7.0","nickname":null},{"version":"2.7.1","date":"2008-06-23T07:44:32.518990Z","semver":"2.7.1","nickname":null},{"version":"2.7.2","date":"2008-08-25T08:53:56.807981Z","semver":"2.7.2","nickname":null},{"version":"2.8.0","date":"2008-10-20T09:24:01.015723Z","semver":"2.8.0","nickname":null},{"version":"2.8.1","date":"2008-12-22T09:03:17.828643Z","semver":"2.8.1","nickname":null},{"version":"2.9.0","date":"2009-04-17T08:32:48.144754Z","semver":"2.9.0","nickname":null},{"version":"2.9.1","date":"2009-06-26T12:10:57.017685Z","semver":"2.9.1","nickname":null},{"version":"2.9.2","date":"2009-08-24T08:22:34.737538Z","semver":"2.9.2","nickname":null},{"version":"2.10.0","date":"2009-10-26T09:02:22.255015Z","semver":"2.10.0","nickname":null},{"version":"2.10.1","date":"2009-12-14T10:28:24.741988Z","semver":"2.10.1","nickname":null},{"version":"2.11.0","date":"2010-04-22T08:11:21.939620Z","semver":"2.11.0","nickname":null},{"version":"2.11.1","date":"2010-05-31T08:10:25.280185Z","semver":"2.11.1","nickname":null},{"version":"2.12.0","date":"2010-10-15T08:41:57.974589Z","semver":"2.12.0","nickname":null},{"version":"2.12.1","date":"2010-12-16T09:12:04.607865Z","semver":"2.12.1","nickname":null},{"version":"2.12.2","date":"2011-02-25T11:07:19.316500Z","semver":"2.12.2","nickname":null},{"version":"2.13.0","date":"2011-04-13T08:31:27.165034Z","semver":"2.13.0","nickname":null},{"version":"2.13.1","date":"2011-07-08T09:37:08.653178Z","semver":"2.13.1","nickname":null},{"version":"2.13.2","date":"2011-09-30T07:05:56.091789Z","semver":"2.13.2","nickname":null},{"version":"2.14.0","date":"2011-10-31T08:09:09.353781Z","semver":"2.14.0","nickname":"Great Pumpkin"},{"version":"2.14.1","date":"2011-12-22T08:10:18.809127Z","semver":"2.14.1","nickname":"December Snowflakes"},{"version":"2.14.2","date":"2012-02-29T08:10:10.445478Z","semver":"2.14.2","nickname":"Gift-Getting Season"},{"version":"2.15.0","date":"2012-03-30T07:16:05.708046Z","semver":"2.15.0","nickname":"Easter Beagle"},{"version":"2.15.1","date":"2012-06-22T07:09:44.415136Z","semver":"2.15.1","nickname":"Roasted Marshmallows"},{"version":"2.15.2","date":"2012-10-26T07:11:16.605580Z","semver":"2.15.2","nickname":"Trick or Treat"},{"version":"2.15.3","date":"2013-03-01T08:28:29.088755Z","semver":"2.15.3","nickname":"Security Blanket"},{"version":"3.0.0","date":"2013-04-03T07:12:36.801147Z","semver":"3.0.0","nickname":"Masked Marvel"},{"version":"3.0.1","date":"2013-05-16T07:11:33.885209Z","semver":"3.0.1","nickname":"Good Sport"},{"version":"3.0.2","date":"2013-09-25T07:11:09.016418Z","semver":"3.0.2","nickname":"Frisbee Sailing"},{"version":"3.0.3","date":"2014-03-06T08:12:33.995105Z","semver":"3.0.3","nickname":"Warm Puppy"},{"version":"3.1.0","date":"2014-04-10T07:11:10.831155Z","semver":"3.1.0","nickname":"Spring Dance"},{"version":"3.1.1","date":"2014-07-10T07:11:09.316022Z","semver":"3.1.1","nickname":"Sock it to Me"},{"version":"3.1.2","date":"2014-10-31T08:11:32.082768Z","semver":"3.1.2","nickname":"Pumpkin Helmet"},{"version":"3.1.3","date":"2015-03-09T08:12:20.229070Z","semver":"3.1.3","nickname":"Smooth Sidewalk"},{"version":"3.2.0","date":"2015-04-16T07:13:33.144514Z","semver":"3.2.0","nickname":"Full of Ingredients"},{"version":"3.2.1","date":"2015-06-18T07:15:04.589869Z","semver":"3.2.1","nickname":"World-Famous Astronaut"},{"version":"3.2.2","date":"2015-08-14T07:13:18.272871Z","semver":"3.2.2","nickname":"Fire Safety"},{"version":"3.2.3","date":"2015-12-10T08:13:08.415370Z","semver":"3.2.3","nickname":"Wooden Christmas-Tree"},{"version":"3.2.4","date":"2016-03-10T08:15:45.901354Z","semver":"3.2.4","nickname":"Very Secure Dishes"},{"version":"3.2.5","date":"2016-04-14T15:59:38.833914Z","semver":"3.2.5","nickname":"Very, Very Secure Dishes"},{"version":"3.3.0","date":"2016-05-03T07:13:28.102867Z","semver":"3.3.0","nickname":"Supposedly Educational"},{"version":"3.3.1","date":"2016-06-21T07:21:38.894907Z","semver":"3.3.1","nickname":"Bug in Your Hair"},{"version":"3.3.2","date":"2016-10-31T08:13:15.868949Z","semver":"3.3.2","nickname":"Sincere Pumpkin Patch"},{"version":"3.3.3","date":"2017-03-06T08:16:31.646592Z","semver":"3.3.3","nickname":"Another Canoe"},{"version":"3.4.0","date":"2017-04-21T07:14:45.366247Z","semver":"3.4.0","nickname":"You Stupid Darkness"},{"version":"3.4.1","date":"2017-06-30T07:04:11.824142Z","semver":"3.4.1","nickname":"Single Candle"},{"version":"3.4.2","date":"2017-09-28T07:04:35.796221Z","semver":"3.4.2","nickname":"Short Summer"},{"version":"3.4.3","date":"2017-11-30T08:05:05.204665Z","semver":"3.4.3","nickname":"Kite-Eating Tree"},{"version":"3.4.4","date":"2018-03-15T08:04:27.234564Z","semver":"3.4.4","nickname":"Someone to Lean On"},{"version":"3.5.0","date":"2018-04-23T07:04:38.341063Z","semver":"3.5.0","nickname":"Joy in Playing"},{"version":"3.5.1","date":"2018-07-02T07:04:31.629927Z","semver":"3.5.1","nickname":"Feather Spray"},{"version":"3.5.2","date":"2018-12-20T08:04:40.536010Z","semver":"3.5.2","nickname":"Eggshell Igloo"},{"version":"3.5.3","date":"2019-03-11T08:04:49.379300Z","semver":"3.5.3","nickname":"Great Truth"},{"version":"3.6.0","date":"2019-04-26T07:05:03.899333Z","semver":"3.6.0","nickname":"Planting of a Tree"},{"version":"3.6.1","date":"2019-07-05T07:05:03.918895Z","semver":"3.6.1","nickname":"Action of the Toes"},{"version":"3.6.2","date":"2019-12-12T08:05:03.679160Z","semver":"3.6.2","nickname":"Dark and Stormy Night"},{"version":"3.6.3","date":"2020-02-29T08:05:16.744223Z","semver":"3.6.3","nickname":"Holding the Windsock"},{"version":"4.0.0","date":"2020-04-24T07:05:34.612930Z","semver":"4.0.0","nickname":"Arbor Day"},{"version":"4.0.1","date":"2020-06-06T07:05:16.469439Z","semver":"4.0.1","nickname":"See Things Now"},{"version":"4.0.2","date":"2020-06-22T07:05:19.236082Z","semver":"4.0.2","nickname":"Taking Off Again"},{"version":"4.0.3","date":"2020-10-10T07:05:24.661746Z","semver":"4.0.3","nickname":"Bunny-Wunnies Freak Out"},{"version":"4.0.4","date":"2021-02-15T08:05:13.579673Z","semver":"4.0.4","nickname":"Lost Library Book"},{"version":"4.0.5","date":"2021-03-31T07:05:15.035437Z","semver":"4.0.5","nickname":"Shake and Throw"},{"version":"4.1.0","date":"2021-05-18T07:05:22.435363Z","semver":"4.1.0","nickname":"Camp Pontanezen"},{"version":"4.1.1","date":"2021-08-10T07:05:06.632742Z","semver":"4.1.1","nickname":"Kick Things"},{"version":"4.1.2","date":"2021-11-01T08:05:12.078145Z","semver":"4.1.2","nickname":"Bird Hippie"},{"version":"4.1.3","date":"2022-03-10T08:05:38.083503Z","semver":"4.1.3","nickname":"One Push-Up"},{"version":"4.2.0","date":"2022-04-22T07:05:41.508134Z","semver":"4.2.0","nickname":"Vigorous Calisthenics"},{"version":"4.2.1","date":"2022-06-23T07:05:33.441356Z","semver":"4.2.1","nickname":"Funny-Looking Kid"},{"version":"4.2.2","date":"2022-10-31T08:05:54.268400Z","semver":"4.2.2","nickname":"Innocent and Trusting"},{"version":"4.2.3","date":"2023-03-15T08:06:01.008593Z","semver":"4.2.3","nickname":"Shortstop Beagle"},{"version":"4.3.0","date":"2023-04-21T07:06:14.217164Z","semver":"4.3.0","nickname":"Already Tomorrow"},{"version":"4.3.1","date":"2023-06-16T07:06:07.136907Z","semver":"4.3.1","nickname":"Beagle Scouts"},{"version":"4.3.2","date":"2023-10-31T08:07:42.870278Z","semver":"4.3.2","nickname":"Eye Holes"},{"version":"4.3.3","date":"2024-02-29T08:07:53.267099Z","semver":"4.3.3","nickname":"Angel Food Cake"},{"version":"4.4.0","date":"2024-04-24T04:07:56.437077Z","semver":"4.4.0","nickname":"Puppy Cup"},{"version":"4.4.1","date":"2024-06-14T07:08:17.306650Z","semver":"4.4.1","nickname":"Race for Your Life"},{"version":"4.4.2","date":"2024-10-31T08:09:02.717743Z","semver":"4.4.2","nickname":"Pile of Leaves"},{"version":"4.4.3","date":"2025-02-28T08:08:59.188927Z","semver":"4.4.3","nickname":"Trophy Case"},{"version":"4.5.0","date":"2025-04-11T08:51:39.256539Z","semver":"4.5.0","nickname":"How About a Twenty-Six"},{"version":"4.5.1","date":"2025-06-13T07:12:01.900745Z","semver":"4.5.1","nickname":"Great Square Root"},{"version":"4.5.2","date":"2025-10-31T08:13:34.137531Z","semver":"4.5.2","nickname":"[Not] Part in a Rumble"},{"version":"4.5.3","date":"2026-03-11T08:14:07.678022Z","semver":"4.5.3","nickname":"Reassured Reassurer"},{"version":"4.6.0","date":"2026-04-24T07:17:39.158455Z","semver":"4.6.0","nickname":"Because it was There"}]
+[
+  {
+    "name": "4.1.0",
+    "date": "2021-05-18T07:05:22.435363Z",
+    "version": "4.1.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.1.0-arm64.pkg"
+  },
+  {
+    "name": "4.1.1",
+    "date": "2021-08-10T07:05:06.632742Z",
+    "version": "4.1.1",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.1.1-arm64.pkg"
+  },
+  {
+    "name": "4.1.2",
+    "date": "2021-11-01T08:05:12.078145Z",
+    "version": "4.1.2",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.1.2-arm64.pkg"
+  },
+  {
+    "name": "4.1.3",
+    "date": "2022-03-10T08:05:38.083503Z",
+    "version": "4.1.3",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.1.3-arm64.pkg"
+  },
+  {
+    "name": "4.2.0",
+    "date": "2022-04-22T07:05:41.508134Z",
+    "version": "4.2.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.2.0-arm64.pkg"
+  },
+  {
+    "name": "4.2.1",
+    "date": "2022-06-23T07:05:33.441356Z",
+    "version": "4.2.1",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.2.1-arm64.pkg"
+  },
+  {
+    "name": "4.2.2",
+    "date": "2022-10-31T08:05:54.268400Z",
+    "version": "4.2.2",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.2.2-arm64.pkg"
+  },
+  {
+    "name": "4.2.3",
+    "date": "2023-03-15T08:06:01.008593Z",
+    "version": "4.2.3",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.2.3-arm64.pkg"
+  },
+  {
+    "name": "4.3.0",
+    "date": "2023-04-21T07:06:14.217164Z",
+    "version": "4.3.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.3.0-arm64.pkg"
+  },
+  {
+    "name": "4.3.1",
+    "date": "2023-06-16T07:06:07.136907Z",
+    "version": "4.3.1",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.3.1-arm64.pkg"
+  },
+  {
+    "name": "4.3.2",
+    "date": "2023-10-31T08:07:42.870278Z",
+    "version": "4.3.2",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.3.2-arm64.pkg"
+  },
+  {
+    "name": "4.3.3",
+    "date": "2024-02-29T08:07:53.267099Z",
+    "version": "4.3.3",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.3.3-arm64.pkg"
+  },
+  {
+    "name": "4.4.0",
+    "date": "2024-04-24T04:07:56.437077Z",
+    "version": "4.4.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.4.0-arm64.pkg"
+  },
+  {
+    "name": "4.4.1",
+    "date": "2024-06-14T07:08:17.306650Z",
+    "version": "4.4.1",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.4.1-arm64.pkg"
+  },
+  {
+    "name": "4.4.2",
+    "date": "2024-10-31T08:09:02.717743Z",
+    "version": "4.4.2",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.4.2-arm64.pkg"
+  },
+  {
+    "name": "4.4.3",
+    "date": "2025-02-28T08:08:59.188927Z",
+    "version": "4.4.3",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.4.3-arm64.pkg"
+  },
+  {
+    "name": "4.5.0",
+    "date": "2025-04-11T08:51:39.256539Z",
+    "version": "4.5.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.5.0-arm64.pkg"
+  },
+  {
+    "name": "4.5.1",
+    "date": "2025-06-13T07:12:01.900745Z",
+    "version": "4.5.1",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.5.1-arm64.pkg"
+  },
+  {
+    "name": "4.5.2",
+    "date": "2025-10-31T08:13:34.137531Z",
+    "version": "4.5.2",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.5.2-arm64.pkg"
+  },
+  {
+    "name": "4.5.3",
+    "date": "2026-03-11T08:14:07.678022Z",
+    "version": "4.5.3",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.5.3-arm64.pkg"
+  },
+  {
+    "name": "4.6.0",
+    "date": "2026-04-24T07:17:39.158455Z",
+    "version": "4.6.0",
+    "type": "release",
+    "url": "https://cran.rstudio.com/bin/macosx/big-sur-arm64/base/R-4.6.0-arm64.pkg"
+  },
+  {
+    "name": "next",
+    "date": null,
+    "version": "4.6.1",
+    "type": "rc",
+    "url": "https://mac.cran.dev/sonoma/last-success/R-4.6-branch-arm64.pkg"
+  },
+  {
+    "name": "devel",
+    "date": null,
+    "version": "4.7.0",
+    "type": "devel",
+    "url": "https://mac.cran.dev/sonoma/last-success/R-devel-arm64.pkg"
+  }
+]

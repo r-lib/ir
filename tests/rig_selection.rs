@@ -174,6 +174,60 @@ fn run_with_r_version_selects_highest_matching_installed_r() {
 
 #[cfg(unix)]
 #[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn run_with_exclude_newer_uses_embedded_metadata_on_common_target() {
+    let cache_dir = unique_dir("ir-r-version-embedded-common-cache");
+    let bin_dir = unique_dir("ir-r-version-embedded-common-bin");
+    let script = unique_path("ir-r-version-embedded-common", "R");
+
+    fs::write(
+        &script,
+        concat!(
+            "#| r-version: \"4.4.3\"\n",
+            "#| exclude-newer: 2025-03-01\n",
+            "cat('unused')\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"list\" ] && [ \"$2\" = \"--json\" ]; then\n",
+            "  printf '[]\\n'\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo \"unexpected rig args: $*\" >&2\n",
+            "exit 43\n",
+        ),
+    );
+    let path = std::env::join_paths([bin_dir.as_os_str().to_owned()]).unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        output_text(&out)
+            .contains("R 4.4.3 is required but is not installed. Run `rig install 4.4.3`."),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_with_exclude_newer_preserves_available_patch_releases() {
     let cache_dir = unique_dir("ir-r-version-embedded-all-cache");
     let bin_dir = unique_dir("ir-r-version-embedded-all-bin");
@@ -299,7 +353,7 @@ fn run_with_exclude_newer_after_embedded_metadata_refreshes_release_dates() {
         &script,
         concat!(
             "#| r-version: \"4.7\"\n",
-            "#| exclude-newer: 2026-06-04\n",
+            "#| exclude-newer: 2999-12-31\n",
             "cat('unused')\n",
         ),
     )
@@ -315,7 +369,7 @@ fn run_with_exclude_newer_after_embedded_metadata_refreshes_release_dates() {
             "fi\n",
             "if [ \"$1\" = \"available\" ] && [ \"$2\" = \"--json\" ] && [ \"$3\" = \"--all\" ]; then\n",
             "  printf 'metadata\\n' >> \"$IR_TEST_R_VERSION_METADATA_CALLS\"\n",
-            "  printf '%s\\n' '[{\"name\":\"4.7\",\"version\":\"4.7.0\",\"date\":\"2026-06-04T00:00:00Z\"}]'\n",
+            "  printf '%s\\n' '[{\"name\":\"4.7\",\"version\":\"4.7.0\",\"date\":\"2999-12-31T00:00:00Z\"}]'\n",
             "  exit 0\n",
             "fi\n",
             "echo \"unexpected rig args: $*\" >&2\n",
