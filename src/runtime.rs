@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use time::macros::format_description;
+use time::{Date, OffsetDateTime};
+
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
 use crate::rig;
@@ -24,10 +27,12 @@ pub(crate) fn cmd_run(
     rscript_args: &[String],
     with_deps: &[String],
     r_requirement: Option<&str>,
+    exclude_newer: Option<&str>,
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
+    apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
@@ -57,11 +62,13 @@ pub(crate) fn cmd_render(
     source: &RenderSource,
     with_deps: &[String],
     r_requirement: Option<&str>,
+    exclude_newer: Option<&str>,
     render_args: &[String],
     isolated: bool,
     vanilla: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
+    apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
     if let Some(req) = r_requirement {
@@ -88,6 +95,44 @@ pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn E
     };
 
     rig::resolve_rscript(req, spec.exclude_newer.as_deref())
+}
+
+fn apply_exclude_newer_override(
+    spec: &mut RuntimeSpec,
+    cli_exclude_newer: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(exclude_newer) = cli_exclude_newer {
+        spec.exclude_newer = normalize_exclude_newer_override(exclude_newer)?;
+        return Ok(());
+    }
+
+    if let Some(exclude_newer) = env::var_os("IR_EXCLUDE_NEWER") {
+        let exclude_newer = env_string("IR_EXCLUDE_NEWER", exclude_newer)?;
+        spec.exclude_newer = normalize_exclude_newer_override(&exclude_newer)?;
+        return Ok(());
+    }
+
+    if let Some(exclude_newer) = spec.exclude_newer.take() {
+        spec.exclude_newer = normalize_exclude_newer_override(&exclude_newer)?;
+    }
+
+    Ok(())
+}
+
+fn normalize_exclude_newer_override(value: &str) -> Result<Option<String>, Box<dyn Error>> {
+    let value = value.trim();
+    if value.is_empty() || is_future_iso_date(value) {
+        return Ok(None);
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn is_future_iso_date(value: &str) -> bool {
+    let format = format_description!("[year]-[month]-[day]");
+    let Ok(date) = Date::parse(value, &format) else {
+        return false;
+    };
+    date > OffsetDateTime::now_utc().date()
 }
 
 /// Return a cached materialised library path, or run the embedded driver in a
@@ -141,7 +186,7 @@ fn resolve_library_inner(
         });
     }
 
-    let _resolver_lock = FileLock::acquire(&cache_dir.join("locks").join("resolver.lock"))?;
+    let _resolver_lock = FileLock::acquire(&resolver_lock_path(&cache_dir))?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {
             library: Some(resolved.library),
@@ -164,7 +209,10 @@ fn resolve_library_inner(
         .env("IR_CACHE_DIR", &cache_dir)
         // pak suppresses progress in noninteractive Rscript unless this is set.
         // Resolution cache hits return before pak, so this adds no cache-hit pak output.
-        .env("R_PKG_SHOW_PROGRESS", "true");
+        .env("R_PKG_SHOW_PROGRESS", "true")
+        // The RuntimeSpec owns snapshot selection. Do not let unsupported
+        // commands accidentally reach the resolver through ambient process env.
+        .env_remove("IR_EXCLUDE_NEWER");
     if let Some(paths) = &resolution_cache_paths {
         cmd.env("IR_RESOLUTION_MARKER", &paths.marker);
     }
@@ -590,8 +638,18 @@ pub(crate) fn ir_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(r_user_cache_dir()?.join("R").join("ir"))
 }
 
+fn resolver_lock_path(root: &Path) -> PathBuf {
+    root.join("locks").join("resolver.lock")
+}
+
 pub(crate) fn nonempty_env(name: &str) -> Option<OsString> {
     env::var_os(name).filter(|value| !value.is_empty())
+}
+
+fn env_string(name: &str, value: OsString) -> Result<String, Box<dyn Error>> {
+    value
+        .into_string()
+        .map_err(|_| format!("`{name}` must be valid UTF-8").into())
 }
 
 fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {

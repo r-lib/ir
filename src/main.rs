@@ -66,6 +66,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 &run.rscript_args,
                 &run.with_deps,
                 run.r_requirement.as_deref(),
+                run.exclude_newer.as_deref(),
                 &run.script_args,
                 run.isolated,
             )
@@ -76,6 +77,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 &render.source,
                 &render.with_deps,
                 render.r_requirement.as_deref(),
+                render.exclude_newer.as_deref(),
                 &render.render_args,
                 render.isolated,
                 render.vanilla,

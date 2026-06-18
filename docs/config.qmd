@@ -38,6 +38,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
+| `IR_EXCLUDE_NEWER` | `ir run` and `ir render` package snapshot date | unset |
 | `IR_RSCRIPT` | runs without `r-version` | `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override |
@@ -53,6 +54,10 @@ The default cache directory is computed before launching R.
 `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`.
 The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
 
+Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
+`IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
+Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
+Future snapshot dates also resolve latest packages.
 `IR_RSCRIPT` is ignored when `r-version` is set, because version selection is resolved through `rig`.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.

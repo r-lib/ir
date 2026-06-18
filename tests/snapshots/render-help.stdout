@@ -7,11 +7,12 @@ Arguments:
   [QUARTO_ARGS]...  Arguments passed to `quarto render`
 
 Options:
-      --with <PKG>        Add a dependency for this render; may be repeated
-      --r-version <SPEC>  Select the R version for this render with rig
-      --isolated          Disable the user library for this render
-      --vanilla           Run Quarto's knitr R with --vanilla
-  -h, --help              Print help
+      --with <PKG>            Add a dependency for this render; may be repeated
+      --r-version <SPEC>      Select the R version for this render with rig
+      --exclude-newer <DATE>  Resolve packages from the Posit Package Manager snapshot at this date
+      --isolated              Disable the user library for this render
+      --vanilla               Run Quarto's knitr R with --vanilla
+  -h, --help                  Print help
 
 Examples:
   ir render report.qmd

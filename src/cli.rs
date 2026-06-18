@@ -100,6 +100,13 @@ fn run_command() -> ClapCommand {
                 .help("Select the R version for this run with rig"),
         )
         .arg(
+            Arg::new("exclude-newer")
+                .long("exclude-newer")
+                .value_name("DATE")
+                .num_args(1)
+                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
+        )
+        .arg(
             Arg::new("isolated")
                 .long("isolated")
                 .action(ArgAction::SetTrue)
@@ -136,6 +143,13 @@ fn render_command() -> ClapCommand {
                 .value_name("SPEC")
                 .num_args(1)
                 .help("Select the R version for this render with rig"),
+        )
+        .arg(
+            Arg::new("exclude-newer")
+                .long("exclude-newer")
+                .value_name("DATE")
+                .num_args(1)
+                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
         )
         .arg(
             Arg::new("isolated")
@@ -328,6 +342,7 @@ pub(crate) struct RunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) exclude_newer: Option<String>,
     pub(crate) source: RunSource,
     pub(crate) script_args: Vec<String>,
     pub(crate) isolated: bool,
@@ -336,6 +351,7 @@ pub(crate) struct RunArgs {
 pub(crate) struct RenderArgs {
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) exclude_newer: Option<String>,
     pub(crate) source: RenderSource,
     pub(crate) render_args: Vec<String>,
     pub(crate) isolated: bool,
@@ -360,19 +376,21 @@ pub(crate) struct ToolInstallArgs {
 }
 
 /// Split the leading region of `ir run`'s arguments into Rscript options,
-/// `--with` dependency specs, an optional `--r-version` spec, and the program
-/// source, with everything after the source treated as program args.
+/// `--with` dependency specs, optional `--r-version` and `--exclude-newer`
+/// specs, and the program source, with everything after the source treated as
+/// program args.
 ///
-/// `-e <expr>`, `--with <spec>`, `--r-version <spec>` and `--isolated` are
-/// `ir`-level flags handled here. Any other `-...` argument is an Rscript
-/// option, forwarded verbatim to the user-code phase. Scanning stops at the
-/// script path unless `-e` was given, in which case scanning stops after the
-/// last `-e <expr>` pair. Everything after the source boundary is passed to
-/// user code as program args.
+/// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--exclude-newer
+/// <date>` and `--isolated` are `ir`-level flags handled here. Any other
+/// `-...` argument is an Rscript option, forwarded verbatim to the user-code
+/// phase. Scanning stops at the script path unless `-e` was given, in which case
+/// scanning stops after the last `-e <expr>` pair. Everything after the source
+/// boundary is passed to user code as program args.
 pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut exclude_newer = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
     let mut iter = args.into_iter();
@@ -406,6 +424,13 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--exclude-newer" {
+            let value = iter.next().ok_or(
+                "`--exclude-newer` requires a date (try `ir run --exclude-newer 2024-06-01 script.R`)",
+            )?;
+            exclude_newer = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--exclude-newer=") {
+            exclude_newer = Some(value.to_string());
         } else if arg == "--isolated" {
             isolated = true;
         } else if arg == "-" {
@@ -438,6 +463,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
         rscript_args,
         with_deps,
         r_requirement,
+        exclude_newer,
         source,
         script_args,
         isolated,
@@ -449,6 +475,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
 pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn Error>> {
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut exclude_newer = None;
     let mut isolated = false;
     let mut vanilla = false;
     let mut iter = args.into_iter();
@@ -473,6 +500,13 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--exclude-newer" {
+            let value = iter.next().ok_or(
+                "`--exclude-newer` requires a date (try `ir render --exclude-newer 2024-06-01 report.qmd`)",
+            )?;
+            exclude_newer = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--exclude-newer=") {
+            exclude_newer = Some(value.to_string());
         } else if arg == "--isolated" {
             isolated = true;
         } else if arg == "--vanilla" {
@@ -494,6 +528,7 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
     Ok(RenderArgs {
         with_deps,
         r_requirement,
+        exclude_newer,
         source: RenderSource::from_source_arg(source)?,
         render_args,
         isolated,

@@ -6,16 +6,14 @@ use support::*;
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 #[test]
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
         "pkgs <- c(",
         "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
-        "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'quarto', ",
+        "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'xfun', 'quarto', ",
         "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
         "'htmltools'); ",
         "missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; ",
@@ -501,6 +499,73 @@ fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
 }
 
 #[test]
+fn run_with_ir_cache_dir_does_not_require_home_cache_env_for_resolver_lock() {
+    let cache_dir = unique_dir("ir-cache-lock-override");
+    let profile = unique_path("ir-cache-lock-override-profile", "R");
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  writeLines("", Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q("no", status = 0L, runLast = FALSE)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("HOME")
+        .env_remove("LOCALAPPDATA")
+        .env_remove("USERPROFILE")
+        .args(["run", "--isolated", "--vanilla", "-e"])
+        .arg("cat('ir.fixture=cache-lock-override\n')")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cache-lock-override");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_with_ir_cache_dir_ignores_unusable_user_cache_for_resolver_lock() {
+    let cache_dir = unique_dir("ir-cache-lock-unusable-override");
+    let r_user_cache_file = unique_path("ir-cache-lock-unusable-r-cache", "txt");
+    let profile = unique_path("ir-cache-lock-unusable-profile", "R");
+    fs::write(&r_user_cache_file, "not a directory\n").unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  writeLines("", Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q("no", status = 0L, runLast = FALSE)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_file)
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--isolated", "--vanilla", "-e"])
+        .arg("cat('ir.fixture=cache-lock-unusable-override\n')")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cache-lock-unusable-override");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&r_user_cache_file);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn cache_clean_removes_cache_dir() {
     let cache_dir = unique_dir("ir-cache-clean");
     let library = cache_dir.join("libraries").join("library");
@@ -658,6 +723,429 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
     let _ = fs::remove_dir_all(&cache_dir);
 
     assert_eq!(resolution_count, 1);
+}
+
+#[test]
+fn run_trims_env_exclude_newer_before_resolution_cache_keying() {
+    let cache_dir = unique_dir("ir-env-exclude-newer-normalized-cache");
+    let profile = unique_path("ir-env-exclude-newer-normalized-profile", "R");
+    let entered = unique_path("ir-env-exclude-newer-normalized-entered", "txt");
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  cat(Sys.getpid(), "\n", file = Sys.getenv("IR_TEST_ENTERED"), append = TRUE)
+}
+"#,
+    )
+    .unwrap();
+    let expr = "cat('ir.fixture=normalized-exclude-newer-cache\\n')";
+
+    for _ in 0..2 {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_EXCLUDE_NEWER", " 2024-06-01 ")
+            .env("IR_RSCRIPT", rscript())
+            .env("R_PROFILE_USER", &profile)
+            .env("IR_TEST_ENTERED", &entered)
+            .args(["run", "--isolated", "--vanilla", "-e", expr])
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=normalized-exclude-newer-cache");
+    }
+
+    assert_eq!(
+        resolver_probe_count(&entered),
+        1,
+        "second run should reuse the Rust warm resolution cache"
+    );
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker_text = fs::read_to_string(&markers[0])
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()));
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-06-01")
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_cli_exclude_newer_overrides_env_and_frontmatter() {
+    let cache_dir = unique_dir("ir-cli-exclude-newer-precedence-cache");
+    let script = unique_path("ir-cli-exclude-newer-precedence", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=cli-exclude-newer-precedence\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", " \t ")
+        .args(["run", "--exclude-newer", " 2024-03-01 ", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cli-exclude-newer-precedence");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-03-01")
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_empty_cli_exclude_newer_overrides_frontmatter_with_latest() {
+    let cache_dir = unique_dir("ir-empty-cli-exclude-newer-cache");
+    let script = unique_path("ir-empty-cli-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=empty-cli-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--exclude-newer", " \t ", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=empty-cli-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_future_cli_exclude_newer_overrides_frontmatter_with_latest() {
+    let cache_dir = unique_dir("ir-future-cli-exclude-newer-cache");
+    let script = unique_path("ir-future-cli-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=future-cli-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--exclude-newer", "2999-01-01", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=future-cli-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
+    let cache_dir = unique_dir("ir-render-cli-exclude-newer-precedence-cache");
+    let library = unique_dir("ir-render-cli-exclude-newer-precedence-library");
+    let doc = unique_path("ir-render-cli-exclude-newer-precedence", "qmd");
+    let profile = unique_path("ir-render-cli-exclude-newer-precedence-profile", "R");
+    let quarto = unique_path("ir-render-cli-exclude-newer-precedence-quarto", "");
+    fs::write(
+        &doc,
+        r#"---
+title: CLI exclude newer precedence
+ir:
+  exclude-newer: 2024-01-01
+---
+
+```{r}
+cat("ir.fixture=render-cli-exclude-newer-precedence\n")
+```
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  library <- Sys.getenv("IR_TEST_LIBRARY")
+  dir.create(library, recursive = TRUE, showWarnings = FALSE)
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (nzchar(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    writeLines(c(
+      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
+      library
+    ), marker)
+  }
+  writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", " \t ")
+        .env("IR_QUARTO", &quarto)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_TEST_LIBRARY", &library)
+        .env("R_PROFILE_USER", &profile)
+        .args(["render", "--exclude-newer", " 2024-03-01 "])
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-03-01")
+    );
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&quarto);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_empty_env_exclude_newer_overrides_frontmatter_with_latest() {
+    let cache_dir = unique_dir("ir-empty-env-exclude-newer-cache");
+    let script = unique_path("ir-empty-env-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=empty-env-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", "")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=empty-env-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_future_env_exclude_newer_overrides_frontmatter_with_latest() {
+    let cache_dir = unique_dir("ir-future-env-exclude-newer-cache");
+    let script = unique_path("ir-future-env-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=future-env-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", "2999-01-01")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=future-env-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_future_frontmatter_exclude_newer_resolves_latest() {
+    let cache_dir = unique_dir("ir-future-frontmatter-exclude-newer-cache");
+    let script = unique_path("ir-future-frontmatter-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2999-01-01
+
+cat("ir.fixture=future-frontmatter-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=future-frontmatter-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_future_frontmatter_exclude_newer_resolves_latest() {
+    let cache_dir = unique_dir("ir-render-future-frontmatter-exclude-newer-cache");
+    let library = unique_dir("ir-render-future-frontmatter-exclude-newer-library");
+    let doc = unique_path("ir-render-future-frontmatter-exclude-newer", "qmd");
+    let profile = unique_path("ir-render-future-frontmatter-exclude-newer-profile", "R");
+    let quarto = unique_path("ir-render-future-frontmatter-exclude-newer-quarto", "");
+    fs::write(
+        &doc,
+        r#"---
+title: Future frontmatter exclude newer
+ir:
+  exclude-newer: 2999-01-01
+---
+
+```{r}
+cat("ir.fixture=render-future-frontmatter-exclude-newer\n")
+```
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  library <- Sys.getenv("IR_TEST_LIBRARY")
+  dir.create(library, recursive = TRUE, showWarnings = FALSE)
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (nzchar(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    source <- if (nzchar(Sys.getenv("IR_EXCLUDE_NEWER"))) {
+      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER"))
+    } else {
+      "latest: 0"
+    }
+    writeLines(c(source, library), marker)
+  }
+  writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_TEST_LIBRARY", &library)
+        .env("R_PROFILE_USER", &profile)
+        .args(["render"])
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&quarto);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
@@ -1243,86 +1731,6 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
     let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
-fn write_resolver_lock_profile(profile: &Path) {
-    fs::write(
-        profile,
-        r#"
-if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
-  local({
-    active <- Sys.getenv("IR_TEST_ACTIVE")
-    if (!dir.create(active, recursive = TRUE, showWarnings = FALSE)) {
-      writeLines("overlap", Sys.getenv("IR_TEST_OVERLAP"))
-      stop("resolve.R overlapped", call. = FALSE)
-    }
-    on.exit(unlink(active, recursive = TRUE, force = TRUE), add = TRUE)
-    cat(Sys.getpid(), "\n", file = Sys.getenv("IR_TEST_ENTERED"), append = TRUE)
-    Sys.sleep(as.numeric(Sys.getenv("IR_TEST_SLEEP", "0")))
-  })
-}
-"#,
-    )
-    .unwrap();
-}
-
-fn resolver_lock_command(
-    cache_dir: &Path,
-    profile: &Path,
-    active: &Path,
-    overlap: &Path,
-    entered: &Path,
-    package: Option<&str>,
-    label: &str,
-) -> Command {
-    let mut cmd = ir();
-    cmd.env("IR_CACHE_DIR", cache_dir)
-        .env("R_PROFILE_USER", profile)
-        .env("IR_TEST_ACTIVE", active)
-        .env("IR_TEST_OVERLAP", overlap)
-        .env("IR_TEST_ENTERED", entered)
-        .env("IR_TEST_SLEEP", "1")
-        .args(["run", "--isolated"]);
-    if let Some(package) = package {
-        cmd.args(["--with", package]);
-    }
-    cmd.args(["--vanilla", "-e"])
-        .arg(format!("cat('ir.fixture={label}\\n')"));
-    cmd
-}
-
-fn spawn_resolver_for_lock_test(
-    cache_dir: &Path,
-    profile: &Path,
-    active: &Path,
-    overlap: &Path,
-    entered: &Path,
-    package: Option<&str>,
-    label: &str,
-) -> std::process::Child {
-    let mut cmd =
-        resolver_lock_command(cache_dir, profile, active, overlap, entered, package, label);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    cmd.spawn().unwrap()
-}
-
-fn wait_for_resolver_probe(mut child: std::process::Child, active: &Path) -> std::process::Child {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !active.exists() && Instant::now() < deadline {
-        if child.try_wait().unwrap().is_some() {
-            let output = child.wait_with_output().unwrap();
-            panic!(
-                "resolver exited before the test profile probe\n{}",
-                output_text(&output)
-            );
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(
-        active.exists(),
-        "resolver should enter the test profile probe before the second run starts"
-    );
-    child
-}
-
 fn resolver_probe_count(entered: &Path) -> usize {
     fs::read_to_string(entered)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()))
@@ -1330,108 +1738,15 @@ fn resolver_probe_count(entered: &Path) -> usize {
         .count()
 }
 
-#[test]
-fn concurrent_resolvers_serialize_same_dependency_resolution() {
-    let cache_dir = unique_dir("ir-same-resolution-lock-cache");
-    let profile = unique_path("ir-same-resolution-lock-profile", "R");
-    let active = unique_path("ir-same-resolution-lock-active", "");
-    let entered = unique_path("ir-same-resolution-lock-entered", "txt");
-    let overlap = unique_path("ir-same-resolution-lock-overlap", "txt");
-
-    write_resolver_lock_profile(&profile);
-
-    let first = spawn_resolver_for_lock_test(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-lock-one",
-    );
-    let first = wait_for_resolver_probe(first, &active);
-
-    let second = resolver_lock_command(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-lock-two",
-    )
-    .output()
-    .unwrap();
-    let first = first.wait_with_output().unwrap();
-
-    assert_success(&first);
-    assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=resolution-lock-one");
-    assert_stdout_contains(&second, "ir.fixture=resolution-lock-two");
-    assert!(!overlap.exists(), "resolve.R should not overlap");
-    assert_eq!(
-        resolver_probe_count(&entered),
-        1,
-        "second resolver should reuse the completed resolution marker"
-    );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&cache_dir);
-}
-
-#[test]
-fn concurrent_resolvers_serialize_different_dependency_resolution() {
-    let cache_dir = unique_dir("ir-resolution-overlap-cache");
-    let profile = unique_path("ir-resolution-overlap-profile", "R");
-    let active = unique_path("ir-resolution-overlap-active", "");
-    let entered = unique_path("ir-resolution-overlap-entered", "txt");
-    let overlap = unique_path("ir-resolution-overlap", "txt");
-
-    write_resolver_lock_profile(&profile);
-
-    let first = spawn_resolver_for_lock_test(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-one",
-    );
-    let first = wait_for_resolver_probe(first, &active);
-
-    let second = resolver_lock_command(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        Some("cli"),
-        "resolution-two",
-    )
-    .output()
-    .unwrap();
-    let first = first.wait_with_output().unwrap();
-
-    assert_success(&first);
-    assert_success(&second);
-    assert_stdout_contains(&first, "ir.fixture=resolution-one");
-    assert_stdout_contains(&second, "ir.fixture=resolution-two");
-    assert!(!overlap.exists(), "resolve.R should not overlap");
-    assert_eq!(
-        resolver_probe_count(&entered),
-        2,
-        "different dependencies should both resolve, but not concurrently"
-    );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&cache_dir);
+fn only_resolution_marker_text(cache_dir: &Path) -> String {
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    fs::read_to_string(&markers[0])
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()))
 }
 
 #[cfg(unix)]

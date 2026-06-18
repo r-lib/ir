@@ -152,11 +152,13 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Keep the GitHub setup actions above"));
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
     assert!(workflow.contains("any::bookdown"));
+    assert!(workflow.contains("any::xfun"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
-    assert!(workflow.contains("rmarkdown bookdown tinytex"));
+    assert!(workflow.contains("rmarkdown xfun quarto"));
+    assert!(workflow.contains("rmarkdown bookdown tinytex xfun"));
     assert!(workflow.contains("shell: bash"));
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
@@ -189,6 +191,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
 fn cli_tests_do_not_use_global_e2e_lock() {
     let tests = [
         "tests/run.rs",
+        "tests/resolver_lock.rs",
         "tests/rig_selection.rs",
         "tests/render.rs",
         "tests/tool.rs",

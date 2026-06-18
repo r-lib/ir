@@ -943,6 +943,56 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let _ = fs::remove_dir_all(&cache_dir);
 }
 
+#[test]
+fn tool_install_ignores_ir_exclude_newer_env() {
+    let cache_dir = unique_dir("ir-tool-install-ignores-exclude-newer-cache");
+    let bin_dir = unique_dir("ir-tool-install-ignores-exclude-newer-bin");
+    let library = unique_dir("ir-tool-install-ignores-exclude-newer-library");
+    let profile = unique_path("ir-tool-install-ignores-exclude-newer-profile", "R");
+    let package = library.join("irfake");
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("hello.R"),
+        "#!/usr/bin/env Rscript\ncat('hello\\n')\n",
+    )
+    .unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  if (nzchar(Sys.getenv("IR_EXCLUDE_NEWER"))) {
+    stop("IR_EXCLUDE_NEWER leaked into tool resolver", call. = FALSE)
+  }
+  writeLines(Sys.getenv("IR_TEST_LIBRARY"), Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  writeLines("irfake", Sys.getenv("IR_RESOLVE_PACKAGE_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", "2024-06-01")
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_TEST_LIBRARY", &library)
+        .env("R_PROFILE_USER", &profile)
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irfake")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn tool_install_with_path_rscript_symlink_records_target() {
