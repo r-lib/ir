@@ -95,7 +95,11 @@ pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn E
 pub(crate) fn apply_env_overrides(spec: &mut RuntimeSpec) -> Result<(), Box<dyn Error>> {
     if let Some(exclude_newer) = nonempty_env("IR_EXCLUDE_NEWER") {
         let exclude_newer = env_string("IR_EXCLUDE_NEWER", exclude_newer)?;
-        spec.exclude_newer = Some(exclude_newer.trim().to_string());
+        let exclude_newer = exclude_newer.trim();
+        if exclude_newer.is_empty() {
+            return Err("`IR_EXCLUDE_NEWER` must not be empty".into());
+        }
+        spec.exclude_newer = Some(exclude_newer.to_string());
     }
 
     Ok(())

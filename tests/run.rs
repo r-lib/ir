@@ -716,6 +716,38 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[test]
+fn run_rejects_blank_env_exclude_newer() {
+    let out = ir()
+        .env("IR_EXCLUDE_NEWER", " \t ")
+        .args([
+            "run",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=blank-exclude-newer-ran\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "blank IR_EXCLUDE_NEWER unexpectedly succeeded\n{}",
+        output_text(&out)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("IR_EXCLUDE_NEWER"), "{}", output_text(&out));
+    assert!(
+        stderr.contains("must not be empty"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !stdout(&out).contains("ir.fixture=blank-exclude-newer-ran"),
+        "{}",
+        output_text(&out)
+    );
+}
+
+#[test]
 fn run_frontmatter_github_ref_installs_github_package() {
     let cache_dir = unique_dir("ir-github-ref-cache");
     let script = unique_path("ir-github-ref", "R");
