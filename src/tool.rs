@@ -11,7 +11,9 @@ use saphyr::Yaml;
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 #[cfg(any(target_os = "macos", not(unix)))]
 use crate::runtime::nonempty_env;
-use crate::runtime::{resolve_library_and_primary_package, rscript_for_spec, spawn_error};
+use crate::runtime::{
+    apply_env_overrides, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
+};
 use crate::spec::{load_first_yaml_document, RuntimeSpec};
 
 pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
@@ -21,6 +23,7 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
         dependencies: deps,
         ..RuntimeSpec::default()
     };
+    apply_env_overrides(&mut spec)?;
     if let Some(req) = &run.r_requirement {
         spec.r_requirement = Some(req.clone());
     }
@@ -44,6 +47,7 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
         ..RuntimeSpec::default()
     };
     spec.dependencies.extend(install.with_deps.iter().cloned());
+    apply_env_overrides(&mut spec)?;
     if let Some(req) = &install.r_requirement {
         spec.r_requirement = Some(req.clone());
     }

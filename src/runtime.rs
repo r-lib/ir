@@ -28,6 +28,7 @@ pub(crate) fn cmd_run(
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
+    apply_env_overrides(&mut spec)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
@@ -62,6 +63,7 @@ pub(crate) fn cmd_render(
     vanilla: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
+    apply_env_overrides(&mut spec)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
     if let Some(req) = r_requirement {
@@ -87,11 +89,23 @@ pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn E
         return rig::resolve_rscript(req, spec.exclude_newer.as_deref());
     }
 
+    if nonempty_env("IR_RSCRIPT").is_some() {
+        return Ok(rscript_command());
+    }
+
     if let Some(exclude_newer) = &spec.exclude_newer {
         return rig::resolve_rscript_for_exclude_newer(exclude_newer);
     }
 
     Ok(rscript_command())
+}
+
+pub(crate) fn apply_env_overrides(spec: &mut RuntimeSpec) -> Result<(), Box<dyn Error>> {
+    if let Some(exclude_newer) = nonempty_env("IR_EXCLUDE_NEWER") {
+        spec.exclude_newer = Some(env_string("IR_EXCLUDE_NEWER", exclude_newer)?);
+    }
+
+    Ok(())
 }
 
 /// Return a cached materialised library path, or run the embedded driver in a
@@ -452,8 +466,8 @@ fn run_script(
     }
 }
 
-/// The Rscript executable to use when no `r-version` is requested: `$IR_RSCRIPT`
-/// if set, else the `Rscript` found on `PATH`.
+/// The Rscript executable to use when R is not selected through `rig`:
+/// `$IR_RSCRIPT` if set, else the `Rscript` found on `PATH`.
 pub(crate) fn rscript_command() -> OsString {
     let command = nonempty_env("IR_RSCRIPT").unwrap_or_else(|| "Rscript".into());
     resolve_command_path(&command).unwrap_or(command)
@@ -596,6 +610,12 @@ pub(crate) fn ir_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
 
 pub(crate) fn nonempty_env(name: &str) -> Option<OsString> {
     env::var_os(name).filter(|value| !value.is_empty())
+}
+
+fn env_string(name: &str, value: OsString) -> Result<String, Box<dyn Error>> {
+    value
+        .into_string()
+        .map_err(|_| format!("`{name}` must be valid UTF-8").into())
 }
 
 fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {

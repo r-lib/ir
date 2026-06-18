@@ -340,6 +340,136 @@ fn run_with_exclude_newer_frontmatter_selects_implicit_r_minor() {
 
 #[cfg(unix)]
 #[test]
+fn run_with_exclude_newer_uses_ir_rscript_when_set() {
+    let cache_dir = unique_dir("ir-exclude-newer-ir-rscript-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-ir-rscript-bin");
+    let r_dir = unique_dir("ir-exclude-newer-ir-rscript-r");
+    let script = unique_path("ir-exclude-newer-ir-rscript", "R");
+
+    selected_r_binary(&r_dir, "custom");
+    let rscript = r_dir.join("Rscript");
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!("#!/bin/sh\n", "echo unexpected rig >&2\n", "exit 65\n",),
+    );
+
+    fs::write(&script, "#| exclude-newer: 2024-01-15\ncat('ignored')\n").unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env("IR_RSCRIPT", &rscript)
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=custom");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r_dir);
+    let _ = fs::remove_file(&script);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_ir_exclude_newer_overrides_frontmatter_for_implicit_r() {
+    let cache_dir = unique_dir("ir-env-exclude-newer-cache");
+    let bin_dir = unique_dir("ir-env-exclude-newer-bin");
+    let r43_dir = unique_dir("ir-env-exclude-newer-r43");
+    let r44_dir = unique_dir("ir-env-exclude-newer-r44");
+    let script = unique_path("ir-env-exclude-newer", "R");
+
+    let r43_binary = selected_r_binary(&r43_dir, "r43");
+    let r44_binary = selected_r_binary(&r44_dir, "r44");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.3.3","version":"4.3.3","aliases":[],"binary":"{}"}},
+{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            r43_binary.display(),
+            r44_binary.display(),
+        ),
+    );
+
+    fs::write(&script, "#| exclude-newer: 2024-01-15\ncat('ignored')\n").unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env("IR_EXCLUDE_NEWER", "2024-06-01")
+        .env_remove("IR_RSCRIPT")
+        .args(["run", script.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r44");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r43_dir);
+    let _ = fs::remove_dir_all(&r44_dir);
+    let _ = fs::remove_file(&script);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_cli_r_version_overrides_ir_exclude_newer_for_r_selection() {
+    let cache_dir = unique_dir("ir-cli-r-version-env-exclude-newer-cache");
+    let bin_dir = unique_dir("ir-cli-r-version-env-exclude-newer-bin");
+    let r43_dir = unique_dir("ir-cli-r-version-env-exclude-newer-r43");
+    let r44_dir = unique_dir("ir-cli-r-version-env-exclude-newer-r44");
+
+    let r43_binary = selected_r_binary(&r43_dir, "r43");
+    let r44_binary = selected_r_binary(&r44_dir, "r44");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.3.3","version":"4.3.3","aliases":[],"binary":"{}"}},
+{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            r43_binary.display(),
+            r44_binary.display(),
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env("IR_EXCLUDE_NEWER", "2024-06-01")
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "4.3", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r43");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r43_dir);
+    let _ = fs::remove_dir_all(&r44_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_with_exclude_newer_frontmatter_errors_when_implicit_r_minor_is_missing() {
     let cache_dir = unique_dir("ir-exclude-newer-missing-r-cache");
     let bin_dir = unique_dir("ir-exclude-newer-missing-r-bin");

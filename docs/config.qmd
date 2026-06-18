@@ -4,8 +4,8 @@ title: Install and Configuration
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT`, when no R version is requested.
-- `rig` on `PATH` when `--r-version`, frontmatter `r-version`, or date-only `exclude-newer` selects R.
+- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT`, when no `r-version` or `--r-version` is set.
+- `rig` on `PATH` when `--r-version` or frontmatter `r-version` is set, or when date-only `exclude-newer` selects R.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
@@ -37,8 +37,9 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | Variable | Used by | Default |
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
+| `IR_EXCLUDE_NEWER` | package snapshot date; also selects R when no R is otherwise selected | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
-| `IR_RSCRIPT` | runs when no R version is requested | `Rscript` on `PATH` |
+| `IR_RSCRIPT` | Rscript path when no `r-version` or `--r-version` is set | `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override |
 | `IR_NO_MODIFY_PATH` | install scripts, `ir tool install` | disables automatic PATH setup when nonempty |
@@ -53,8 +54,11 @@ The default cache directory is computed before launching R.
 `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`.
 The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
 
+Runtime metadata is applied first, then environment variables, then CLI arguments.
+`IR_EXCLUDE_NEWER` overrides frontmatter `exclude-newer`.
+`IR_RSCRIPT` selects a specific Rscript executable, including when `exclude-newer` is set.
 `IR_RSCRIPT` is ignored when `--r-version` or frontmatter `r-version` is set, because explicit R version selection is resolved through `rig`.
-When `exclude-newer` is set without `r-version`, `ir` also uses `rig` to select the latest R minor version available on that date.
+When `exclude-newer` is set without `r-version`, `--r-version`, or `IR_RSCRIPT`, `ir` uses `rig` to select the latest R minor version available on that date.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected launcher directory to the user `Path`.

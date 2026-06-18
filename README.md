@@ -101,8 +101,8 @@ caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to inspect the plan.
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT` when R is not selected through `rig`.
-- `rig` on `PATH` when using `r-version` or `exclude-newer`.
+- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT`, when no `r-version` or `--r-version` is set.
+- `rig` on `PATH` when using `r-version`, `--r-version`, or date-only `exclude-newer` R selection.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
