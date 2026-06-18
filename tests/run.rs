@@ -1687,21 +1687,27 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
     .unwrap();
 }
 
+struct ResolverLockProbe<'a> {
+    user_cache_dir: &'a Path,
+    profile: &'a Path,
+    active: &'a Path,
+    overlap: &'a Path,
+    entered: &'a Path,
+}
+
 fn resolver_lock_command(
     cache_dir: &Path,
-    profile: &Path,
-    active: &Path,
-    overlap: &Path,
-    entered: &Path,
+    probe: &ResolverLockProbe<'_>,
     package: Option<&str>,
     label: &str,
 ) -> Command {
     let mut cmd = ir();
     cmd.env("IR_CACHE_DIR", cache_dir)
-        .env("R_PROFILE_USER", profile)
-        .env("IR_TEST_ACTIVE", active)
-        .env("IR_TEST_OVERLAP", overlap)
-        .env("IR_TEST_ENTERED", entered)
+        .env("R_USER_CACHE_DIR", probe.user_cache_dir)
+        .env("R_PROFILE_USER", probe.profile)
+        .env("IR_TEST_ACTIVE", probe.active)
+        .env("IR_TEST_OVERLAP", probe.overlap)
+        .env("IR_TEST_ENTERED", probe.entered)
         .env("IR_TEST_SLEEP", "1")
         .args(["run", "--isolated"]);
     if let Some(package) = package {
@@ -1714,15 +1720,11 @@ fn resolver_lock_command(
 
 fn spawn_resolver_for_lock_test(
     cache_dir: &Path,
-    profile: &Path,
-    active: &Path,
-    overlap: &Path,
-    entered: &Path,
+    probe: &ResolverLockProbe<'_>,
     package: Option<&str>,
     label: &str,
 ) -> std::process::Child {
-    let mut cmd =
-        resolver_lock_command(cache_dir, profile, active, overlap, entered, package, label);
+    let mut cmd = resolver_lock_command(cache_dir, probe, package, label);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.spawn().unwrap()
 }
@@ -1767,35 +1769,27 @@ fn only_resolution_marker_text(cache_dir: &Path) -> String {
 #[test]
 fn concurrent_resolvers_serialize_same_dependency_resolution() {
     let cache_dir = unique_dir("ir-same-resolution-lock-cache");
+    let user_cache_dir = unique_dir("ir-same-resolution-lock-user-cache");
     let profile = unique_path("ir-same-resolution-lock-profile", "R");
     let active = unique_path("ir-same-resolution-lock-active", "");
     let entered = unique_path("ir-same-resolution-lock-entered", "txt");
     let overlap = unique_path("ir-same-resolution-lock-overlap", "txt");
+    let probe = ResolverLockProbe {
+        user_cache_dir: &user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
 
     write_resolver_lock_profile(&profile);
 
-    let first = spawn_resolver_for_lock_test(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-lock-one",
-    );
+    let first = spawn_resolver_for_lock_test(&cache_dir, &probe, None, "resolution-lock-one");
     let first = wait_for_resolver_probe(first, &active);
 
-    let second = resolver_lock_command(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-lock-two",
-    )
-    .output()
-    .unwrap();
+    let second = resolver_lock_command(&cache_dir, &probe, None, "resolution-lock-two")
+        .output()
+        .unwrap();
     let first = first.wait_with_output().unwrap();
 
     assert_success(&first);
@@ -1814,40 +1808,33 @@ fn concurrent_resolvers_serialize_same_dependency_resolution() {
     let _ = fs::remove_file(&overlap);
     let _ = fs::remove_dir_all(&active);
     let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&user_cache_dir);
 }
 
 #[test]
 fn concurrent_resolvers_serialize_different_dependency_resolution() {
     let cache_dir = unique_dir("ir-resolution-overlap-cache");
+    let user_cache_dir = unique_dir("ir-resolution-overlap-user-cache");
     let profile = unique_path("ir-resolution-overlap-profile", "R");
     let active = unique_path("ir-resolution-overlap-active", "");
     let entered = unique_path("ir-resolution-overlap-entered", "txt");
     let overlap = unique_path("ir-resolution-overlap", "txt");
+    let probe = ResolverLockProbe {
+        user_cache_dir: &user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
 
     write_resolver_lock_profile(&profile);
 
-    let first = spawn_resolver_for_lock_test(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        None,
-        "resolution-one",
-    );
+    let first = spawn_resolver_for_lock_test(&cache_dir, &probe, None, "resolution-one");
     let first = wait_for_resolver_probe(first, &active);
 
-    let second = resolver_lock_command(
-        &cache_dir,
-        &profile,
-        &active,
-        &overlap,
-        &entered,
-        Some("cli"),
-        "resolution-two",
-    )
-    .output()
-    .unwrap();
+    let second = resolver_lock_command(&cache_dir, &probe, Some("cli"), "resolution-two")
+        .output()
+        .unwrap();
     let first = first.wait_with_output().unwrap();
 
     assert_success(&first);
@@ -1866,6 +1853,58 @@ fn concurrent_resolvers_serialize_different_dependency_resolution() {
     let _ = fs::remove_file(&overlap);
     let _ = fs::remove_dir_all(&active);
     let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&user_cache_dir);
+}
+
+#[test]
+fn concurrent_resolvers_serialize_across_cache_roots() {
+    let first_cache_dir = unique_dir("ir-cross-cache-lock-one");
+    let second_cache_dir = unique_dir("ir-cross-cache-lock-two");
+    let user_cache_dir = unique_dir("ir-cross-cache-lock-user-cache");
+    let profile = unique_path("ir-cross-cache-lock-profile", "R");
+    let active = unique_path("ir-cross-cache-lock-active", "");
+    let entered = unique_path("ir-cross-cache-lock-entered", "txt");
+    let overlap = unique_path("ir-cross-cache-lock-overlap", "txt");
+    let probe = ResolverLockProbe {
+        user_cache_dir: &user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
+
+    write_resolver_lock_profile(&profile);
+
+    let first =
+        spawn_resolver_for_lock_test(&first_cache_dir, &probe, None, "cross-cache-lock-one");
+    let first = wait_for_resolver_probe(first, &active);
+
+    let second = resolver_lock_command(&second_cache_dir, &probe, None, "cross-cache-lock-two")
+        .output()
+        .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=cross-cache-lock-one");
+    assert_stdout_contains(&second, "ir.fixture=cross-cache-lock-two");
+    assert!(
+        !overlap.exists(),
+        "resolve.R should not overlap across cache roots"
+    );
+    assert_eq!(
+        resolver_probe_count(&entered),
+        2,
+        "each cache root should resolve independently"
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_file(&overlap);
+    let _ = fs::remove_dir_all(&active);
+    let _ = fs::remove_dir_all(&first_cache_dir);
+    let _ = fs::remove_dir_all(&second_cache_dir);
+    let _ = fs::remove_dir_all(&user_cache_dir);
 }
 
 #[cfg(unix)]
