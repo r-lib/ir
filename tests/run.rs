@@ -535,6 +535,39 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[test]
+fn run_with_ir_cache_dir_falls_back_when_user_cache_lock_is_unusable() {
+    let cache_dir = unique_dir("ir-cache-lock-unusable-override");
+    let r_user_cache_file = unique_path("ir-cache-lock-unusable-r-cache", "txt");
+    let profile = unique_path("ir-cache-lock-unusable-profile", "R");
+    fs::write(&r_user_cache_file, "not a directory\n").unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  writeLines("", Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q("no", status = 0L, runLast = FALSE)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_file)
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--isolated", "--vanilla", "-e"])
+        .arg("cat('ir.fixture=cache-lock-unusable-override\n')")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cache-lock-unusable-override");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&r_user_cache_file);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn cache_clean_removes_cache_dir() {
     let cache_dir = unique_dir("ir-cache-clean");
     let library = cache_dir.join("libraries").join("library");

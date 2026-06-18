@@ -186,7 +186,7 @@ fn resolve_library_inner(
         });
     }
 
-    let _resolver_lock = FileLock::acquire(&resolver_lock_path(&cache_dir))?;
+    let _resolver_lock = acquire_resolver_lock(&cache_dir)?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {
             library: Some(resolved.library),
@@ -638,12 +638,25 @@ pub(crate) fn ir_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(r_user_cache_dir()?.join("R").join("ir"))
 }
 
-fn resolver_lock_path(cache_dir: &Path) -> PathBuf {
+fn acquire_resolver_lock(cache_dir: &Path) -> Result<FileLock, Box<dyn Error>> {
     // IR_CACHE_DIR isolates ir's resolution markers and materialised libraries,
     // but renv still uses the process-level R package cache when one exists.
-    let root = r_user_cache_dir()
-        .map(|path| path.join("R").join("ir"))
-        .unwrap_or_else(|_| cache_dir.to_path_buf());
+    if let Ok(path) = r_user_cache_dir() {
+        let path = resolver_lock_path(&path.join("R").join("ir"));
+        match FileLock::acquire(&path) {
+            Ok(lock) => return Ok(lock),
+            Err(error) => {
+                if nonempty_env("IR_CACHE_DIR").is_none() {
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    FileLock::acquire(&resolver_lock_path(cache_dir))
+}
+
+fn resolver_lock_path(root: &Path) -> PathBuf {
     root.join("locks").join("resolver.lock")
 }
 
