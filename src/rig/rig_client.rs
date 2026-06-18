@@ -17,7 +17,7 @@ pub(crate) fn list() -> Result<Vec<InstalledR>, Box<dyn Error>> {
     rig_json(&["list", "--json"])
 }
 
-fn output(args: &[&str]) -> Result<Vec<u8>, Box<dyn Error>> {
+pub(crate) fn output(args: &[&str]) -> Result<Vec<u8>, Box<dyn Error>> {
     let output = Command::new("rig")
         .args(args)
         .stdin(Stdio::null())

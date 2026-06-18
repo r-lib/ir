@@ -5,6 +5,9 @@ mod support;
 use support::*;
 
 use std::fs;
+use time::{Date, Duration, OffsetDateTime};
+
+use time::macros::format_description;
 
 #[cfg(windows)]
 use std::path::PathBuf;
@@ -123,6 +126,47 @@ fn path_with_bin_dir(bin_dir: &std::path::Path) -> std::ffi::OsString {
         ),
     )
     .unwrap()
+}
+
+#[cfg(unix)]
+fn snapshot_date_after_embedded_r_metadata() -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        semver: String,
+        date: String,
+    }
+
+    let json = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/rig/r-versions.json"
+    ))
+    .unwrap();
+    let format = format_description!("[year]-[month]-[day]");
+    let latest = serde_json::from_str::<Vec<Release>>(&json)
+        .unwrap()
+        .into_iter()
+        .filter_map(|release| {
+            let mut parts = release.semver.split('.');
+            let major = parts.next()?.parse::<u64>().ok()?;
+            let minor = parts.next()?.parse::<u64>().ok()?;
+            let patch = parts.next()?.parse::<u64>().ok()?;
+            if parts.next().is_some() || major < 4 {
+                return None;
+            }
+            let date = Date::parse(release.date.get(..10)?, &format).ok()?;
+            Some(((major, minor, patch), date))
+        })
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, date)| date)
+        .unwrap();
+    let snapshot = latest + Duration::days(1);
+
+    if snapshot > OffsetDateTime::now_utc().date() {
+        eprintln!("SKIP stale embedded R metadata fallback: latest embedded R release is {latest}");
+        return None;
+    }
+
+    Some(snapshot.to_string())
 }
 
 #[cfg(unix)]
@@ -609,6 +653,122 @@ fn run_with_exclude_newer_selects_latest_available_minor_r() {
     let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&r43_dir);
     let _ = fs::remove_dir_all(&r44_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_exclude_newer_selects_r_4_0_for_2021_snapshot() {
+    let cache_dir = unique_dir("ir-exclude-newer-r40-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-r40-bin");
+    let r40_dir = unique_dir("ir-exclude-newer-r40");
+    let r41_dir = unique_dir("ir-exclude-newer-r41");
+
+    let r40_binary = selected_r_binary(&r40_dir, "r40");
+    let r41_binary = selected_r_binary(&r41_dir, "r41");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1\" in\n",
+                "  list)\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.0.5","version":"4.0.5","aliases":[],"binary":"{}"}},
+{{"name":"4.1.3","version":"4.1.3","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  available) echo unexpected available >&2; exit 65 ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            r40_binary.display(),
+            r41_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            "2021-03-31",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r40");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r40_dir);
+    let _ = fs::remove_dir_all(&r41_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_exclude_newer_discovers_minor_after_embedded_metadata() {
+    let Some(snapshot_date) = snapshot_date_after_embedded_r_metadata() else {
+        return;
+    };
+
+    let cache_dir = unique_dir("ir-exclude-newer-r-newer-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-r-newer-bin");
+    let newer_dir = unique_dir("ir-exclude-newer-r-newer");
+
+    let newer_binary = selected_r_binary(&newer_dir, "newer");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1 $2 $3\" in\n",
+                "  \"list --json \")\n",
+                "    cat <<'JSON'\n",
+                r#"[{{"name":"99.0.0","version":"99.0.0","aliases":[],"binary":"{}"}}]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  \"available --all --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[{{"name":"99.0.0","version":"99.0.0","date":"{}T00:00:00Z"}}]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            newer_binary.display(),
+            snapshot_date
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            &snapshot_date,
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=newer");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&newer_dir);
 }
 
 #[cfg(unix)]
