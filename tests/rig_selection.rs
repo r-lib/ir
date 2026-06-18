@@ -166,6 +166,59 @@ fn run_with_r_version_selects_highest_matching_installed_r() {
     assert_success(&out);
     assert_stdout_contains(&out, "selected=new");
 
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "== 4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=new");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.4.2","version":"4.4.2","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            old_binary.display()
+        ),
+    );
+
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "== 4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=old");
+
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&old_r_dir);
@@ -240,12 +293,7 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
         output_text(&out)
     );
     assert!(
-        stderr.contains("Install a matching R with `rig install`"),
-        "{}",
-        output_text(&out)
-    );
-    assert!(
-        !stderr.contains("Run `rig install 4.4`"),
+        stderr.contains("Run `rig install 4.4`"),
         "{}",
         output_text(&out)
     );

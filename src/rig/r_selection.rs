@@ -93,10 +93,9 @@ pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str>
         VersionRequirement::Bare(req) => Some(req),
         VersionRequirement::Comparison {
             op: VersionOp::Eq,
-            version,
             raw,
             ..
-        } if version.len() == 3 => Some(raw),
+        } => Some(raw),
         VersionRequirement::Comparison { .. } => None,
     }
 }
@@ -153,6 +152,9 @@ impl VersionRequirement {
                     VersionOp::Gte => compare_version_parts(&candidate, required_version).is_ge(),
                     VersionOp::Lt => compare_version_parts(&candidate, required_version).is_lt(),
                     VersionOp::Lte => compare_version_parts(&candidate, required_version).is_le(),
+                    VersionOp::Eq if required_version.len() < 3 => {
+                        candidate.starts_with(required_version)
+                    }
                     VersionOp::Eq => compare_version_parts(&candidate, required_version).is_eq(),
                 }
             }
