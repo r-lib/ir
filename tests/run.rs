@@ -661,6 +661,61 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
 }
 
 #[test]
+fn run_trims_env_exclude_newer_before_resolution_cache_keying() {
+    let cache_dir = unique_dir("ir-env-exclude-newer-normalized-cache");
+    let profile = unique_path("ir-env-exclude-newer-normalized-profile", "R");
+    let entered = unique_path("ir-env-exclude-newer-normalized-entered", "txt");
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  cat(Sys.getpid(), "\n", file = Sys.getenv("IR_TEST_ENTERED"), append = TRUE)
+}
+"#,
+    )
+    .unwrap();
+    let expr = "cat('ir.fixture=normalized-exclude-newer-cache\\n')";
+
+    for _ in 0..2 {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_EXCLUDE_NEWER", " 2024-06-01 ")
+            .env("IR_RSCRIPT", rscript())
+            .env("R_PROFILE_USER", &profile)
+            .env("IR_TEST_ENTERED", &entered)
+            .args(["run", "--isolated", "--vanilla", "-e", expr])
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=normalized-exclude-newer-cache");
+    }
+
+    assert_eq!(
+        resolver_probe_count(&entered),
+        1,
+        "second run should reuse the Rust warm resolution cache"
+    );
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker_text = fs::read_to_string(&markers[0])
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()));
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-06-01")
+    );
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&entered);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
 fn run_frontmatter_github_ref_installs_github_package() {
     let cache_dir = unique_dir("ir-github-ref-cache");
     let script = unique_path("ir-github-ref", "R");
