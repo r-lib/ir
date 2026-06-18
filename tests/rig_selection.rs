@@ -390,7 +390,7 @@ fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
     assert!(!out.status.success(), "{}", output_text(&out));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("R == 4.4 is required"),
+        stderr.contains("R 4.4 is required"),
         "{}",
         output_text(&out)
     );
@@ -455,11 +455,7 @@ fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
 
     assert!(!out.status.success(), "{}", output_text(&out));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("R == 4 is required"),
-        "{}",
-        output_text(&out)
-    );
+    assert!(stderr.contains("R 4 is required"), "{}", output_text(&out));
     assert!(
         stderr.contains("Run `rig install 4`"),
         "{}",
@@ -532,7 +528,7 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
     assert!(!out.status.success(), "{}", output_text(&out));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("R == 4.4 is required"),
+        stderr.contains("R 4.4 is required"),
         "{}",
         output_text(&out)
     );
@@ -663,7 +659,7 @@ fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
 
 #[cfg(unix)]
 #[test]
-fn missing_exact_minor_r_version_with_exclude_newer_reports_minor_install_hint() {
+fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_releases() {
     let cache_dir = unique_dir("ir-exclude-newer-missing-r-cache");
     let bin_dir = unique_dir("ir-exclude-newer-missing-r-bin");
 
@@ -673,15 +669,7 @@ fn missing_exact_minor_r_version_with_exclude_newer_reports_minor_install_hint()
             "#!/bin/sh\n",
             "case \"$1\" in\n",
             "  list) echo '[]' ;;\n",
-            "  available)\n",
-            "    cat <<'JSON'\n",
-            r#"[
-{"name":"4.4.0","version":"4.4.0","date":"2024-04-24T04:07:56Z"},
-{"name":"4.4.1","version":"4.4.1","date":"2024-06-14T07:08:17Z"},
-{"name":"4.4.2","version":"4.4.2","date":"2024-10-31T08:09:02Z"}
-]"#,
-            "\nJSON\n",
-            "    ;;\n",
+            "  available) echo unexpected available >&2; exit 65 ;;\n",
             "  *) exit 64 ;;\n",
             "esac\n",
         ),
@@ -712,6 +700,67 @@ fn missing_exact_minor_r_version_with_exclude_newer_reports_minor_install_hint()
     );
     assert!(
         stderr.contains("Run `rig install 4.4`"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !stderr.contains("unexpected available"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_exact_patch_r_version_with_exclude_newer_reports_requested_install_hint() {
+    let cache_dir = unique_dir("ir-exclude-newer-missing-r-patch-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-missing-r-patch-bin");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "case \"$1\" in\n",
+            "  list) echo '[]' ;;\n",
+            "  available) echo unexpected available >&2; exit 65 ;;\n",
+            "  *) exit 64 ;;\n",
+            "esac\n",
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--r-version",
+            "== 4.4.2",
+            "--exclude-newer",
+            "2024-06-20",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("R 4.4.2 is required but is not installed"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        stderr.contains("Run `rig install 4.4.2`"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !stderr.contains("unexpected available"),
         "{}",
         output_text(&out)
     );

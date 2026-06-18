@@ -9,4 +9,3 @@ trap 'rm -f "$tmp"' EXIT INT HUP TERM
 
 curl -fsSL "$url" -o "$tmp"
 mv "$tmp" src/rig/r-versions.json
-date -u +%F > src/rig/r-versions-fetched-at.txt
