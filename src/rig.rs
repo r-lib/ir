@@ -22,9 +22,11 @@ pub fn resolve_rscript(req: &str, exclude_newer: Option<&str>) -> Result<OsStrin
 
     let required =
         rig_releases::required_available_version(req, &requirement, exclude_newer.as_deref())?;
+    let requested = r_selection::rig_install_hint(&requirement);
+    let required_version = requested.unwrap_or(&required.version);
+    let install_hint = requested.unwrap_or(&required.name);
     Err(format!(
-        "R {} is required but is not installed. Run `rig install {}`.",
-        required.version, required.name
+        "R {required_version} is required but is not installed. Run `rig install {install_hint}`."
     )
     .into())
 }

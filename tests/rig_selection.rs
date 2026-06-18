@@ -663,7 +663,7 @@ fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
 
 #[cfg(unix)]
 #[test]
-fn missing_exact_minor_r_version_with_exclude_newer_reports_available_patch() {
+fn missing_exact_minor_r_version_with_exclude_newer_reports_minor_install_hint() {
     let cache_dir = unique_dir("ir-exclude-newer-missing-r-cache");
     let bin_dir = unique_dir("ir-exclude-newer-missing-r-bin");
 
@@ -706,12 +706,12 @@ fn missing_exact_minor_r_version_with_exclude_newer_reports_available_patch() {
     assert!(!out.status.success(), "{}", output_text(&out));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("R 4.4.1 is required but is not installed"),
+        stderr.contains("R 4.4 is required but is not installed"),
         "{}",
         output_text(&out)
     );
     assert!(
-        stderr.contains("Run `rig install 4.4.1`"),
+        stderr.contains("Run `rig install 4.4`"),
         "{}",
         output_text(&out)
     );
