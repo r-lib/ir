@@ -716,35 +716,180 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[test]
-fn run_rejects_blank_env_exclude_newer() {
+fn run_cli_exclude_newer_overrides_env_and_frontmatter() {
+    let cache_dir = unique_dir("ir-cli-exclude-newer-precedence-cache");
+    let script = unique_path("ir-cli-exclude-newer-precedence", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=cli-exclude-newer-precedence\n")
+"#,
+    )
+    .unwrap();
+
     let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_EXCLUDE_NEWER", " \t ")
+        .args(["run", "--exclude-newer", " 2024-03-01 ", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cli-exclude-newer-precedence");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-03-01")
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_rejects_blank_cli_exclude_newer() {
+    let out = ir()
         .args([
             "run",
+            "--exclude-newer",
+            " \t ",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=blank-exclude-newer-ran\\n')",
+            "cat('ir.fixture=blank-cli-exclude-newer-ran\\n')",
         ])
         .output()
         .unwrap();
 
     assert!(
         !out.status.success(),
-        "blank IR_EXCLUDE_NEWER unexpectedly succeeded\n{}",
+        "blank --exclude-newer unexpectedly succeeded\n{}",
         output_text(&out)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("IR_EXCLUDE_NEWER"), "{}", output_text(&out));
+    assert!(stderr.contains("--exclude-newer"), "{}", output_text(&out));
     assert!(
         stderr.contains("must not be empty"),
         "{}",
         output_text(&out)
     );
     assert!(
-        !stdout(&out).contains("ir.fixture=blank-exclude-newer-ran"),
+        !stdout(&out).contains("ir.fixture=blank-cli-exclude-newer-ran"),
         "{}",
         output_text(&out)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
+    let cache_dir = unique_dir("ir-render-cli-exclude-newer-precedence-cache");
+    let library = unique_dir("ir-render-cli-exclude-newer-precedence-library");
+    let doc = unique_path("ir-render-cli-exclude-newer-precedence", "qmd");
+    let profile = unique_path("ir-render-cli-exclude-newer-precedence-profile", "R");
+    let quarto = unique_path("ir-render-cli-exclude-newer-precedence-quarto", "");
+    fs::write(
+        &doc,
+        r#"---
+title: CLI exclude newer precedence
+ir:
+  exclude-newer: 2024-01-01
+---
+
+```{r}
+cat("ir.fixture=render-cli-exclude-newer-precedence\n")
+```
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  library <- Sys.getenv("IR_TEST_LIBRARY")
+  dir.create(library, recursive = TRUE, showWarnings = FALSE)
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (nzchar(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    writeLines(c(
+      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
+      library
+    ), marker)
+  }
+  writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", " \t ")
+        .env("IR_QUARTO", &quarto)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_TEST_LIBRARY", &library)
+        .env("R_PROFILE_USER", &profile)
+        .args(["render", "--exclude-newer", " 2024-03-01 "])
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert_eq!(
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-03-01")
+    );
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&quarto);
+    let _ = fs::remove_dir_all(&library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[test]
+fn run_empty_env_exclude_newer_overrides_frontmatter_with_latest() {
+    let cache_dir = unique_dir("ir-empty-env-exclude-newer-cache");
+    let script = unique_path("ir-empty-env-exclude-newer", "R");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| exclude-newer: 2024-01-01
+
+cat("ir.fixture=empty-env-exclude-newer\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", "")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=empty-env-exclude-newer");
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
@@ -1415,6 +1560,17 @@ fn resolver_probe_count(entered: &Path) -> usize {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()))
         .lines()
         .count()
+}
+
+fn only_resolution_marker_text(cache_dir: &Path) -> String {
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    fs::read_to_string(&markers[0])
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()))
 }
 
 #[test]

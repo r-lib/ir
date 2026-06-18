@@ -31,7 +31,7 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 
 - **The file explains itself.** Package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use `r-version` to select an installed R and `exclude-newer` to resolve packages as of a specific date.
+- **Reproducibility is explicit.** Use `r-version` to select an installed R and `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date.
 - **It works with normal R habits.** Forward `Rscript` options, render Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers for R, Rapp, and direct executable scripts without setting up a project by hand.
 
@@ -45,6 +45,7 @@ $ ir run --vanilla script.R
 $ ir render report.qmd --to html
 $ ir run --with cli -e 'cli::cli_alert_success("works")'
 $ ir run --r-version 4.5 script.R
+$ ir run --exclude-newer 2024-01-15 script.R
 $ rx btw --help
 $ ir tool run --from btw btw --help
 $ ir tool install btw

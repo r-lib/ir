@@ -24,11 +24,12 @@ pub(crate) fn cmd_run(
     rscript_args: &[String],
     with_deps: &[String],
     r_requirement: Option<&str>,
+    exclude_newer: Option<&str>,
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
-    apply_env_overrides(&mut spec)?;
+    apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     if let Some(req) = r_requirement {
         spec.r_requirement = Some(req.to_string());
@@ -58,12 +59,13 @@ pub(crate) fn cmd_render(
     source: &RenderSource,
     with_deps: &[String],
     r_requirement: Option<&str>,
+    exclude_newer: Option<&str>,
     render_args: &[String],
     isolated: bool,
     vanilla: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
-    apply_env_overrides(&mut spec)?;
+    apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
     if let Some(req) = r_requirement {
@@ -92,14 +94,23 @@ pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn E
     rig::resolve_rscript(req, spec.exclude_newer.as_deref())
 }
 
-fn apply_env_overrides(spec: &mut RuntimeSpec) -> Result<(), Box<dyn Error>> {
-    if let Some(exclude_newer) = nonempty_env("IR_EXCLUDE_NEWER") {
+fn apply_exclude_newer_override(
+    spec: &mut RuntimeSpec,
+    cli_exclude_newer: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(exclude_newer) = cli_exclude_newer {
+        spec.exclude_newer = Some(trimmed_nonempty("--exclude-newer", exclude_newer)?.to_string());
+        return Ok(());
+    }
+
+    if let Some(exclude_newer) = env::var_os("IR_EXCLUDE_NEWER") {
         let exclude_newer = env_string("IR_EXCLUDE_NEWER", exclude_newer)?;
         let exclude_newer = exclude_newer.trim();
-        if exclude_newer.is_empty() {
-            return Err("`IR_EXCLUDE_NEWER` must not be empty".into());
-        }
-        spec.exclude_newer = Some(exclude_newer.to_string());
+        spec.exclude_newer = if exclude_newer.is_empty() {
+            None
+        } else {
+            Some(exclude_newer.to_string())
+        };
     }
 
     Ok(())
@@ -616,6 +627,14 @@ fn env_string(name: &str, value: OsString) -> Result<String, Box<dyn Error>> {
     value
         .into_string()
         .map_err(|_| format!("`{name}` must be valid UTF-8").into())
+}
+
+fn trimmed_nonempty<'a>(name: &str, value: &'a str) -> Result<&'a str, Box<dyn Error>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("`{name}` must not be empty").into());
+    }
+    Ok(value)
 }
 
 fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {

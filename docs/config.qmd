@@ -54,7 +54,9 @@ The default cache directory is computed before launching R.
 `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`.
 The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
 
-`IR_EXCLUDE_NEWER` overrides frontmatter `exclude-newer` for `ir run` and `ir render` package snapshot resolution.
+Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
+`IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
+Set `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 `IR_RSCRIPT` is ignored when `r-version` is set, because version selection is resolved through `rig`.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.

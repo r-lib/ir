@@ -23,6 +23,7 @@ Render the document with the `render` subcommand:
 ```console
 $ ir render report.qmd
 $ ir render report.qmd --to pdf
+$ ir render --exclude-newer 2024-01-15 report.qmd
 $ ir render --vanilla report.qmd
 ```
 
@@ -47,6 +48,8 @@ The `ir.packages` value follows the same rules as script `packages`: use a YAML 
 Arguments after the source path are passed to `quarto render`.
 
 Use `--vanilla` before the source path to run Quarto's knitr R with `--vanilla`.
+Snapshot date precedence is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `ir.exclude-newer`.
+An empty `IR_EXCLUDE_NEWER` overrides frontmatter `ir.exclude-newer` and resolves latest packages.
 
 When an R version is selected by frontmatter or `--r-version`, `ir` pins Quarto's knitr R to that selection.
 
