@@ -200,7 +200,7 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .env("PATH", path)
+        .env("PATH", &path)
         .env_remove("IR_RSCRIPT")
         .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
         .output()
@@ -215,6 +215,37 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
     );
     assert!(
         stderr.contains("Run `rig install 4.4`"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !stderr.contains("unexpected available"),
+        "{}",
+        output_text(&out)
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", &path)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "== 4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("R == 4.4 is required"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        stderr.contains("Install a matching R with `rig install`"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !stderr.contains("Run `rig install 4.4`"),
         "{}",
         output_text(&out)
     );

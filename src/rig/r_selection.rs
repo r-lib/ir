@@ -93,9 +93,10 @@ pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str>
         VersionRequirement::Bare(req) => Some(req),
         VersionRequirement::Comparison {
             op: VersionOp::Eq,
+            version,
             raw,
             ..
-        } => Some(raw),
+        } if version.len() == 3 => Some(raw),
         VersionRequirement::Comparison { .. } => None,
     }
 }
