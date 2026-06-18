@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use time::macros::format_description;
+use time::{Date, OffsetDateTime};
+
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
 use crate::rig;
@@ -118,48 +121,18 @@ fn apply_exclude_newer_override(
 
 fn normalize_exclude_newer_override(value: &str) -> Result<Option<String>, Box<dyn Error>> {
     let value = value.trim();
-    if value.is_empty() || is_future_iso_date(value)? {
+    if value.is_empty() || is_future_iso_date(value) {
         return Ok(None);
     }
     Ok(Some(value.to_string()))
 }
 
-fn is_future_iso_date(value: &str) -> Result<bool, Box<dyn Error>> {
-    if !looks_like_iso_date(value) {
-        return Ok(false);
-    }
-    Ok(value > current_utc_date()?.as_str())
-}
-
-fn looks_like_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[0..4].iter().all(u8::is_ascii_digit)
-        && bytes[4] == b'-'
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[7] == b'-'
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
-}
-
-fn current_utc_date() -> Result<String, Box<dyn Error>> {
-    let days = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() / 86_400;
-    let (year, month, day) = civil_from_days(days as i64);
-    Ok(format!("{year:04}-{month:02}-{day:02}"))
-}
-
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let days = days + 719_468;
-    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
-    let year = year + if month <= 2 { 1 } else { 0 };
-    (year, month, day)
+fn is_future_iso_date(value: &str) -> bool {
+    let format = format_description!("[year]-[month]-[day]");
+    let Ok(date) = Date::parse(value, &format) else {
+        return false;
+    };
+    date > OffsetDateTime::now_utc().date()
 }
 
 /// Return a cached materialised library path, or run the embedded driver in a
