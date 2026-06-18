@@ -663,7 +663,7 @@ fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
 
 #[cfg(unix)]
 #[test]
-fn missing_minor_r_version_with_exclude_newer_reports_available_patch() {
+fn missing_exact_minor_r_version_with_exclude_newer_reports_available_patch() {
     let cache_dir = unique_dir("ir-exclude-newer-missing-r-cache");
     let bin_dir = unique_dir("ir-exclude-newer-missing-r-bin");
 
@@ -694,7 +694,7 @@ fn missing_minor_r_version_with_exclude_newer_reports_available_patch() {
         .args([
             "run",
             "--r-version",
-            "4.4",
+            "== 4.4",
             "--exclude-newer",
             "2024-06-20",
             "-e",
