@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -35,7 +36,15 @@ def resolve_spec(spec: str) -> str:
     return version
 
 
-def release_metadata(spec: str) -> tuple[str, str, str]:
+def installed_name_for_version(version: str, spec: str) -> str:
+    installs = json.loads(run_rig(["-q", "list", "--json"]))
+    for install in installs:
+        if install.get("version") == version:
+            return install["name"]
+    die(f"R {version} from {spec} is not installed by rig")
+
+
+def release_metadata(name: str) -> tuple[str, str, str]:
     expression = (
         'rscript <- file.path(R.home("bin"), '
         'if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"); '
@@ -47,15 +56,15 @@ def release_metadata(spec: str) -> tuple[str, str, str]:
         [
             "run",
             "-r",
-            spec,
+            name,
             "-e",
             expression,
         ]
     )
     return (
-        output_field(output, "IR_TEST_R_VERSION", spec),
-        output_field(output, "IR_TEST_R_DATE", spec),
-        output_field(output, "IR_TEST_RSCRIPT", spec),
+        output_field(output, "IR_TEST_R_VERSION", name),
+        output_field(output, "IR_TEST_R_DATE", name),
+        output_field(output, "IR_TEST_RSCRIPT", name),
     )
 
 
@@ -70,11 +79,13 @@ def main() -> None:
     if len(sys.argv) != 2:
         die("usage: scripts/resolve-test-r.py oldrel/N")
 
-    version = resolve_spec(sys.argv[1])
-    reported_version, date, rscript = release_metadata(version)
+    spec = sys.argv[1]
+    version = resolve_spec(spec)
+    name = installed_name_for_version(version, spec)
+    reported_version, date, rscript = release_metadata(name)
     if reported_version != version:
-        die(f"rig resolved {sys.argv[1]} to R {version}, but ran R {reported_version}")
-    print(version)
+        die(f"rig resolved {spec} to R {version}, but ran R {reported_version}")
+    print(name)
     print(version)
     print(date)
     print(rscript)
