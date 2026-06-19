@@ -158,6 +158,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Warm GitHub R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
+    assert!(workflow.contains("unset RENV_CONFIG_REPOS_OVERRIDE"));
     assert!(workflow.contains("withr@3.0.3"));
     assert!(workflow.contains("github::rstudio/reticulate@main"));
     assert!(workflow.contains("rmarkdown xfun quarto"));

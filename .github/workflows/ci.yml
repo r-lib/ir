@@ -113,6 +113,7 @@ jobs:
       - name: Warm GitHub R package cache
         shell: bash
         run: |
+          unset RENV_CONFIG_REPOS_OVERRIDE
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
             --repos https://cloud.r-project.org \
             withr@3.0.3
