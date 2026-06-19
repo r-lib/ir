@@ -25,6 +25,8 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
     else {
         return;
     };
+    let target_exclude_newer = std::env::var("IR_TEST_R_EXCLUDE_NEWER")
+        .unwrap_or_else(|_| panic!("IR_TEST_R_VERSION={target} requires IR_TEST_R_EXCLUDE_NEWER"));
 
     // Selecting the version the default path already uses would prove nothing.
     if default_r_version().as_deref() == Some(target.as_str()) {
@@ -36,6 +38,22 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
 
     let fixture_dir = fixture_copy("run", "ir-r-version-render-fixture");
     let cache_dir = test_cache("ir-r-version-cache");
+    for filename in ["r-version-select.qmd", "r-version-frontmatter.R"] {
+        let path = fixture_dir.join(filename);
+        let frontmatter = fs::read_to_string(&path).unwrap();
+        assert!(frontmatter.contains("exclude-newer: 2026-06-01"));
+        let updated = frontmatter.replace(
+            "exclude-newer: 2026-06-01",
+            &format!("exclude-newer: {target_exclude_newer}"),
+        );
+        let updated = if filename.ends_with(".R") {
+            assert!(updated.contains("#| r-version: 4.4.3"));
+            updated.replace("#| r-version: 4.4.3", &format!("#| r-version: {target}"))
+        } else {
+            updated
+        };
+        fs::write(&path, updated).unwrap();
+    }
 
     let render = ir()
         .current_dir(&fixture_dir)
@@ -64,12 +82,6 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
     assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
 
     let script = fixture_dir.join("r-version-frontmatter.R");
-    let frontmatter = fs::read_to_string(&script).unwrap();
-    fs::write(
-        &script,
-        frontmatter.replace("#| r-version: 4.4.3", &format!("#| r-version: {target}")),
-    )
-    .unwrap();
 
     let run = ir()
         .env("IR_CACHE_DIR", &cache_dir)

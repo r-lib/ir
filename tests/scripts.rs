@@ -183,6 +183,9 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
         .nth(1)
         .and_then(|block| block.split("      - run: cargo nextest").next())
         .expect("workflow should warm the non-default R package cache before tests");
+    assert!(warm_non_default_cache
+        .contains("--repos https://packagemanager.posit.co/cran/${IR_TEST_R_EXCLUDE_NEWER}"));
+    assert!(!warm_non_default_cache.contains("2026-06-01"));
     assert!(warm_non_default_cache.contains("R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library"));
     let warm_default_cache = workflow
         .split("      - name: Warm default R package cache")
@@ -293,6 +296,9 @@ fn r_version_selection_test_uses_dynamic_test_r_version() {
         "rig_test_r_version(\"r_version_selection_covers_render_flag_and_run_frontmatter\")"
     ));
     assert!(test.contains("replace(\"#| r-version: 4.4.3\""));
+    assert!(test.contains("IR_TEST_R_EXCLUDE_NEWER"));
+    assert!(test.contains("\"exclude-newer: 2026-06-01\""));
+    assert!(test.contains("exclude-newer: {target_exclude_newer}"));
 }
 
 #[test]
