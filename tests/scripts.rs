@@ -176,6 +176,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
             "workflow should have a default cache warm step before the snapshot cache warm step",
         );
     assert!(warm_default_cache.contains("GITHUB_PAT: ${{ github.token }}"));
+    assert!(!warm_default_cache.contains("R_PROFILE_USER"));
     assert!(!workflow.contains("bookdown btw Rapp"));
     assert!(!workflow.contains("Warm default R package cache (Unix)"));
     assert!(!workflow.contains("Warm default R package cache (Windows)"));

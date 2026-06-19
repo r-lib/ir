@@ -11,11 +11,12 @@ if (length(args) >= 2L && identical(args[[1L]], "--repos")) {
 stopifnot(length(args) > 0L)
 
 tooling_repos <- c(CRAN = "https://packagemanager.posit.co/cran/latest")
+default_repos <- c(CRAN = "https://cran.r-project.org")
 if (is.null(repos)) {
   repos <- getOption("repos")
   cran <- repos[["CRAN"]]
   if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
-    repos <- tooling_repos
+    repos <- default_repos
 } else {
   repos <- c(CRAN = repos)
 }

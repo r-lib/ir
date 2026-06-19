@@ -109,7 +109,6 @@ jobs:
             btw Rapp docopt pkgsearch prettyunits
         env:
           GITHUB_PAT: ${{ github.token }}
-          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
 
       - name: Warm snapshot R package cache
         shell: bash
