@@ -14,6 +14,7 @@ $TestRSpec = "oldrel/2"
 $TestRName = $null
 $TestRVersion = $null
 $TestRExcludeNewer = $null
+$TestRscript = $null
 $RustupInitUrl = "https://win.rustup.rs"
 $SkipRust = $false
 $SkipPython = $false
@@ -135,6 +136,7 @@ function Set-TestRMetadata {
         $script:TestRName = "<rig-name-for-$TestRSpec>"
         $script:TestRVersion = "<resolved-$TestRSpec-version>"
         $script:TestRExcludeNewer = "<release-date-for-$TestRSpec>"
+        $script:TestRscript = "<Rscript-for-$TestRSpec>"
         return
     }
 
@@ -142,14 +144,15 @@ function Set-TestRMetadata {
     if ($LASTEXITCODE -ne 0) {
         throw "scripts/resolve-test-r.py exited with code $LASTEXITCODE"
     }
-    $fields = ([string]$metadata).Trim() -split "\s+"
-    if ($fields.Count -ne 3) {
+    $fields = @($metadata)
+    if ($fields.Count -ne 4) {
         throw "scripts/resolve-test-r.py returned unexpected output: $metadata"
     }
 
     $script:TestRName = $fields[0]
     $script:TestRVersion = $fields[1]
     $script:TestRExcludeNewer = $fields[2]
+    $script:TestRscript = $fields[3]
 }
 
 function Add-PathIfExists {
@@ -284,6 +287,7 @@ Invoke-Step "quarto" @("--version")
 if (-not $SkipTestR -and -not $DryRun -and $env:GITHUB_ENV) {
     Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=$TestRVersion"
     Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"
+    Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_RSCRIPT=$TestRscript"
 }
 
 Write-Host ""
@@ -295,6 +299,7 @@ Write-Host "To enable the version-selection tests in this PowerShell session, ru
 Write-Host ""
 Write-Host "  `$env:IR_TEST_R_VERSION=$TestRVersion"
 Write-Host "  `$env:IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"
+Write-Host "  `$env:IR_TEST_RSCRIPT=$TestRscript"
 Write-Host ""
 Write-Host "Then run:"
 Write-Host ""

@@ -168,10 +168,12 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
+    assert!(workflow.contains("Warm non-default R package cache"));
     assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
     assert!(workflow.contains("github::rstudio/reticulate fansi"));
     assert!(workflow.contains("rmarkdown xfun quarto"));
     assert!(workflow.contains("rmarkdown bookdown tinytex xfun"));
+    assert!(workflow.contains("\"$IR_TEST_RSCRIPT\" scripts/warm-renv-cache.R"));
     assert!(workflow.contains("shell: bash"));
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
@@ -194,7 +196,6 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow.contains("Warm default R package cache (Windows)"));
     assert!(workflow.contains("cargo nextest run --verbose --no-fail-fast"));
     assert!(!workflow.contains("cargo build --verbose"));
-    assert!(!workflow.contains("Warm non-default R package cache"));
     assert!(!workflow.contains("Warm GitHub R package cache"));
     assert!(!workflow.contains("withr@"));
     assert!(!workflow.contains("reticulate github::rstudio/reticulate"));
@@ -222,7 +223,9 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
     assert!(sh.contains("TEST_R_SPEC=\"oldrel/2\""));
     assert!(sh.contains("scripts/resolve-test-r.py \"$TEST_R_SPEC\""));
+    assert!(sh.contains("sed -n '4p' \"$metadata_file\""));
     assert!(sh.contains("IR_TEST_R_EXCLUDE_NEWER"));
+    assert!(sh.contains("IR_TEST_RSCRIPT"));
     assert!(
         !sh.contains("rig default release"),
         "setup should not mutate a user's configured rig default"
@@ -233,7 +236,10 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
     assert!(ps1.contains("$TestRSpec = \"oldrel/2\""));
     assert!(ps1.contains("scripts/resolve-test-r.py\" $TestRSpec"));
+    assert!(ps1.contains("$fields = @($metadata)"));
+    assert!(!ps1.contains(r#"-split "\s+""#));
     assert!(ps1.contains("IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"));
+    assert!(ps1.contains("IR_TEST_RSCRIPT=$TestRscript"));
     assert!(
         !ps1.contains("rig default release"),
         "setup should not mutate a user's configured rig default"
@@ -316,6 +322,7 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     );
     assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
     assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
+    assert_stdout_contains(&out, "IR_TEST_RSCRIPT=<Rscript-for-oldrel/2>");
 }
 
 #[cfg(windows)]
@@ -367,6 +374,7 @@ fn install_dev_deps_ps1_can_skip_test_r() {
     assert!(!stdout.contains("rig add oldrel/2"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_VERSION"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_EXCLUDE_NEWER"), "{stdout}");
+    assert!(!stdout.contains("IR_TEST_RSCRIPT"), "{stdout}");
 }
 
 #[test]
@@ -398,6 +406,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("$TestRSpec = \"oldrel/2\""));
     assert!(script.contains("IR_TEST_R_VERSION=$TestRVersion"));
     assert!(script.contains("IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"));
+    assert!(script.contains("IR_TEST_RSCRIPT=$TestRscript"));
     assert!(
         !script.contains("rig default release"),
         "setup should not mutate a user's configured rig default"
@@ -445,15 +454,18 @@ fn test_r_metadata_resolver_uses_newest_installed_r_without_release_alias() {
     let _ = fs::remove_dir_all(&temp);
     fs::create_dir_all(&temp).unwrap();
     let rig = temp.join("rig");
+    let r_binary = temp.join("R dir").join("R");
+    let rscript = temp.join("R dir").join("Rscript");
     fs::write(
         &rig,
-        r#"#!/usr/bin/env sh
+        format!(
+            r#"#!/usr/bin/env sh
 set -eu
 if [ "$1" = "list" ] && [ "$2" = "--json" ]; then
   cat <<'JSON'
 [
-  {"name": "4.6.0", "version": "4.6.0", "aliases": []},
-  {"name": "4.4.3", "version": "4.4.3", "aliases": []}
+  {{"name": "4.6.0", "version": "4.6.0", "aliases": [], "binary": "{release_binary}"}},
+  {{"name": "4.4.3", "version": "4.4.3", "aliases": [], "binary": "{test_binary}"}}
 ]
 JSON
 elif [ "$1" = "run" ]; then
@@ -462,6 +474,9 @@ else
   exit 99
 fi
 "#,
+            release_binary = temp.join("release").display(),
+            test_binary = r_binary.display()
+        ),
     )
     .unwrap();
     let mut permissions = fs::metadata(&rig).unwrap().permissions();
@@ -482,7 +497,7 @@ fi
     assert_success(&out);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "4.4.3 4.4.3 2025-02-28\n"
+        format!("4.4.3\n4.4.3\n2025-02-28\n{}\n", rscript.display())
     );
 
     let _ = fs::remove_dir_all(&temp);

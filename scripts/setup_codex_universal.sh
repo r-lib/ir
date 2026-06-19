@@ -170,10 +170,11 @@ renv::install(
 EOF
 
 rig add oldrel/2
-test_r_metadata="$(python3 scripts/resolve-test-r.py oldrel/2)"
-read -r rig_name test_r_version test_r_exclude_newer <<EOF
-$test_r_metadata
-EOF
+mapfile -t test_r_metadata < <(python3 scripts/resolve-test-r.py oldrel/2)
+rig_name="${test_r_metadata[0]}"
+test_r_version="${test_r_metadata[1]}"
+test_r_exclude_newer="${test_r_metadata[2]}"
+test_rscript="${test_r_metadata[3]}"
 cat > /tmp/ir-rig-setup.R <<'EOF'
 options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 if (!requireNamespace("pak", quietly = TRUE)) {
@@ -202,8 +203,10 @@ EOF
 env -u R_LIBS_USER rig run -r "$rig_name" -f /tmp/ir-rig-setup.R
 export IR_TEST_R_VERSION="$test_r_version"
 export IR_TEST_R_EXCLUDE_NEWER="$test_r_exclude_newer"
+export IR_TEST_RSCRIPT="$test_rscript"
 persist_export IR_TEST_R_VERSION "$test_r_version"
 persist_export IR_TEST_R_EXCLUDE_NEWER "$test_r_exclude_newer"
+persist_export IR_TEST_RSCRIPT "$test_rscript"
 
 cores="$(nproc)"
 append_once "$HOME/.Renviron" 'NOT_CRAN=true'

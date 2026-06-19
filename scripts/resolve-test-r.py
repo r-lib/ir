@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -79,7 +80,17 @@ def release_install(installed: list[dict[str, Any]]) -> dict[str, Any]:
     return release
 
 
-def resolve_install(spec: str) -> tuple[str, str]:
+def rscript_path(install: dict[str, Any]) -> str:
+    binary = install.get("binary")
+    if not isinstance(binary, str) or not binary:
+        die(f"rig does not report an R binary for {install.get('name')}")
+
+    path = Path(binary)
+    suffix = path.suffix
+    return str(path.with_name(f"Rscript{suffix}")).replace("\\", "/")
+
+
+def resolve_install(spec: str) -> tuple[str, str, str]:
     offset = oldrel_offset(spec)
     installed = installed_r()
     release = release_install(installed)
@@ -99,7 +110,7 @@ def resolve_install(spec: str) -> tuple[str, str]:
         die(f"R {target[0]}.{target[1]} from {spec} is not installed by rig")
 
     _, install = max(matches, key=lambda item: item[0])
-    return install["name"], install["version"]
+    return install["name"], install["version"], rscript_path(install)
 
 
 def release_date(name: str) -> str:
@@ -122,8 +133,11 @@ def main() -> None:
     if len(sys.argv) != 2:
         die("usage: scripts/resolve-test-r.py oldrel/N")
 
-    name, version = resolve_install(sys.argv[1])
-    print(name, version, release_date(name))
+    name, version, rscript = resolve_install(sys.argv[1])
+    print(name)
+    print(version)
+    print(release_date(name))
+    print(rscript)
 
 
 if __name__ == "__main__":

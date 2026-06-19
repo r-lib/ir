@@ -10,6 +10,7 @@ TEST_R_SPEC="oldrel/2"
 TEST_R_NAME=""
 TEST_R_VERSION=""
 TEST_R_EXCLUDE_NEWER=""
+TEST_RSCRIPT=""
 DRY_RUN=0
 PLATFORM="auto"
 SKIP_RUST=0
@@ -271,14 +272,22 @@ load_test_r_metadata() {
     TEST_R_NAME="<rig-name-for-${TEST_R_SPEC}>"
     TEST_R_VERSION="<resolved-${TEST_R_SPEC}-version>"
     TEST_R_EXCLUDE_NEWER="<release-date-for-${TEST_R_SPEC}>"
+    TEST_RSCRIPT="<Rscript-for-${TEST_R_SPEC}>"
     return
   fi
 
   require_command python3
-  set -- $(python3 scripts/resolve-test-r.py "$TEST_R_SPEC")
-  TEST_R_NAME="$1"
-  TEST_R_VERSION="$2"
-  TEST_R_EXCLUDE_NEWER="$3"
+  metadata_file="${TMPDIR:-/tmp}/ir-test-r-metadata.$$"
+  python3 scripts/resolve-test-r.py "$TEST_R_SPEC" >"$metadata_file"
+  TEST_R_NAME="$(sed -n '1p' "$metadata_file")"
+  TEST_R_VERSION="$(sed -n '2p' "$metadata_file")"
+  TEST_R_EXCLUDE_NEWER="$(sed -n '3p' "$metadata_file")"
+  TEST_RSCRIPT="$(sed -n '4p' "$metadata_file")"
+  rm -f "$metadata_file"
+  [ -n "$TEST_R_NAME" ] || die "scripts/resolve-test-r.py did not return a rig name"
+  [ -n "$TEST_R_VERSION" ] || die "scripts/resolve-test-r.py did not return an R version"
+  [ -n "$TEST_R_EXCLUDE_NEWER" ] || die "scripts/resolve-test-r.py did not return an R release date"
+  [ -n "$TEST_RSCRIPT" ] || die "scripts/resolve-test-r.py did not return an Rscript path"
 }
 
 verify_install() {
@@ -308,6 +317,7 @@ persist_github_env() {
   if [ -n "${GITHUB_ENV:-}" ] && [ "$SKIP_TEST_R" -eq 0 ]; then
     printf 'IR_TEST_R_VERSION=%s\n' "$TEST_R_VERSION" >>"$GITHUB_ENV"
     printf 'IR_TEST_R_EXCLUDE_NEWER=%s\n' "$TEST_R_EXCLUDE_NEWER" >>"$GITHUB_ENV"
+    printf 'IR_TEST_RSCRIPT=%s\n' "$TEST_RSCRIPT" >>"$GITHUB_ENV"
   fi
 }
 
@@ -326,6 +336,7 @@ To enable the version-selection tests in this shell, run:
 
   export IR_TEST_R_VERSION=${TEST_R_VERSION}
   export IR_TEST_R_EXCLUDE_NEWER=${TEST_R_EXCLUDE_NEWER}
+  export IR_TEST_RSCRIPT=${TEST_RSCRIPT}
 
 Then run:
 

@@ -117,6 +117,15 @@ jobs:
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
 
+      - name: Warm non-default R package cache
+        shell: bash
+        run: |
+          "$IR_TEST_RSCRIPT" scripts/warm-renv-cache.R \
+            --repos https://packagemanager.posit.co/cran/2026-06-01 \
+            jsonlite knitr rmarkdown
+        env:
+          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+
       - run: cargo nextest run --verbose --no-fail-fast
         env:
           GITHUB_PAT: ${{ github.token }}
