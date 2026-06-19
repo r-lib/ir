@@ -125,6 +125,7 @@ jobs:
             jsonlite knitr rmarkdown
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+          R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library
 
       - run: cargo nextest run --verbose --no-fail-fast
         env:

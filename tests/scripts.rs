@@ -178,6 +178,12 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
     assert!(workflow.contains("scripts/warm-renv-cache.R"));
+    let warm_non_default_cache = workflow
+        .split("      - name: Warm non-default R package cache")
+        .nth(1)
+        .and_then(|block| block.split("      - run: cargo nextest").next())
+        .expect("workflow should warm the non-default R package cache before tests");
+    assert!(warm_non_default_cache.contains("R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library"));
     let warm_default_cache = workflow
         .split("      - name: Warm default R package cache")
         .nth(1)
@@ -214,6 +220,13 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow.contains("Install rig (macOS)"));
     assert!(!workflow.contains("Warm resolver tooling for the non-default R"));
     assert!(!workflow.contains("pak::pkg_install(c(\"pak\", \"renv\", \"secretbase\"))"));
+
+    let warm_script_path = repo_root().join("scripts/warm-renv-cache.R");
+    let warm_script = fs::read_to_string(&warm_script_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", warm_script_path.display()));
+    assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
+    assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
+    assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
 }
 
 #[test]
@@ -419,6 +432,12 @@ fn test_r_metadata_resolution_is_shared() {
     assert!(
         helper.exists(),
         "test R metadata resolution should live in a shared helper"
+    );
+    let helper_text = fs::read_to_string(&helper)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", helper.display()));
+    assert!(
+        helper_text.contains(r#"if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript""#),
+        "test R metadata resolution should ask Windows R for Rscript.exe"
     );
 
     for script in [

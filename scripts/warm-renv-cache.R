@@ -21,6 +21,15 @@ if (is.null(repos)) {
 Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
 options(repos = repos, renv.consent = TRUE)
 
+r_libs_user <- Sys.getenv("R_LIBS_USER", unset = "")
+if (nzchar(r_libs_user)) {
+  user_libs <- strsplit(r_libs_user, .Platform$path.sep, fixed = TRUE)[[1L]]
+  user_libs <- user_libs[nzchar(user_libs)]
+  for (user_lib in user_libs)
+    dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+  .libPaths(c(user_libs, .libPaths()))
+}
+
 tooling <- c("pak", "renv", "secretbase")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))

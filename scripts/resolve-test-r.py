@@ -104,10 +104,11 @@ def resolve_install(spec: str) -> tuple[str, str]:
 
 def release_metadata(name: str) -> tuple[str, str]:
     expression = (
+        'rscript <- file.path(R.home("bin"), '
+        'if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"); '
         'cat(sprintf("IR_TEST_R_DATE=%s-%s-%s\\nIR_TEST_RSCRIPT=%s\\n", '
         'R.version$year, R.version$month, R.version$day, '
-        'normalizePath(file.path(R.home("bin"), "Rscript"), '
-        'winslash = "/", mustWork = TRUE)))'
+        'normalizePath(rscript, winslash = "/", mustWork = TRUE)))'
     )
     output = run_rig(
         [
