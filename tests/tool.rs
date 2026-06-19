@@ -1048,7 +1048,8 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     fs::create_dir_all(&exec_dir).unwrap();
     write_executable(&exec_dir.join("hello.R"), "#!/usr/bin/env Rscript\n");
 
-    let rscript = rscript_dir.join("Rscript");
+    let rscript_name = "Rscript-ir-tool-install-cli-rscript";
+    let rscript = rscript_dir.join(rscript_name);
     write_executable(
         &rscript,
         concat!(
@@ -1065,9 +1066,9 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
+        .env("PATH", path_with_bin_dir(&rscript_dir))
         .env_remove("IR_RSCRIPT")
-        .args(["tool", "install", "--rscript"])
-        .arg(&rscript)
+        .args(["tool", "install", "--rscript", rscript_name])
         .args(["--bin-dir"])
         .arg(&bin_dir)
         .arg("irfake")
@@ -1077,12 +1078,16 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     assert_success(&out);
     assert_stdout_contains(&out, "Installed");
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
-    let selected = std::path::absolute(&rscript).unwrap();
+    let selected = fs::canonicalize(&rscript).unwrap();
+    let reinstall = format!(
+        "ir tool install --force --rscript {} irfake",
+        selected.to_string_lossy()
+    );
     assert!(
         launcher.contains(&selected.to_string_lossy().into_owned()),
         "{launcher}"
     );
-    assert!(launcher.contains("--rscript"), "{launcher}");
+    assert!(launcher.contains(&reinstall), "{launcher}");
 
     let _ = fs::remove_dir_all(&library);
     let _ = fs::remove_dir_all(&rscript_dir);
@@ -1208,4 +1213,15 @@ fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {
     {
         bin_dir.join(format!("{name}.cmd"))
     }
+}
+
+#[cfg(unix)]
+fn path_with_bin_dir(bin_dir: &Path) -> std::ffi::OsString {
+    std::env::join_paths(
+        std::iter::once(bin_dir.as_os_str().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|path| path.into_os_string()),
+        ),
+    )
+    .unwrap()
 }
