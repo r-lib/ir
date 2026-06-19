@@ -17,30 +17,19 @@ fn rig_test_prerequisites_match_ir_test_r_version() {
 
 #[test]
 fn r_version_selection_covers_render_flag_and_run_frontmatter() {
-    const FIXTURE_R_VERSION: &str = "4.4.3";
-
     // Opt-in: needs rig plus a non-default R installed (CI provisions both).
-    // `ir`'s `--r-version` path resolves through rig unconditionally, so with a
-    // single R there is nothing to select. The frontmatter fixture pins 4.4.3,
-    // so CI sets the same value to cover both public version-selection paths.
-    let Ok(target) = std::env::var("IR_TEST_R_VERSION") else {
-        eprintln!(
-            "SKIP r_version_selection_covers_render_flag_and_run_frontmatter: set IR_TEST_R_VERSION={FIXTURE_R_VERSION}"
-        );
+    // `ir`'s `--r-version` path resolves through rig unconditionally, so a
+    // single R installation cannot cover selection.
+    let Some(target) =
+        rig_test_r_version("r_version_selection_covers_render_flag_and_run_frontmatter")
+    else {
         return;
     };
 
-    if target != FIXTURE_R_VERSION {
-        eprintln!(
-            "SKIP r_version_selection_covers_render_flag_and_run_frontmatter: IR_TEST_R_VERSION ({target}) must match the fixture's `#| r-version`"
-        );
-        return;
-    }
-
     // Selecting the version the default path already uses would prove nothing.
-    if default_r_version().as_deref() == Some(FIXTURE_R_VERSION) {
+    if default_r_version().as_deref() == Some(target.as_str()) {
         eprintln!(
-            "SKIP r_version_selection_covers_render_flag_and_run_frontmatter: the fixture's R ({FIXTURE_R_VERSION}) matches the default R; nothing to select"
+            "SKIP r_version_selection_covers_render_flag_and_run_frontmatter: the test R ({target}) matches the default R; nothing to select"
         );
         return;
     }
@@ -74,7 +63,13 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
     assert!(html.contains("version.lib_in_cache=true"), "{html}");
     assert!(html.contains("version.jsonlite_in_cache=true"), "{html}");
 
-    let script = fixture("run/r-version-frontmatter.R");
+    let script = fixture_dir.join("r-version-frontmatter.R");
+    let frontmatter = fs::read_to_string(&script).unwrap();
+    fs::write(
+        &script,
+        frontmatter.replace("#| r-version: 4.4.3", &format!("#| r-version: {target}")),
+    )
+    .unwrap();
 
     let run = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -87,7 +82,7 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
 
     assert_success(&run);
     assert_stdout_contains(&run, "ir.fixture=r-version-frontmatter");
-    assert_stdout_contains(&run, &format!("version.r_version=[{FIXTURE_R_VERSION}]"));
+    assert_stdout_contains(&run, &format!("version.r_version=[{target}]"));
     assert_stdout_contains(&run, "version.lib_in_cache=true");
     assert_stdout_contains(&run, "version.jsonlite_in_cache=true");
 
@@ -528,6 +523,42 @@ fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
 
 #[cfg(unix)]
 #[test]
+fn run_with_exclude_newer_selects_newest_installed_r_available_by_date() {
+    let out = run_with_installed_r_versions(
+        "ir-exclude-newer-sparse-installed",
+        &[("4.4.3", "r44")],
+        &[
+            "run",
+            "--exclude-newer",
+            "2026-03-20",
+            "-e",
+            "cat('ignored')",
+        ],
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r44");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_exclude_newer_ignores_installed_patch_released_after_date() {
+    let out = run_with_installed_r_versions(
+        "ir-exclude-newer-patch-date",
+        &[("4.2.3", "r42"), ("4.3.2", "r432"), ("4.3.3", "r433")],
+        &[
+            "run",
+            "--exclude-newer",
+            "2024-01-15",
+            "-e",
+            "cat('ignored')",
+        ],
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r432");
+}
+
+#[cfg(unix)]
+#[test]
 fn run_with_exclude_newer_selects_r_4_0_for_2021_snapshot() {
     let cache_dir = unique_dir("ir-exclude-newer-r40-cache");
     let bin_dir = unique_dir("ir-exclude-newer-r40-bin");
@@ -647,7 +678,7 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
     assert_stdout_contains(&out, "selected=r47");
     assert!(available_called.exists(), "{}", output_text(&out));
 
-    let cache = fs::read_to_string(cache_dir.join("rig").join("minor-releases.json")).unwrap();
+    let cache = fs::read_to_string(cache_dir.join("rig").join("releases.json")).unwrap();
     assert!(
         cache.contains(&format!(r#""fetched_at": "{}""#, utc_today_string())),
         "{cache}"
@@ -659,7 +690,7 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
     assert_stdout_contains(&out, "selected=r47");
     assert!(
         !available_called.exists(),
-        "date-only exclude-newer should reuse refreshed minor-release cache"
+        "date-only exclude-newer should reuse refreshed release cache"
     );
 
     let _ = fs::remove_dir_all(&cache_dir);

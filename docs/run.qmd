@@ -38,7 +38,7 @@ The script frontmatter supports:
 - `r-version`: an optional R version requirement selected from installed versions reported by rig.
 - `rscript`: an optional Rscript executable path or command.
 - `isolated`: `true` disables the user library for the run.
-- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When no R selector is set, it also selects the latest R major.minor version available on that date.
+- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When no R selector is set, it also selects the newest installed R release available on or before that date.
 
 Snapshot date precedence is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 R selection precedence is command line, then environment, then frontmatter.

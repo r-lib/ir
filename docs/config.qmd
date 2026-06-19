@@ -63,7 +63,7 @@ R selection precedence is command line, then environment, then frontmatter.
 Use `--rscript`, `IR_RSCRIPT`, or frontmatter `rscript` to select a specific Rscript executable.
 Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
 Within one layer, set either `rscript` or `r-version`, not both.
-When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date.
+When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the newest installed R release available on or before that date.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected launcher directory to the user `Path`.

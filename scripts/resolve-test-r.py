@@ -53,7 +53,44 @@ def installed_r() -> list[dict[str, Any]]:
     return json.loads(clean_rig_output(run_rig(["list", "--json"])))
 
 
-def release_install(installed: list[dict[str, Any]]) -> dict[str, Any]:
+def available_r() -> list[dict[str, Any]]:
+    return json.loads(clean_rig_output(run_rig(["available", "--all", "--json"])))
+
+
+def stable_version_parts(record: dict[str, Any]) -> tuple[int, int, int] | None:
+    return version_parts(record.get("semver") or record.get("version", ""))
+
+
+def available_release_parts() -> tuple[int, int, int]:
+    available = available_r()
+    release = next(
+        (
+            record
+            for record in available
+            if record.get("name") == "release"
+        ),
+        None,
+    )
+    if release is not None:
+        parts = stable_version_parts(release)
+        if parts is None:
+            die("rig available reports release without a stable R version")
+        return parts
+
+    stable = [
+        parts
+        for record in available
+        if record.get("name") not in {"devel", "next"}
+        for parts in [stable_version_parts(record)]
+        if parts is not None
+    ]
+    if not stable:
+        die("rig available does not report a stable release R")
+
+    return max(stable)
+
+
+def release_parts(installed: list[dict[str, Any]]) -> tuple[int, int, int]:
     aliased = next(
         (
             install
@@ -64,31 +101,22 @@ def release_install(installed: list[dict[str, Any]]) -> dict[str, Any]:
         None,
     )
     if aliased is not None:
-        return aliased
+        parts = version_parts(aliased.get("version", ""))
+        if parts is None:
+            die(f"installed release R has unsupported version {aliased.get('version')}")
+        return parts
 
-    stable = [
-        (parts, install)
-        for install in installed
-        for parts in [version_parts(install.get("version", ""))]
-        if parts is not None
-    ]
-    if not stable:
-        die("rig does not report an installed stable R")
-
-    _, release = max(stable, key=lambda item: item[0])
-    return release
+    return available_release_parts()
 
 
 def resolve_install(spec: str) -> tuple[str, str]:
     offset = oldrel_offset(spec)
     installed = installed_r()
-    release = release_install(installed)
+    baseline = release_parts(installed)
+    if baseline[1] < offset:
+        die(f"cannot resolve {spec} relative to release R {baseline[0]}.{baseline[1]}.{baseline[2]}")
 
-    release_parts = version_parts(release.get("version", ""))
-    if release_parts is None or release_parts[1] < offset:
-        die(f"cannot resolve {spec} relative to installed release R {release.get('version')}")
-
-    target = (release_parts[0], release_parts[1] - offset)
+    target = (baseline[0], baseline[1] - offset)
     matches = [
         (parts, install)
         for install in installed
