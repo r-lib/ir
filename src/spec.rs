@@ -9,6 +9,7 @@ pub(crate) struct RuntimeSpec {
     pub(crate) exclude_newer: Option<String>,
     pub(crate) isolated: bool,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) rscript: Option<String>,
     // A Quarto render needs rmarkdown injected for the knitr engine.
     pub(crate) quarto_render: bool,
 }
@@ -66,6 +67,7 @@ fn runtime_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<RuntimeSpec, Box<dyn
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
         isolated: frontmatter_optional_bool(doc, "isolated")?.unwrap_or(false),
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
+        rscript: frontmatter_optional_string(doc, "rscript")?,
         // Quarto rendering is a property of the command, not the frontmatter.
         // cmd_render sets it after parsing.
         ..RuntimeSpec::default()

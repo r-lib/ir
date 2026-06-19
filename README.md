@@ -31,7 +31,7 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 
 - **The file explains itself.** Package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use `r-version` to select an installed R and `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
+- **Reproducibility is explicit.** Use `r-version`, `rscript`, or their command-line and environment equivalents to select R. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
 - **It works with normal R habits.** Forward `Rscript` options, render Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers for R, Rapp, and direct executable scripts without setting up a project by hand.
 
@@ -102,8 +102,8 @@ caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to inspect the plan.
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT`, when R is not selected by `r-version`, `--r-version`, or date-only `exclude-newer`.
-- `rig` on `PATH` when using `r-version`, `--r-version`, or date-only `exclude-newer` R selection.
+- `R` / `Rscript` on `PATH`, or a selected `rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
+- `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.

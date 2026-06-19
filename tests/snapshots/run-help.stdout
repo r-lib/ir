@@ -6,12 +6,13 @@ Arguments:
   [ARGS]...  Rscript options, script path, and script arguments
 
 Options:
-  -e, --expr <EXPR>           Evaluate an inline R expression instead of a script file
-      --with <PKG>            Add a dependency for this run; may be repeated
-      --r-version <SPEC>      Select the R version for this run with rig
-      --exclude-newer <DATE>  Resolve packages from the Posit Package Manager snapshot at this date
-      --isolated              Disable the user library for this run
-  -h, --help                  Print help
+  -e, --expr <EXPR>                Evaluate an inline R expression instead of a script file
+      --with <PKG>                 Add a dependency for this run; may be repeated
+      --r-version <SPEC>           Select the R version for this run with rig
+      --rscript <PATH_OR_COMMAND>  Select the Rscript executable for this run
+      --exclude-newer <DATE>       Resolve packages from the Posit Package Manager snapshot at this date
+      --isolated                   Disable the user library for this run
+  -h, --help                       Print help
 
 Examples:
   ir run script.R

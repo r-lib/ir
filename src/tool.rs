@@ -11,21 +11,26 @@ use saphyr::Yaml;
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 #[cfg(any(target_os = "macos", not(unix)))]
 use crate::runtime::nonempty_env;
-use crate::runtime::{resolve_library_and_primary_package, rscript_for_spec, spawn_error};
+use crate::runtime::{
+    resolve_library_and_primary_package, rscript_for_spec, spawn_error, RSelectionArgs,
+};
 use crate::spec::{load_first_yaml_document, RuntimeSpec};
 
 pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
     let mut deps = vec![run.target.package_ref.clone()];
     deps.extend(run.with_deps.iter().cloned());
-    let mut spec = RuntimeSpec {
+    let spec = RuntimeSpec {
         dependencies: deps,
         ..RuntimeSpec::default()
     };
-    if let Some(req) = &run.r_requirement {
-        spec.r_requirement = Some(req.clone());
-    }
 
-    let rscript = rscript_for_spec(&spec)?;
+    let rscript = rscript_for_spec(
+        &spec,
+        RSelectionArgs {
+            r_requirement: run.r_requirement.as_deref(),
+            rscript: run.rscript.as_deref(),
+        },
+    )?;
     let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
     let executable = find_package_executable(&library, &package_name, &run.target.executable)?;
     let code = run_package_executable(
@@ -44,11 +49,14 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
         ..RuntimeSpec::default()
     };
     spec.dependencies.extend(install.with_deps.iter().cloned());
-    if let Some(req) = &install.r_requirement {
-        spec.r_requirement = Some(req.clone());
-    }
 
-    let rscript = rscript_for_spec(&spec)?;
+    let rscript = rscript_for_spec(
+        &spec,
+        RSelectionArgs {
+            r_requirement: install.r_requirement.as_deref(),
+            rscript: install.rscript.as_deref(),
+        },
+    )?;
     let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
     let executables = discover_package_executables(&library, &package_name)?;
     if executables.is_empty() {
@@ -1011,6 +1019,10 @@ fn tool_install_recovery_command(install: &ToolInstallArgs) -> String {
     if let Some(req) = &install.r_requirement {
         words.push("--r-version".to_string());
         words.push(command_word(req));
+    }
+    if let Some(rscript) = &install.rscript {
+        words.push("--rscript".to_string());
+        words.push(command_word(rscript));
     }
     words.push(command_word(&install.package_ref));
     words.join(" ")

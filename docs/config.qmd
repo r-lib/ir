@@ -4,8 +4,8 @@ title: Install and Configuration
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or `IR_RSCRIPT`, when R is not selected by `r-version`, `--r-version`, or date-only `exclude-newer`.
-- `rig` on `PATH` when `--r-version` or frontmatter `r-version` is set, or when date-only `exclude-newer` selects R.
+- `R` / `Rscript` on `PATH`, a selected `rscript`, or `IR_RSCRIPT`, when R is not selected by `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
+- `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
@@ -37,9 +37,10 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | Variable | Used by | Default |
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
-| `IR_EXCLUDE_NEWER` | `ir run` and `ir render` package snapshot date; also selects R when no `r-version`, `--r-version`, or `IR_RSCRIPT` is set | unset |
+| `IR_EXCLUDE_NEWER` | `ir run` and `ir render` package snapshot date; also selects R when no explicit R selector is set | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
-| `IR_RSCRIPT` | `ir run` and `ir render` Rscript path when no `r-version` or `--r-version` is set; overrides date-only R selection | `Rscript` on `PATH` |
+| `IR_R_VERSION` | R version selected through `rig` | unset |
+| `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override |
 | `IR_NO_MODIFY_PATH` | install scripts, `ir tool install` | disables automatic PATH setup when nonempty |
@@ -58,9 +59,11 @@ Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newe
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
-Set `IR_RSCRIPT` and `IR_EXCLUDE_NEWER` together to run or render with a specific Rscript executable and a package snapshot date.
-`IR_RSCRIPT` is ignored when `--r-version` or frontmatter `r-version` is set, because explicit R version selection is resolved through `rig`.
-When `exclude-newer` is set without `r-version`, `--r-version`, or `IR_RSCRIPT`, `ir` uses `rig` to select the latest R minor version available on that date.
+R selection precedence is command line, then environment, then frontmatter.
+Use `--rscript`, `IR_RSCRIPT`, or frontmatter `rscript` to select a specific Rscript executable.
+Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
+Within one layer, set either `rscript` or `r-version`, not both.
+When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date.
 `--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected launcher directory to the user `Path`.

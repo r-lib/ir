@@ -100,6 +100,13 @@ fn run_command() -> ClapCommand {
                 .help("Select the R version for this run with rig"),
         )
         .arg(
+            Arg::new("rscript")
+                .long("rscript")
+                .value_name("PATH_OR_COMMAND")
+                .num_args(1)
+                .help("Select the Rscript executable for this run"),
+        )
+        .arg(
             Arg::new("exclude-newer")
                 .long("exclude-newer")
                 .value_name("DATE")
@@ -126,7 +133,7 @@ fn render_command() -> ClapCommand {
             "  ir render --with ggplot2 report.qmd --to html\n",
             "      # --with is for ir; --to html is passed to quarto render.\n\n",
             "  ir render --vanilla slides.qmd --output slides.html\n",
-            "      # --vanilla runs knitr R with --vanilla.\n",
+            "      # --vanilla is passed to the Rscript used by Quarto.\n",
             "      # --output slides.html is passed to quarto render.",
         )))
         .arg(
@@ -145,6 +152,13 @@ fn render_command() -> ClapCommand {
                 .help("Select the R version for this render with rig"),
         )
         .arg(
+            Arg::new("rscript")
+                .long("rscript")
+                .value_name("PATH_OR_COMMAND")
+                .num_args(1)
+                .help("Select the Rscript executable for this render"),
+        )
+        .arg(
             Arg::new("exclude-newer")
                 .long("exclude-newer")
                 .value_name("DATE")
@@ -161,7 +175,7 @@ fn render_command() -> ClapCommand {
             Arg::new("vanilla")
                 .long("vanilla")
                 .action(ArgAction::SetTrue)
-                .help("Run Quarto's knitr R with --vanilla"),
+                .help("Pass --vanilla to the Rscript used by Quarto"),
         )
         .arg(
             Arg::new("source")
@@ -253,6 +267,13 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .help("Select the R version for this tool run with rig"),
         )
         .arg(
+            Arg::new("rscript")
+                .long("rscript")
+                .value_name("PATH_OR_COMMAND")
+                .num_args(1)
+                .help("Select the Rscript executable for this tool run"),
+        )
+        .arg(
             Arg::new("isolated")
                 .long("isolated")
                 .action(ArgAction::SetTrue)
@@ -285,6 +306,13 @@ fn tool_install_command() -> ClapCommand {
                 .value_name("SPEC")
                 .num_args(1)
                 .help("Select the R version for installed launchers with rig"),
+        )
+        .arg(
+            Arg::new("rscript")
+                .long("rscript")
+                .value_name("PATH_OR_COMMAND")
+                .num_args(1)
+                .help("Select the Rscript executable for installed launchers"),
         )
         .arg(
             Arg::new("bin-dir")
@@ -342,6 +370,7 @@ pub(crate) struct RunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
     pub(crate) source: RunSource,
     pub(crate) script_args: Vec<String>,
@@ -351,6 +380,7 @@ pub(crate) struct RunArgs {
 pub(crate) struct RenderArgs {
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
     pub(crate) source: RenderSource,
     pub(crate) render_args: Vec<String>,
@@ -362,6 +392,7 @@ pub(crate) struct ToolRunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) rscript: Option<String>,
     pub(crate) target: PackageExecTarget,
     pub(crate) tool_args: Vec<String>,
 }
@@ -370,18 +401,19 @@ pub(crate) struct ToolInstallArgs {
     pub(crate) package_ref: String,
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
+    pub(crate) rscript: Option<String>,
     pub(crate) bin_dir: PathBuf,
     pub(crate) setup_bin_dir_on_path: bool,
     pub(crate) force: bool,
 }
 
 /// Split the leading region of `ir run`'s arguments into Rscript options,
-/// `--with` dependency specs, optional `--r-version` and `--exclude-newer`
-/// specs, and the program source, with everything after the source treated as
-/// program args.
+/// `--with` dependency specs, optional R selection and `--exclude-newer` specs,
+/// and the program source, with everything after the source treated as program
+/// args.
 ///
-/// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--exclude-newer
-/// <date>` and `--isolated` are `ir`-level flags handled here. Any other
+/// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--rscript <path>`,
+/// `--exclude-newer <date>` and `--isolated` are `ir`-level flags handled here. Any other
 /// `-...` argument is an Rscript option, forwarded verbatim to the user-code
 /// phase. Scanning stops at the script path unless `-e` was given, in which case
 /// scanning stops after the last `-e <expr>` pair. Everything after the source
@@ -390,6 +422,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut rscript = None;
     let mut exclude_newer = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
@@ -424,6 +457,13 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--rscript" {
+            let value = iter.next().ok_or(
+                "`--rscript` requires a path or command (try `ir run --rscript /path/to/Rscript script.R`)",
+            )?;
+            rscript = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--rscript=") {
+            rscript = Some(value.to_string());
         } else if arg == "--exclude-newer" {
             let value = iter.next().ok_or(
                 "`--exclude-newer` requires a date (try `ir run --exclude-newer 2024-06-01 script.R`)",
@@ -463,6 +503,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
         rscript_args,
         with_deps,
         r_requirement,
+        rscript,
         exclude_newer,
         source,
         script_args,
@@ -475,6 +516,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
 pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn Error>> {
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut rscript = None;
     let mut exclude_newer = None;
     let mut isolated = false;
     let mut vanilla = false;
@@ -500,6 +542,13 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--rscript" {
+            let value = iter.next().ok_or(
+                "`--rscript` requires a path or command (try `ir render --rscript /path/to/Rscript report.qmd`)",
+            )?;
+            rscript = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--rscript=") {
+            rscript = Some(value.to_string());
         } else if arg == "--exclude-newer" {
             let value = iter.next().ok_or(
                 "`--exclude-newer` requires a date (try `ir render --exclude-newer 2024-06-01 report.qmd`)",
@@ -528,6 +577,7 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
     Ok(RenderArgs {
         with_deps,
         r_requirement,
+        rscript,
         exclude_newer,
         source: RenderSource::from_source_arg(source)?,
         render_args,
@@ -598,6 +648,7 @@ pub(crate) fn parse_tool_run_args(
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut rscript = None;
     let mut from = None;
     let mut iter = args.into_iter();
     let mut positional = None;
@@ -636,6 +687,16 @@ pub(crate) fn parse_tool_run_args(
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--rscript" {
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--rscript` requires a path or command (try `{} --rscript /path/to/Rscript btw`)",
+                    invocation.command()
+                )
+            })?;
+            rscript = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--rscript=") {
+            rscript = Some(value.to_string());
         } else if arg == "--isolated" {
             // `ir tool run` is always isolated; accept this for symmetry with
             // `ir run` without changing behavior.
@@ -678,6 +739,7 @@ pub(crate) fn parse_tool_run_args(
         rscript_args,
         with_deps,
         r_requirement,
+        rscript,
         target,
         tool_args,
     })
@@ -688,6 +750,7 @@ pub(crate) fn parse_tool_install_args(
 ) -> Result<ToolInstallArgs, Box<dyn Error>> {
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
+    let mut rscript = None;
     let mut bin_dir = None;
     let mut force = false;
     let mut iter = args.into_iter();
@@ -708,6 +771,13 @@ pub(crate) fn parse_tool_install_args(
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
+        } else if arg == "--rscript" {
+            let value = iter.next().ok_or(
+                "`--rscript` requires a path or command (try `ir tool install --rscript /path/to/Rscript btw`)",
+            )?;
+            rscript = Some(value);
+        } else if let Some(value) = arg.strip_prefix("--rscript=") {
+            rscript = Some(value.to_string());
         } else if arg == "--bin-dir" {
             let value = iter
                 .next()
@@ -743,6 +813,7 @@ pub(crate) fn parse_tool_install_args(
         package_ref: package_arg,
         with_deps,
         r_requirement,
+        rscript,
         bin_dir: bin_dir.unwrap_or(tool_install_bin_dir()?),
         setup_bin_dir_on_path,
         force,

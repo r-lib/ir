@@ -30,6 +30,7 @@ $ rx --with cli --from btw btw
 $ rx -w cli --from btw btw
 $ rx --from 'btw>=0.1.0' btw
 $ rx --r-version 4.5 --from btw btw
+$ rx --rscript /path/to/Rscript --from btw btw
 ```
 
 Package refs use pak syntax.
@@ -82,9 +83,10 @@ $ ir tool install github::r-lib/Rapp
 $ ir tool install --bin-dir ~/.local/bin btw
 $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw
+$ ir tool install --rscript /path/to/Rscript btw
 ```
 
-Installed launchers keep the same resolved package ref, `--with` package additions, and R version selection that were used at install time.
+Installed launchers keep the same resolved package ref, `--with` package additions, and R selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.

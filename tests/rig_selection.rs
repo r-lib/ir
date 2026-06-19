@@ -126,6 +126,28 @@ fn path_with_bin_dir(bin_dir: &std::path::Path) -> std::ffi::OsString {
 }
 
 #[cfg(unix)]
+fn write_selected_rscript(path: &std::path::Path, label: &str) {
+    write_executable(
+        path,
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  if [ -n \"${{IR_TEST_EXPECT_EXCLUDE_NEWER:-}}\" ] && [ \"${{IR_EXCLUDE_NEWER:-}}\" != \"$IR_TEST_EXPECT_EXCLUDE_NEWER\" ]; then\n",
+                "    echo \"unexpected exclude-newer: $IR_EXCLUDE_NEWER\" >&2\n",
+                "    exit 66\n",
+                "  fi\n",
+                "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "echo selected={}\n",
+            ),
+            label
+        ),
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn run_with_r_version_selects_highest_matching_installed_r() {
     let cache_dir = unique_dir("ir-r-version-cache");
@@ -833,6 +855,356 @@ fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&bin_dir);
     let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn env_rscript_overrides_frontmatter_r_version_without_rig() {
+    let cache_dir = unique_dir("ir-env-rscript-frontmatter-r-version-cache");
+    let bin_dir = unique_dir("ir-env-rscript-frontmatter-r-version-bin");
+    let rscript_dir = unique_dir("ir-env-rscript-frontmatter-r-version-r");
+    let script = unique_path("ir-env-rscript-frontmatter-r-version", "R");
+
+    fs::write(&script, "#| r-version: \"4.4\"\ncat('ignored')\n").unwrap();
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!("#!/bin/sh\n", "echo unexpected rig >&2\n", "exit 65\n",),
+    );
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "env-rscript");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=env-rscript");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("unexpected rig"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn env_r_version_overrides_frontmatter_rscript() {
+    let cache_dir = unique_dir("ir-env-r-version-frontmatter-rscript-cache");
+    let bin_dir = unique_dir("ir-env-r-version-frontmatter-rscript-bin");
+    let rscript_dir = unique_dir("ir-env-r-version-frontmatter-rscript-r");
+    let rig_r_dir = unique_dir("ir-env-r-version-frontmatter-rscript-rig-r");
+    let script = unique_path("ir-env-r-version-frontmatter-rscript", "R");
+
+    let frontmatter_rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&frontmatter_rscript, "frontmatter-rscript");
+    fs::write(
+        &script,
+        format!(
+            "#| rscript: {}\ncat('ignored')\n",
+            r_string(&frontmatter_rscript)
+        ),
+    )
+    .unwrap();
+
+    let rig_binary = selected_r_binary(&rig_r_dir, "env-r-version");
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            rig_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_R_VERSION", "4.4")
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=env-r-version");
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+    let _ = fs::remove_dir_all(&rig_r_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_rscript_overrides_env_r_version_and_frontmatter_r_version() {
+    let cache_dir = unique_dir("ir-cli-rscript-precedence-cache");
+    let bin_dir = unique_dir("ir-cli-rscript-precedence-bin");
+    let rscript_dir = unique_dir("ir-cli-rscript-precedence-r");
+    let script = unique_path("ir-cli-rscript-precedence", "R");
+
+    fs::write(&script, "#| r-version: \"4.4\"\ncat('ignored')\n").unwrap();
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!("#!/bin/sh\n", "echo unexpected rig >&2\n", "exit 65\n",),
+    );
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "cli-rscript");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_R_VERSION", "4.4")
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--rscript"])
+        .arg(&rscript)
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=cli-rscript");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("unexpected rig"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_r_version_overrides_env_rscript() {
+    let cache_dir = unique_dir("ir-cli-r-version-env-rscript-cache");
+    let bin_dir = unique_dir("ir-cli-r-version-env-rscript-bin");
+    let rscript_dir = unique_dir("ir-cli-r-version-env-rscript-r");
+    let rig_r_dir = unique_dir("ir-cli-r-version-env-rscript-rig-r");
+
+    let env_rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&env_rscript, "env-rscript");
+    let rig_binary = selected_r_binary(&rig_r_dir, "cli-r-version");
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            rig_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &env_rscript)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=cli-r-version");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+    let _ = fs::remove_dir_all(&rig_r_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_r_selection_conflict_errors() {
+    let rscript_dir = unique_dir("ir-cli-r-selection-conflict-r");
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "unused");
+
+    let out = ir()
+        .args(["run", "--r-version", "4.4", "--rscript"])
+        .arg(&rscript)
+        .args(["-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("cannot set both `--r-version` and `--rscript`"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn env_r_selection_conflict_errors() {
+    let rscript_dir = unique_dir("ir-env-r-selection-conflict-r");
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "unused");
+
+    let out = ir()
+        .env("IR_RSCRIPT", &rscript)
+        .env("IR_R_VERSION", "4.4")
+        .args(["run", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("cannot set both `IR_R_VERSION` and `IR_RSCRIPT`"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn frontmatter_r_selection_conflict_errors() {
+    let cache_dir = unique_dir("ir-frontmatter-r-selection-conflict-cache");
+    let rscript_dir = unique_dir("ir-frontmatter-r-selection-conflict-r");
+    let script = unique_path("ir-frontmatter-r-selection-conflict", "R");
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "unused");
+    fs::write(
+        &script,
+        format!(
+            "#| r-version: \"4.4\"\n#| rscript: {}\ncat('ignored')\n",
+            r_string(&rscript)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("IR_RSCRIPT")
+        .env_remove("IR_R_VERSION")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("frontmatter cannot set both `r-version` and `rscript`"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_file(&script);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_rscript_with_exclude_newer_uses_snapshot_without_rig_selection() {
+    let cache_dir = unique_dir("ir-cli-rscript-exclude-newer-cache");
+    let bin_dir = unique_dir("ir-cli-rscript-exclude-newer-bin");
+    let rscript_dir = unique_dir("ir-cli-rscript-exclude-newer-r");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!("#!/bin/sh\n", "echo unexpected rig >&2\n", "exit 65\n",),
+    );
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "cli-rscript");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_EXPECT_EXCLUDE_NEWER", "2024-03-15")
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--rscript"])
+        .arg(&rscript)
+        .args(["--exclude-newer", "2024-03-15", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=cli-rscript");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("unexpected rig"),
+        "{}",
+        output_text(&out)
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_cli_rscript_sets_quarto_r() {
+    let cache_dir = unique_dir("ir-render-cli-rscript-cache");
+    let rscript_dir = unique_dir("ir-render-cli-rscript-r");
+    let quarto_dir = unique_dir("ir-render-cli-rscript-quarto-dir");
+    let doc = unique_path("ir-render-cli-rscript", "qmd");
+    let observed = unique_path("ir-render-cli-rscript-quarto-r", "txt");
+
+    fs::write(&doc, "---\ntitle: rscript render\n---\n").unwrap();
+    let rscript = rscript_dir.join("Rscript");
+    write_selected_rscript(&rscript, "unused");
+    write_executable(
+        &quarto_dir.join("quarto"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' \"$QUARTO_R\" > {}\n",
+                "exit 0\n",
+            ),
+            observed.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", quarto_dir.join("quarto"))
+        .env_remove("IR_RSCRIPT")
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let quarto_r = fs::read_to_string(&observed).unwrap();
+    assert_eq!(
+        quarto_r.trim(),
+        std::path::absolute(&rscript).unwrap().to_string_lossy()
+    );
+
+    let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&observed);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&rscript_dir);
+    let _ = fs::remove_dir_all(&quarto_dir);
 }
 
 #[cfg(unix)]

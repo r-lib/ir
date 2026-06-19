@@ -26,7 +26,7 @@ pub(crate) fn cmd_run(
     source: &RunSource,
     rscript_args: &[String],
     with_deps: &[String],
-    r_requirement: Option<&str>,
+    r_selection: RSelectionArgs<'_>,
     exclude_newer: Option<&str>,
     script_args: &[String],
     isolated: bool,
@@ -34,11 +34,8 @@ pub(crate) fn cmd_run(
     let mut spec = source.script_spec()?;
     apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
-    if let Some(req) = r_requirement {
-        spec.r_requirement = Some(req.to_string());
-    }
     let isolated = isolated || spec.isolated;
-    let rscript = rscript_for_spec(&spec)?;
+    let rscript = rscript_for_spec(&spec, r_selection)?;
 
     // Reuse a warm resolution marker, or launch the private resolver R session
     // to resolve deps and materialise the library.
@@ -61,7 +58,7 @@ pub(crate) fn cmd_run(
 pub(crate) fn cmd_render(
     source: &RenderSource,
     with_deps: &[String],
-    r_requirement: Option<&str>,
+    r_selection: RSelectionArgs<'_>,
     exclude_newer: Option<&str>,
     render_args: &[String],
     isolated: bool,
@@ -71,11 +68,8 @@ pub(crate) fn cmd_render(
     apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
-    if let Some(req) = r_requirement {
-        spec.r_requirement = Some(req.to_string());
-    }
     let isolated = isolated || spec.isolated;
-    let rscript = rscript_for_spec(&spec)?;
+    let rscript = rscript_for_spec(&spec, r_selection)?;
 
     let library = resolve_library(&rscript, &spec)?;
     let code = quarto::run(
@@ -89,20 +83,97 @@ pub(crate) fn cmd_render(
     std::process::exit(code);
 }
 
-pub(crate) fn rscript_for_spec(spec: &RuntimeSpec) -> Result<OsString, Box<dyn Error>> {
-    if let Some(req) = &spec.r_requirement {
-        return rig::resolve_rscript(req, spec.exclude_newer.as_deref());
-    }
+enum RSelection {
+    Version(String),
+    Rscript(OsString),
+}
 
-    if nonempty_env("IR_RSCRIPT").is_some() {
-        return Ok(rscript_command());
-    }
+pub(crate) struct RSelectionArgs<'a> {
+    pub(crate) r_requirement: Option<&'a str>,
+    pub(crate) rscript: Option<&'a str>,
+}
 
+pub(crate) fn rscript_for_spec(
+    spec: &RuntimeSpec,
+    cli: RSelectionArgs<'_>,
+) -> Result<OsString, Box<dyn Error>> {
+    if let Some(selection) = cli_r_selection(cli.r_requirement, cli.rscript)? {
+        return resolve_r_selection(selection, spec.exclude_newer.as_deref());
+    }
+    if let Some(selection) = env_r_selection()? {
+        return resolve_r_selection(selection, spec.exclude_newer.as_deref());
+    }
+    if let Some(selection) = frontmatter_r_selection(spec)? {
+        return resolve_r_selection(selection, spec.exclude_newer.as_deref());
+    }
     if let Some(exclude_newer) = &spec.exclude_newer {
         return rig::resolve_rscript_for_exclude_newer(exclude_newer);
     }
 
     Ok(rscript_command())
+}
+
+fn cli_r_selection(
+    r_requirement: Option<&str>,
+    rscript: Option<&str>,
+) -> Result<Option<RSelection>, Box<dyn Error>> {
+    match (r_requirement, rscript) {
+        (Some(_), Some(_)) => Err("cannot set both `--r-version` and `--rscript`".into()),
+        (Some(req), None) => Ok(Some(RSelection::Version(nonempty_cli_value(
+            "--r-version",
+            req,
+        )?))),
+        (None, Some(rscript)) => Ok(Some(RSelection::Rscript(OsString::from(
+            nonempty_cli_value("--rscript", rscript)?,
+        )))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn env_r_selection() -> Result<Option<RSelection>, Box<dyn Error>> {
+    let rscript = nonempty_env("IR_RSCRIPT");
+    let r_version = env_optional_trimmed_string("IR_R_VERSION")?;
+    match (r_version, rscript) {
+        (Some(_), Some(_)) => Err("cannot set both `IR_R_VERSION` and `IR_RSCRIPT`".into()),
+        (Some(req), None) => Ok(Some(RSelection::Version(req))),
+        (None, Some(rscript)) => Ok(Some(RSelection::Rscript(rscript))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn frontmatter_r_selection(spec: &RuntimeSpec) -> Result<Option<RSelection>, Box<dyn Error>> {
+    match (&spec.r_requirement, &spec.rscript) {
+        (Some(_), Some(_)) => Err("frontmatter cannot set both `r-version` and `rscript`".into()),
+        (Some(req), None) => Ok(Some(RSelection::Version(req.clone()))),
+        (None, Some(rscript)) => Ok(Some(RSelection::Rscript(OsString::from(rscript)))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn resolve_r_selection(
+    selection: RSelection,
+    exclude_newer: Option<&str>,
+) -> Result<OsString, Box<dyn Error>> {
+    match selection {
+        RSelection::Version(req) => rig::resolve_rscript(&req, exclude_newer),
+        RSelection::Rscript(rscript) => Ok(resolve_rscript_command(&rscript)),
+    }
+}
+
+fn nonempty_cli_value(name: &str, value: &str) -> Result<String, Box<dyn Error>> {
+    if value.is_empty() {
+        return Err(format!("`{name}` must not be empty").into());
+    }
+    Ok(value.to_string())
+}
+
+fn env_optional_trimmed_string(name: &str) -> Result<Option<String>, Box<dyn Error>> {
+    let Some(value) = env::var_os(name) else {
+        return Ok(None);
+    };
+    let value = env_string(name, value)?;
+    let value = value.trim();
+    Ok((!value.is_empty()).then(|| value.to_string()))
 }
 
 fn apply_exclude_newer_override(
@@ -504,11 +575,13 @@ fn run_script(
     }
 }
 
-/// The Rscript executable to use when R is not selected through `rig`:
-/// `$IR_RSCRIPT` if set, else the `Rscript` found on `PATH`.
+/// The default Rscript executable to use when R is not selected explicitly.
 pub(crate) fn rscript_command() -> OsString {
-    let command = nonempty_env("IR_RSCRIPT").unwrap_or_else(|| "Rscript".into());
-    resolve_command_path(&command).unwrap_or(command)
+    resolve_rscript_command(OsStr::new("Rscript"))
+}
+
+pub(crate) fn resolve_rscript_command(command: &OsStr) -> OsString {
+    resolve_command_path(command).unwrap_or_else(|| command.to_os_string())
 }
 
 fn resolve_command_path(command: &OsStr) -> Option<OsString> {
@@ -733,7 +806,7 @@ fn unique_path(dir: &Path, prefix: &str, ext: &str) -> PathBuf {
 pub(crate) fn spawn_error(rscript: &OsStr, err: io::Error) -> String {
     if err.kind() == io::ErrorKind::NotFound {
         format!(
-            "could not find `{}` on PATH. Install R, or set IR_RSCRIPT to its path.",
+            "could not find `{}` on PATH. Install R, set IR_RSCRIPT, or pass --rscript.",
             rscript.to_string_lossy()
         )
     } else {

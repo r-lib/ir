@@ -65,7 +65,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 &run.source,
                 &run.rscript_args,
                 &run.with_deps,
-                run.r_requirement.as_deref(),
+                runtime::RSelectionArgs {
+                    r_requirement: run.r_requirement.as_deref(),
+                    rscript: run.rscript.as_deref(),
+                },
                 run.exclude_newer.as_deref(),
                 &run.script_args,
                 run.isolated,
@@ -76,7 +79,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_render(
                 &render.source,
                 &render.with_deps,
-                render.r_requirement.as_deref(),
+                runtime::RSelectionArgs {
+                    r_requirement: render.r_requirement.as_deref(),
+                    rscript: render.rscript.as_deref(),
+                },
                 render.exclude_newer.as_deref(),
                 &render.render_args,
                 render.isolated,

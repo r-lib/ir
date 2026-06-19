@@ -37,9 +37,9 @@ impl RenderSource {
 /// Phase 2 — render `doc` with `quarto render`, pointed at the selected R and
 /// the materialised library.
 ///
-/// `QUARTO_R` pins quarto's knitr R to `ir`'s selected Rscript. `R_LIBS`
-/// injects the resolved library exactly as for a script. With `vanilla`, Quarto's
-/// knitr Rscript receives `--vanilla`. `render_args` become
+/// `QUARTO_R` pins Quarto to `ir`'s selected Rscript. `R_LIBS`
+/// injects the resolved library exactly as for a script. With `vanilla`, that
+/// Rscript receives `--vanilla`. `render_args` become
 /// `quarto render <doc> <render_args>`.
 pub(crate) fn run(
     rscript: &OsStr,
