@@ -175,7 +175,7 @@ rig_name="${test_r_metadata[0]}"
 test_r_version="${test_r_metadata[1]}"
 test_r_exclude_newer="${test_r_metadata[2]}"
 test_rscript="${test_r_metadata[3]}"
-cat > /tmp/ir-rig-setup.R <<'EOF'
+cat > /tmp/ir-rig-setup.R <<EOF
 options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak")
@@ -184,13 +184,13 @@ pak::pkg_install(c("renv", "secretbase", "jsonlite", "knitr", "rmarkdown"))
 prefetch_lib <- file.path(
   Sys.getenv("HOME"),
   ".cache", "ir-codex-renv-prefetch",
-  paste0(getRversion(), "-", R.version$platform)
+  paste0(getRversion(), "-", R.version\$platform)
 )
 dir.create(prefetch_lib, recursive = TRUE, showWarnings = FALSE)
 renv::install(
   c("jsonlite", "knitr", "rmarkdown"),
   library = prefetch_lib,
-  repos = c(CRAN = "https://packagemanager.posit.co/cran/2026-06-01"),
+  repos = c(CRAN = "https://packagemanager.posit.co/cran/${test_r_exclude_newer}"),
   prompt = FALSE,
   rebuild = FALSE
 )

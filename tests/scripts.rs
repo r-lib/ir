@@ -488,6 +488,17 @@ fn test_r_metadata_resolution_is_shared() {
     }
 }
 
+#[test]
+fn universal_setup_uses_resolved_test_r_snapshot_date() {
+    let path = repo_root().join("scripts/setup_codex_universal.sh");
+    let script = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+
+    assert!(script.contains("test_r_exclude_newer=\"${test_r_metadata[2]}\""));
+    assert!(script.contains("https://packagemanager.posit.co/cran/${test_r_exclude_newer}"));
+    assert!(!script.contains("https://packagemanager.posit.co/cran/2026-06-01"));
+}
+
 #[cfg(unix)]
 #[test]
 fn test_r_metadata_resolver_delegates_oldrel_resolution_to_rig_resolve() {
