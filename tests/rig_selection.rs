@@ -5,6 +5,7 @@ mod support;
 use support::*;
 
 use std::fs;
+use time::OffsetDateTime;
 
 #[cfg(windows)]
 use std::path::PathBuf;
@@ -125,6 +126,16 @@ fn path_with_bin_dir(bin_dir: &std::path::Path) -> std::ffi::OsString {
         ),
     )
     .unwrap()
+}
+
+fn utc_today_string() -> String {
+    let today = OffsetDateTime::now_utc().date();
+    format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
+    )
 }
 
 #[cfg(unix)]
@@ -939,6 +950,81 @@ fn run_with_exclude_newer_after_metadata_fetch_uses_refreshed_minor_cache() {
     assert!(
         !available_called.exists(),
         "date-only exclude-newer should use a refreshed minor-release cache before calling `rig available`"
+    );
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r46_dir);
+    let _ = fs::remove_dir_all(&r47_dir);
+    let _ = fs::remove_file(&available_called);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
+    let cache_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-bin");
+    let r46_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-r46");
+    let r47_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-r47");
+    let available_called = unique_path("ir-exclude-newer-r-cache-fetch-date-available", "txt");
+
+    let r46_binary = selected_r_binary(&r46_dir, "r46");
+    let r47_binary = selected_r_binary(&r47_dir, "r47");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  \"list --json\")\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6.0","version":"4.6.0","aliases":[],"binary":"{}"}},
+{{"name":"4.7.0","version":"4.7.0","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  \"available --all --json\")\n",
+                "    : > '{}'\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6.0","version":"4.6.0","date":"2026-04-24T00:00:00Z"}},
+{{"name":"4.7.0","version":"4.7.0","date":"2026-06-18T00:00:00Z"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            r46_binary.display(),
+            r47_binary.display(),
+            available_called.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            "2026-06-18",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r47");
+    assert!(available_called.exists(), "{}", output_text(&out));
+
+    let cache = fs::read_to_string(cache_dir.join("rig").join("minor-releases.json")).unwrap();
+    assert!(
+        cache.contains(&format!(r#""fetched_at": "{}""#, utc_today_string())),
+        "{cache}"
     );
 
     let _ = fs::remove_dir_all(&cache_dir);
