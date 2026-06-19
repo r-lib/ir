@@ -102,9 +102,9 @@ fn run_command() -> ClapCommand {
         .arg(
             Arg::new("rscript")
                 .long("rscript")
-                .value_name("PATH_OR_COMMAND")
+                .value_name("RSCRIPT")
                 .num_args(1)
-                .help("Select the Rscript executable for this run"),
+                .help("Select the Rscript executable"),
         )
         .arg(
             Arg::new("exclude-newer")
@@ -154,9 +154,9 @@ fn render_command() -> ClapCommand {
         .arg(
             Arg::new("rscript")
                 .long("rscript")
-                .value_name("PATH_OR_COMMAND")
+                .value_name("RSCRIPT")
                 .num_args(1)
-                .help("Select the Rscript executable for this render"),
+                .help("Select the Rscript executable"),
         )
         .arg(
             Arg::new("exclude-newer")
@@ -269,9 +269,9 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
         .arg(
             Arg::new("rscript")
                 .long("rscript")
-                .value_name("PATH_OR_COMMAND")
+                .value_name("RSCRIPT")
                 .num_args(1)
-                .help("Select the Rscript executable for this tool run"),
+                .help("Select the Rscript executable"),
         )
         .arg(
             Arg::new("isolated")
@@ -310,9 +310,9 @@ fn tool_install_command() -> ClapCommand {
         .arg(
             Arg::new("rscript")
                 .long("rscript")
-                .value_name("PATH_OR_COMMAND")
+                .value_name("RSCRIPT")
                 .num_args(1)
-                .help("Select the Rscript executable for installed launchers"),
+                .help("Select the Rscript executable"),
         )
         .arg(
             Arg::new("bin-dir")

@@ -7,13 +7,13 @@ Arguments:
   [QUARTO_ARGS]...  Arguments passed to `quarto render`
 
 Options:
-      --with <PKG>                 Add a dependency for this render; may be repeated
-      --r-version <SPEC>           Select the R version for this render with rig
-      --rscript <PATH_OR_COMMAND>  Select the Rscript executable for this render
-      --exclude-newer <DATE>       Resolve packages from the Posit Package Manager snapshot at this date
-      --isolated                   Disable the user library for this render
-      --vanilla                    Pass --vanilla to the Rscript used by Quarto
-  -h, --help                       Print help
+      --with <PKG>            Add a dependency for this render; may be repeated
+      --r-version <SPEC>      Select the R version for this render with rig
+      --rscript <RSCRIPT>     Select the Rscript executable
+      --exclude-newer <DATE>  Resolve packages from the Posit Package Manager snapshot at this date
+      --isolated              Disable the user library for this render
+      --vanilla               Pass --vanilla to the Rscript used by Quarto
+  -h, --help                  Print help
 
 Examples:
   ir render report.qmd

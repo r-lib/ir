@@ -6,11 +6,11 @@ Arguments:
   [ARGS]...  Rscript options, package ref or command, and tool arguments
 
 Options:
-      --from <PKG_REF>             Resolve a package ref and run <command> from that package
-  -w, --with <PKG>                 Add a dependency for this tool run; may be repeated
-      --r-version <SPEC>           Select the R version for this tool run with rig
-      --rscript <PATH_OR_COMMAND>  Select the Rscript executable for this tool run
-  -h, --help                       Print help
+      --from <PKG_REF>     Resolve a package ref and run <command> from that package
+  -w, --with <PKG>         Add a dependency for this tool run; may be repeated
+      --r-version <SPEC>   Select the R version for this tool run with rig
+      --rscript <RSCRIPT>  Select the Rscript executable
+  -h, --help               Print help
 
 Examples:
   ir tool run btw
