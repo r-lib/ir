@@ -41,6 +41,8 @@ fn generated_release_metadata(
     output.push_str("fn embedded_minor_releases() -> Vec<MinorRelease> {\n");
     output.push_str("    vec![\n");
     for ((major, minor), date) in embedded_minor_releases(releases) {
+        let date = iso_date_prefix(date)
+            .unwrap_or_else(|| panic!("R minor release date `{date}` must start with YYYY-MM-DD"));
         output.push_str("        MinorRelease {\n");
         output.push_str("            major: ");
         output.push_str(&major.to_string());
@@ -102,6 +104,15 @@ fn parse_metadata_date(value: &str, source: &str) -> Result<String, String> {
         ));
     }
     Ok(value.to_string())
+}
+
+fn iso_date_prefix(value: &str) -> Option<&str> {
+    let date = value.get(..10)?;
+    if is_iso_date(date) {
+        Some(date)
+    } else {
+        None
+    }
 }
 
 fn is_iso_date(value: &str) -> bool {

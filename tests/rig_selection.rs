@@ -630,6 +630,63 @@ fn run_with_exclude_newer_selects_latest_available_minor_r() {
 
 #[cfg(unix)]
 #[test]
+fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
+    let cache_dir = unique_dir("ir-exclude-newer-r-release-date-cache");
+    let bin_dir = unique_dir("ir-exclude-newer-r-release-date-bin");
+    let r43_dir = unique_dir("ir-exclude-newer-r-release-date-r43");
+    let r44_dir = unique_dir("ir-exclude-newer-r-release-date-r44");
+
+    let r43_binary = selected_r_binary(&r43_dir, "r43");
+    let r44_binary = selected_r_binary(&r44_dir, "r44");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1\" in\n",
+                "  list)\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.3.3","version":"4.3.3","aliases":[],"binary":"{}"}},
+{{"name":"4.4.0","version":"4.4.0","aliases":[],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  available) echo unexpected available >&2; exit 65 ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            r43_binary.display(),
+            r44_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            "2024-04-24",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=r44");
+
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+    let _ = fs::remove_dir_all(&r43_dir);
+    let _ = fs::remove_dir_all(&r44_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn run_with_exclude_newer_selects_r_4_0_for_2021_snapshot() {
     let cache_dir = unique_dir("ir-exclude-newer-r40-cache");
     let bin_dir = unique_dir("ir-exclude-newer-r40-bin");
