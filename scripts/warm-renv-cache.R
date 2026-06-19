@@ -21,6 +21,7 @@ if (is.null(repos)) {
   repos <- c(CRAN = repos)
 }
 
+Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
 options(repos = repos, renv.consent = TRUE)
 
 tooling <- c("pak", "renv", "secretbase")
