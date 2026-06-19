@@ -453,6 +453,9 @@ fn test_r_metadata_resolution_is_shared() {
         helper_text.contains(r#"if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript""#),
         "test R metadata resolution should ask Windows R for Rscript.exe"
     );
+    assert!(!helper_text.contains("list\", \"--json"));
+    assert!(!helper_text.contains("available\", \"--all\", \"--json"));
+    assert!(!helper_text.contains("def version_parts"));
 
     for script in [
         "scripts/install-dev-deps.sh",
@@ -482,71 +485,7 @@ fn test_r_metadata_resolution_is_shared() {
 
 #[cfg(unix)]
 #[test]
-fn test_r_metadata_resolver_uses_available_release_without_installed_release_alias() {
-    let temp = std::env::temp_dir().join(format!("ir-fake-rig-no-release-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&temp);
-    fs::create_dir_all(&temp).unwrap();
-    let rig = temp.join("rig");
-    let rscript = temp.join("R dir").join("Rscript");
-    fs::write(
-        &rig,
-        format!(
-            r#"#!/usr/bin/env sh
-set -eu
-if [ "$1" = "list" ] && [ "$2" = "--json" ]; then
-  cat <<'JSON'
-[
-  {{"name": "4.6.0", "version": "4.6.0", "aliases": []}},
-  {{"name": "4.4.3", "version": "4.4.3", "aliases": []}}
-]
-JSON
-elif [ "$1" = "run" ]; then
-  cat <<'EOF'
-IR_TEST_R_DATE=2025-02-28
-IR_TEST_RSCRIPT={test_rscript}
-EOF
-elif [ "$1" = "available" ] && [ "$2" = "--all" ] && [ "$3" = "--json" ]; then
-  cat <<'JSON'
-[
-  {{"name": "release", "version": "4.6.0", "date": "2026-04-24T00:00:00Z"}},
-  {{"name": "oldrel/2", "version": "4.4.3", "date": "2025-02-28T00:00:00Z"}}
-]
-JSON
-else
-  exit 99
-fi
-"#,
-            test_rscript = rscript.display()
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&rig).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&rig, permissions).unwrap();
-
-    let old_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut paths = vec![temp.clone()];
-    paths.extend(std::env::split_paths(&old_path));
-    let path = std::env::join_paths(paths).unwrap();
-    let out = Command::new("python3")
-        .current_dir(repo_root())
-        .env("PATH", path)
-        .args(["scripts/resolve-test-r.py", "oldrel/2"])
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout),
-        format!("4.4.3\n4.4.3\n2025-02-28\n{}\n", rscript.display())
-    );
-
-    let _ = fs::remove_dir_all(&temp);
-}
-
-#[cfg(unix)]
-#[test]
-fn test_r_metadata_resolver_handles_oldrel_without_installed_release_alias() {
+fn test_r_metadata_resolver_delegates_oldrel_resolution_to_rig() {
     let temp = std::env::temp_dir().join(format!(
         "ir-fake-rig-oldrel-no-release-{}",
         std::process::id()
@@ -560,26 +499,14 @@ fn test_r_metadata_resolver_handles_oldrel_without_installed_release_alias() {
         format!(
             r#"#!/usr/bin/env sh
 set -eu
-if [ "$1" = "list" ] && [ "$2" = "--json" ]; then
-  cat <<'JSON'
-[
-  {{"name": "4.4.3", "version": "4.4.3", "aliases": []}}
-]
-JSON
-elif [ "$1" = "available" ] && [ "$2" = "--all" ] && [ "$3" = "--json" ]; then
-  cat <<'JSON'
-[
-  {{"name": "release", "version": "4.6.0", "date": "2026-04-24T00:00:00Z"}},
-  {{"name": "oldrel/2", "version": "4.4.3", "date": "2025-02-28T00:00:00Z"}}
-]
-JSON
-elif [ "$1" = "run" ]; then
-  test "$3" = "4.4.3"
+if [ "$1" = "run" ] && [ "$2" = "-r" ] && [ "$3" = "oldrel/2" ]; then
   cat <<'EOF'
+IR_TEST_R_VERSION=4.4.3
 IR_TEST_R_DATE=2025-02-28
 IR_TEST_RSCRIPT={test_rscript}
 EOF
 else
+  echo "unexpected rig command: $*" >&2
   exit 99
 fi
 "#,
@@ -605,7 +532,7 @@ fi
     assert_success(&out);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        format!("4.4.3\n4.4.3\n2025-02-28\n{}\n", rscript.display())
+        format!("oldrel/2\n4.4.3\n2025-02-28\n{}\n", rscript.display())
     );
 
     let _ = fs::remove_dir_all(&temp);
