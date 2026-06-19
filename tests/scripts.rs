@@ -155,6 +155,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("any::xfun"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(workflow.contains("Warm default R package cache"));
+    assert!(workflow.contains("Warm GitHub R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
     assert!(workflow.contains("github::rstudio/reticulate@main"));

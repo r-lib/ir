@@ -106,8 +106,15 @@ jobs:
         run: |
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
             cli glue jsonlite dplyr tidyr reticulate fansi htmltools knitr rmarkdown xfun quarto \
-            github::rstudio/reticulate@main \
             btw Rapp docopt pkgsearch prettyunits
+        env:
+          R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+
+      - name: Warm GitHub R package cache
+        shell: bash
+        run: |
+          "$IR_RSCRIPT" scripts/warm-renv-cache.R \
+            github::rstudio/reticulate@main
         env:
           GITHUB_PAT: ${{ github.token }}
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
