@@ -994,29 +994,46 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[cfg(unix)]
-#[test]
-fn tool_run_accepts_cli_rscript() {
-    let cache_dir = unique_dir("ir-tool-run-cli-rscript-cache");
-    let library = unique_dir("ir-tool-run-cli-rscript-library");
-    let rscript_dir = unique_dir("ir-tool-run-cli-rscript-r");
-    let package = library.join("irfake");
-    let exec_dir = package.join("exec");
+fn fake_tool_package_with_rscript(
+    prefix: &str,
+    rscript_name: &str,
+    label: &str,
+) -> (PathBuf, PathBuf, PathBuf) {
+    let library = unique_dir(&format!("{prefix}-library"));
+    let rscript_dir = unique_dir(&format!("{prefix}-r"));
+    let exec_dir = library.join("irfake").join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
     write_executable(&exec_dir.join("hello.R"), "#!/usr/bin/env Rscript\n");
 
-    let rscript = rscript_dir.join("Rscript");
+    let rscript = rscript_dir.join(rscript_name);
     write_executable(
         &rscript,
-        concat!(
-            "#!/bin/sh\n",
-            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
-            "  cat >/dev/null\n",
-            "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
-            "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
-            "  exit 0\n",
-            "fi\n",
-            "echo selected=tool-rscript\n",
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
+                "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "echo {}\n",
+            ),
+            label
         ),
+    );
+
+    (library, rscript_dir, rscript)
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_accepts_cli_rscript() {
+    let cache_dir = unique_dir("ir-tool-run-cli-rscript-cache");
+    let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
+        "ir-tool-run-cli-rscript",
+        "Rscript",
+        "selected=tool-rscript",
     );
 
     let out = ir()
@@ -1042,27 +1059,11 @@ fn tool_run_accepts_cli_rscript() {
 fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let cache_dir = unique_dir("ir-tool-install-cli-rscript-cache");
     let bin_dir = unique_dir("ir-tool-install-cli-rscript-bin");
-    let library = unique_dir("ir-tool-install-cli-rscript-library");
-    let rscript_dir = unique_dir("ir-tool-install-cli-rscript-r");
-    let package = library.join("irfake");
-    let exec_dir = package.join("exec");
-    fs::create_dir_all(&exec_dir).unwrap();
-    write_executable(&exec_dir.join("hello.R"), "#!/usr/bin/env Rscript\n");
-
     let rscript_name = "Rscript-ir-tool-install-cli-rscript";
-    let rscript = rscript_dir.join(rscript_name);
-    write_executable(
-        &rscript,
-        concat!(
-            "#!/bin/sh\n",
-            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
-            "  cat >/dev/null\n",
-            "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
-            "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
-            "  exit 0\n",
-            "fi\n",
-            "echo selected=tool-rscript\n",
-        ),
+    let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
+        "ir-tool-install-cli-rscript",
+        rscript_name,
+        "selected=tool-rscript",
     );
 
     let out = ir()
@@ -1102,26 +1103,10 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
 fn tool_install_records_env_selected_rscript_in_recovery_command() {
     let cache_dir = unique_dir("ir-tool-install-env-rscript-cache");
     let bin_dir = unique_dir("ir-tool-install-env-rscript-bin");
-    let library = unique_dir("ir-tool-install-env-rscript-library");
-    let rscript_dir = unique_dir("ir-tool-install-env-rscript-r");
-    let package = library.join("irfake");
-    let exec_dir = package.join("exec");
-    fs::create_dir_all(&exec_dir).unwrap();
-    write_executable(&exec_dir.join("hello.R"), "#!/usr/bin/env Rscript\n");
-
-    let rscript = rscript_dir.join("Rscript");
-    write_executable(
-        &rscript,
-        concat!(
-            "#!/bin/sh\n",
-            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
-            "  cat >/dev/null\n",
-            "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
-            "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
-            "  exit 0\n",
-            "fi\n",
-            "echo selected=env-rscript\n",
-        ),
+    let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
+        "ir-tool-install-env-rscript",
+        "Rscript",
+        "selected=env-rscript",
     );
 
     let out = ir()
@@ -1214,29 +1199,10 @@ fn tool_install_with_path_rscript_symlink_records_target() {
     let cache_dir = unique_dir("ir-tool-install-rscript-link-cache");
     let bin_dir = unique_dir("ir-tool-install-rscript-link-bin");
     let link_dir = unique_dir("ir-tool-install-rscript-link-path");
-    let target_dir = unique_dir("ir-tool-install-rscript-link-target");
-    let library = unique_dir("ir-tool-install-rscript-link-library");
-    let package = library.join("irfake");
-    let exec_dir = package.join("exec");
-    fs::create_dir_all(&exec_dir).unwrap();
-    write_executable(
-        &exec_dir.join("hello.R"),
-        "#!/usr/bin/env Rscript\ncat('hello\\n')\n",
-    );
-
-    let target_rscript = target_dir.join("Rscript");
-    write_executable(
-        &target_rscript,
-        concat!(
-            "#!/bin/sh\n",
-            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
-            "  cat >/dev/null\n",
-            "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
-            "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
-            "  exit 0\n",
-            "fi\n",
-            "echo target-rscript\n",
-        ),
+    let (library, target_dir, target_rscript) = fake_tool_package_with_rscript(
+        "ir-tool-install-rscript-link-target",
+        "Rscript",
+        "target-rscript",
     );
     let link_rscript = link_dir.join("Rscript");
     std::os::unix::fs::symlink(&target_rscript, &link_rscript).unwrap();
