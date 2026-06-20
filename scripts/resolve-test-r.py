@@ -7,16 +7,33 @@ import json
 import re
 import subprocess
 import sys
+from email.parser import Parser
+
+R_METADATA_SCRIPT = r"""
+rscript <- file.path(
+  R.home("bin"),
+  if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
+)
+
+metadata <- data.frame(
+  version = as.character(getRversion()),
+  date = sprintf("%s-%s-%s", R.version$year, R.version$month, R.version$day),
+  rscript = normalizePath(rscript, winslash = "/", mustWork = TRUE)
+)
+
+write.dcf(metadata, stdout())
+"""
 
 
 def die(message: str) -> None:
     raise SystemExit(message)
 
 
-def run_rig(args: list[str]) -> str:
+def run_rig(args: list[str], stdin: str | None = None) -> str:
     result = subprocess.run(
         ["rig", *args],
         check=False,
+        input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -45,34 +62,31 @@ def installed_name_for_version(version: str, spec: str) -> str:
 
 
 def release_metadata(name: str) -> tuple[str, str, str]:
-    expression = (
-        'rscript <- file.path(R.home("bin"), '
-        'if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"); '
-        'cat(sprintf("IR_TEST_R_VERSION=%s\\nIR_TEST_R_DATE=%s-%s-%s\\nIR_TEST_RSCRIPT=%s\\n", '
-        'as.character(getRversion()), R.version$year, R.version$month, R.version$day, '
-        'normalizePath(rscript, winslash = "/", mustWork = TRUE)))'
-    )
     output = run_rig(
         [
             "run",
             "-r",
             name,
-            "-e",
-            expression,
-        ]
+            "-f",
+            "-",
+        ],
+        stdin=R_METADATA_SCRIPT,
     )
+    metadata = parse_metadata(output, name)
     return (
-        output_field(output, "IR_TEST_R_VERSION", name),
-        output_field(output, "IR_TEST_R_DATE", name),
-        output_field(output, "IR_TEST_RSCRIPT", name),
+        metadata["version"],
+        metadata["date"],
+        metadata["rscript"],
     )
 
 
-def output_field(output: str, name: str, spec: str) -> str:
-    value = re.search(rf"^{name}=(.+)$", output, re.MULTILINE)
-    if not value:
-        die(f"could not read {name} for {spec}")
-    return value.group(1)
+def parse_metadata(output: str, spec: str) -> dict[str, str]:
+    metadata = Parser().parsestr(output)
+    fields = {name: metadata.get(name, "") for name in ("version", "date", "rscript")}
+    missing = [name for name, value in fields.items() if not value]
+    if missing:
+        die(f"could not read {', '.join(missing)} for {spec}")
+    return fields
 
 
 def main() -> None:
