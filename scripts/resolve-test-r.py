@@ -23,6 +23,7 @@ metadata <- data.frame(
 
 write.dcf(metadata, stdout())
 """
+R_STDIN_BOOTSTRAP = 'source(file("stdin"))'
 
 
 def die(message: str) -> None:
@@ -67,8 +68,8 @@ def release_metadata(name: str) -> tuple[str, str, str]:
             "run",
             "-r",
             name,
-            "-f",
-            "-",
+            "-e",
+            R_STDIN_BOOTSTRAP,
         ],
         stdin=R_METADATA_SCRIPT,
     )

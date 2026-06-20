@@ -462,9 +462,8 @@ fn test_r_metadata_resolution_is_shared() {
     assert!(helper_text.contains("R_METADATA_SCRIPT = r\"\"\""));
     assert!(helper_text.contains("write.dcf"));
     assert!(helper_text.contains("from email.parser import Parser"));
-    assert!(helper_text.contains(r#""-f""#));
-    assert!(helper_text.contains(r#""-""#));
-    assert!(!helper_text.contains(r#""-e","#));
+    assert!(helper_text.contains(r#"source(file("stdin"))"#));
+    assert!(!helper_text.contains("cat(sprintf"));
     assert!(!helper_text.contains("def output_field"));
     assert!(!helper_text.contains("available\", \"--all\", \"--json"));
     assert!(!helper_text.contains("def version_parts"));
@@ -530,7 +529,7 @@ elif [ "$1" = "-q" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
   {{"name": "4.4-arm64", "version": "4.4.3", "aliases": []}}
 ]
 JSON
-elif [ "$1" = "run" ] && [ "$2" = "-r" ] && [ "$3" = "4.4-arm64" ] && [ "${{4:-}}" = "-f" ] && [ "${{5:-}}" = "-" ]; then
+elif [ "$1" = "run" ] && [ "$2" = "-r" ] && [ "$3" = "4.4-arm64" ] && [ "${{4:-}}" = "-e" ] && [ "${{5:-}}" = 'source(file("stdin"))' ]; then
   script="$(cat)"
   printf '%s\n' "$script" | grep -q 'write[.]dcf' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
   printf '%s\n' "$script" | grep -q 'Rscript[.]exe' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
