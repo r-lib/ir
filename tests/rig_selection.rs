@@ -535,9 +535,9 @@ fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
 
 #[cfg(unix)]
 #[test]
-fn run_with_exclude_newer_selects_newest_installed_r_available_by_date() {
+fn run_with_exclude_newer_requires_latest_available_minor_r() {
     let out = run_with_installed_r_versions(
-        "ir-exclude-newer-sparse-installed",
+        "ir-exclude-newer-missing-latest-minor",
         &[("4.4.3", "r44")],
         &[
             "run",
@@ -547,13 +547,19 @@ fn run_with_exclude_newer_selects_newest_installed_r_available_by_date() {
             "cat('ignored')",
         ],
     );
-    assert_success(&out);
-    assert_stdout_contains(&out, "selected=r44");
+    assert_failure_contains(
+        &out,
+        &[
+            "`exclude-newer` 2026-03-20 implies `r-version:",
+            "latest R minor version available on that date",
+            "Run `rig install",
+        ],
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn run_with_exclude_newer_ignores_installed_patch_released_after_date() {
+fn run_with_exclude_newer_selects_latest_installed_patch_within_minor() {
     let out = run_with_installed_r_versions(
         "ir-exclude-newer-patch-date",
         &[("4.2.3", "r42"), ("4.3.2", "r432"), ("4.3.3", "r433")],
@@ -566,7 +572,7 @@ fn run_with_exclude_newer_ignores_installed_patch_released_after_date() {
         ],
     );
     assert_success(&out);
-    assert_stdout_contains(&out, "selected=r432");
+    assert_stdout_contains(&out, "selected=r433");
 }
 
 #[cfg(unix)]
@@ -690,7 +696,7 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
     assert_stdout_contains(&out, "selected=r47");
     assert!(available_called.exists(), "{}", output_text(&out));
 
-    let cache = fs::read_to_string(cache_dir.join("rig").join("releases.json")).unwrap();
+    let cache = fs::read_to_string(cache_dir.join("rig").join("minor-releases.json")).unwrap();
     assert!(
         cache.contains(&format!(r#""fetched_at": "{}""#, utc_today_string())),
         "{cache}"
@@ -702,7 +708,7 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
     assert_stdout_contains(&out, "selected=r47");
     assert!(
         !available_called.exists(),
-        "date-only exclude-newer should reuse refreshed release cache"
+        "date-only exclude-newer should reuse refreshed minor-release cache"
     );
 
     let _ = fs::remove_dir_all(&cache_dir);
