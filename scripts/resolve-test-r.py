@@ -9,22 +9,6 @@ import subprocess
 import sys
 from email.parser import Parser
 
-R_METADATA_SCRIPT = r"""
-rscript <- file.path(
-  R.home("bin"),
-  if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
-)
-
-metadata <- data.frame(
-  version = as.character(getRversion()),
-  date = sprintf("%s-%s-%s", R.version$year, R.version$month, R.version$day),
-  rscript = normalizePath(rscript, winslash = "/", mustWork = TRUE)
-)
-
-write.dcf(metadata, stdout())
-"""
-R_STDIN_BOOTSTRAP = 'source(file("stdin"))'
-
 
 def die(message: str) -> None:
     raise SystemExit(message)
@@ -64,14 +48,22 @@ def installed_name_for_version(version: str, spec: str) -> str:
 
 def release_metadata(name: str) -> tuple[str, str, str]:
     output = run_rig(
-        [
-            "run",
-            "-r",
-            name,
-            "-e",
-            R_STDIN_BOOTSTRAP,
-        ],
-        stdin=R_METADATA_SCRIPT,
+        ["run", "-r", name, "-e", 'source(file("stdin"))'],
+        # fmt: r
+        stdin="""
+            rscript <- file.path(
+            R.home("bin"),
+            if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
+            )
+
+            metadata <- data.frame(
+            version = as.character(getRversion()),
+            date = sprintf("%s-%s-%s", R.version$year, R.version$month, R.version$day),
+            rscript = normalizePath(rscript, winslash = "/", mustWork = TRUE)
+            )
+
+            write.dcf(metadata, stdout())
+        """,
     )
     metadata = parse_metadata(output, name)
     return (

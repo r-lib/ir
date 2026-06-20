@@ -459,7 +459,7 @@ fn test_r_metadata_resolution_is_shared() {
         helper_text.contains(r#"if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript""#),
         "test R metadata resolution should ask Windows R for Rscript.exe"
     );
-    assert!(helper_text.contains("R_METADATA_SCRIPT = r\"\"\""));
+    assert!(helper_text.contains("stdin=\"\"\""));
     assert!(helper_text.contains("write.dcf"));
     assert!(helper_text.contains("from email.parser import Parser"));
     assert!(helper_text.contains(r#"source(file("stdin"))"#));
