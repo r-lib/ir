@@ -83,7 +83,7 @@ def release_metadata(binary: str) -> tuple[str, str, str]:
               rscript = normalizePath(rscript, winslash = "/", mustWork = TRUE)
             )
 
-            write.dcf(metadata, stdout())
+            write.dcf(metadata, stdout(), width = 100000)
         """,
     )
     metadata = parse_metadata(output, binary)

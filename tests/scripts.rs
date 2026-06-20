@@ -551,6 +551,7 @@ set -eu
 if [ "$1" = "--vanilla" ] && [ "$2" = "--slave" ] && [ "$3" = "-e" ] && [ "$4" = 'source(file("stdin"))' ]; then
   script="$(cat)"
   printf '%s\n' "$script" | grep -q 'write[.]dcf' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
+  printf '%s\n' "$script" | grep -q 'width *= *100000' || {{ echo "metadata script should disable DCF wrapping" >&2; exit 98; }}
   printf '%s\n' "$script" | grep -q 'Rscript[.]exe' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
   cat <<'EOF'
 version: 4.4.3
