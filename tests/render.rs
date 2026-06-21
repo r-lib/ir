@@ -17,7 +17,7 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
 
     let docs_dir = docs_copy("ir-docs-reference-project");
     let (output_dir, output_dir_name) = unique_dir_in(&docs_dir, "ir-docs-reference-output");
-    let bin_dir = unique_dir("ir-docs-reference-bin");
+    let bin_dir = temp_dir("ir-docs-reference-bin");
     let fake_cargo = bin_dir.join("cargo");
     let stale_ir = bin_dir.join("ir");
     let cargo_marker = output_dir.join("cargo-called");
@@ -112,10 +112,6 @@ fn docs_website_has_dark_mode_and_colored_reference_output() {
     assert!(html.contains("color: #555555"), "{html}");
     assert!(html.contains("font-weight: bold"), "{html}");
     assert!(!html.contains("\u{1b}["), "{html}");
-
-    let _ = fs::remove_dir_all(&output_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&docs_dir);
 }
 
 #[test]
@@ -151,15 +147,12 @@ fn docs_run_page_dark_mode_styles_console_blocks() {
         styles.contains("background-color: var(--ir-help-panel)"),
         "{styles}"
     );
-
-    let _ = fs::remove_dir_all(&output_dir);
-    let _ = fs::remove_dir_all(&docs_dir);
 }
 
 #[test]
 fn render_quarto_fixture_injects_rmarkdown_and_renders() {
     let fixture_dir = fixture_copy("run", "ir-e2e-qmd-fixture");
-    let cache_dir = unique_dir("ir-e2e-qmd-cache");
+    let cache_dir = temp_dir("ir-e2e-qmd-cache");
 
     for _ in 0..2 {
         let out = ir()
@@ -191,16 +184,13 @@ fn render_quarto_fixture_injects_rmarkdown_and_renders() {
         let _ = fs::remove_file(fixture_dir.join("report.html"));
         let _ = fs::remove_dir_all(fixture_dir.join("report_files"));
     }
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 // report-pinned.qmd declares rmarkdown itself, so the resolver leaves it alone.
 #[test]
 fn render_quarto_fixture_with_declared_rmarkdown_skips_injection() {
     let fixture_dir = fixture_copy("run", "ir-e2e-qmd-pinned-fixture");
-    let cache_dir = unique_dir("ir-e2e-qmd-pinned-cache");
+    let cache_dir = temp_dir("ir-e2e-qmd-pinned-cache");
 
     let out = ir()
         .current_dir(&fixture_dir)
@@ -230,8 +220,6 @@ fn render_quarto_fixture_with_declared_rmarkdown_skips_injection() {
 
     let _ = fs::remove_file(fixture_dir.join("report-pinned.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report-pinned_files"));
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 // report-transitive.qmd declares `quarto`, which Imports rmarkdown. The
@@ -239,7 +227,7 @@ fn render_quarto_fixture_with_declared_rmarkdown_skips_injection() {
 #[test]
 fn render_quarto_fixture_with_transitive_rmarkdown_renders() {
     let fixture_dir = fixture_copy("run", "ir-e2e-qmd-transitive-fixture");
-    let cache_dir = unique_dir("ir-e2e-qmd-transitive-cache");
+    let cache_dir = temp_dir("ir-e2e-qmd-transitive-cache");
 
     let out = ir()
         .current_dir(&fixture_dir)
@@ -274,8 +262,6 @@ fn render_quarto_fixture_with_transitive_rmarkdown_renders() {
 
     let _ = fs::remove_file(fixture_dir.join("report-transitive.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report-transitive_files"));
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 // report-bare.qmd declares no dependencies at all, so the resolver must still
@@ -283,7 +269,7 @@ fn render_quarto_fixture_with_transitive_rmarkdown_renders() {
 #[test]
 fn render_quarto_bare_fixture_injects_rmarkdown() {
     let fixture_dir = fixture_copy("run", "ir-e2e-qmd-bare-fixture");
-    let cache_dir = unique_dir("ir-e2e-qmd-bare-cache");
+    let cache_dir = temp_dir("ir-e2e-qmd-bare-cache");
 
     for run in ["fresh resolution", "cached resolution"] {
         let out = ir()
@@ -316,14 +302,12 @@ fn render_quarto_bare_fixture_injects_rmarkdown() {
 
     let _ = fs::remove_file(fixture_dir.join("report-bare.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report-bare_files"));
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 #[test]
 fn render_quarto_script_fixture_renders_with_dependencies() {
     let fixture_dir = fixture_copy("run", "ir-e2e-render-script-fixture");
-    let cache_dir = unique_dir("ir-e2e-render-script-cache");
+    let cache_dir = temp_dir("ir-e2e-render-script-cache");
 
     let out = ir()
         .current_dir(&fixture_dir)
@@ -345,6 +329,4 @@ fn render_quarto_script_fixture_renders_with_dependencies() {
 
     let _ = fs::remove_file(fixture_dir.join("report-script.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("report-script_files"));
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&fixture_dir);
 }

@@ -101,12 +101,12 @@ fn resolver_probe_count(entered: &Path) -> usize {
 
 #[test]
 fn concurrent_resolvers_serialize_same_dependency_resolution() {
-    let cache_dir = unique_dir("ir-same-resolution-lock-cache");
-    let user_cache_dir = unique_dir("ir-same-resolution-lock-user-cache");
-    let profile = unique_path("ir-same-resolution-lock-profile", "R");
-    let active = unique_path("ir-same-resolution-lock-active", "");
-    let entered = unique_path("ir-same-resolution-lock-entered", "txt");
-    let overlap = unique_path("ir-same-resolution-lock-overlap", "txt");
+    let cache_dir = temp_dir("ir-same-resolution-lock-cache");
+    let user_cache_dir = temp_dir("ir-same-resolution-lock-user-cache");
+    let profile = temp_path("ir-same-resolution-lock-profile", "R");
+    let active = temp_path("ir-same-resolution-lock-active", "");
+    let entered = temp_path("ir-same-resolution-lock-entered", "txt");
+    let overlap = temp_path("ir-same-resolution-lock-overlap", "txt");
     let probe = ResolverLockProbe {
         user_cache_dir: &user_cache_dir,
         profile: &profile,
@@ -135,23 +135,16 @@ fn concurrent_resolvers_serialize_same_dependency_resolution() {
         1,
         "second resolver should reuse the completed resolution marker"
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&user_cache_dir);
 }
 
 #[test]
 fn concurrent_resolvers_serialize_different_dependency_resolution() {
-    let cache_dir = unique_dir("ir-resolution-overlap-cache");
-    let user_cache_dir = unique_dir("ir-resolution-overlap-user-cache");
-    let profile = unique_path("ir-resolution-overlap-profile", "R");
-    let active = unique_path("ir-resolution-overlap-active", "");
-    let entered = unique_path("ir-resolution-overlap-entered", "txt");
-    let overlap = unique_path("ir-resolution-overlap", "txt");
+    let cache_dir = temp_dir("ir-resolution-overlap-cache");
+    let user_cache_dir = temp_dir("ir-resolution-overlap-user-cache");
+    let profile = temp_path("ir-resolution-overlap-profile", "R");
+    let active = temp_path("ir-resolution-overlap-active", "");
+    let entered = temp_path("ir-resolution-overlap-entered", "txt");
+    let overlap = temp_path("ir-resolution-overlap", "txt");
     let probe = ResolverLockProbe {
         user_cache_dir: &user_cache_dir,
         profile: &profile,
@@ -180,24 +173,17 @@ fn concurrent_resolvers_serialize_different_dependency_resolution() {
         2,
         "different dependencies should both resolve, but not concurrently"
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&user_cache_dir);
 }
 
 #[test]
 fn concurrent_resolvers_serialize_shared_cache_with_different_user_cache_roots() {
-    let cache_dir = unique_dir("ir-shared-cache-different-user-cache");
-    let first_user_cache_dir = unique_dir("ir-shared-cache-user-one");
-    let second_user_cache_dir = unique_dir("ir-shared-cache-user-two");
-    let profile = unique_path("ir-shared-cache-different-user-cache-profile", "R");
-    let active = unique_path("ir-shared-cache-different-user-cache-active", "");
-    let entered = unique_path("ir-shared-cache-different-user-cache-entered", "txt");
-    let overlap = unique_path("ir-shared-cache-different-user-cache-overlap", "txt");
+    let cache_dir = temp_dir("ir-shared-cache-different-user-cache");
+    let first_user_cache_dir = temp_dir("ir-shared-cache-user-one");
+    let second_user_cache_dir = temp_dir("ir-shared-cache-user-two");
+    let profile = temp_path("ir-shared-cache-different-user-cache-profile", "R");
+    let active = temp_path("ir-shared-cache-different-user-cache-active", "");
+    let entered = temp_path("ir-shared-cache-different-user-cache-entered", "txt");
+    let overlap = temp_path("ir-shared-cache-different-user-cache-overlap", "txt");
     let first_probe = ResolverLockProbe {
         user_cache_dir: &first_user_cache_dir,
         profile: &profile,
@@ -237,12 +223,4 @@ fn concurrent_resolvers_serialize_shared_cache_with_different_user_cache_roots()
         1,
         "second resolver should reuse the shared cache marker"
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_file(&overlap);
-    let _ = fs::remove_dir_all(&active);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&first_user_cache_dir);
-    let _ = fs::remove_dir_all(&second_user_cache_dir);
 }

@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -139,7 +140,7 @@ pub(crate) fn assert_rx_help_snapshot(name: &str, args: &[&str]) {
     assert_eq!(actual, expected, "{args:?} changed {}", snapshot.display());
 }
 
-pub(crate) fn unique_path(prefix: &str, ext: &str) -> PathBuf {
+fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -153,10 +154,67 @@ pub(crate) fn unique_path(prefix: &str, ext: &str) -> PathBuf {
     path
 }
 
-pub(crate) fn unique_dir(prefix: &str) -> PathBuf {
+fn unique_dir(prefix: &str) -> PathBuf {
     let dir = unique_path(prefix, "");
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[derive(Debug)]
+pub(crate) struct TempPath {
+    path: PathBuf,
+}
+
+impl TempPath {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Drop for TempPath {
+    fn drop(&mut self) {
+        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        let result = if metadata.is_dir() {
+            fs::remove_dir_all(&self.path)
+        } else {
+            fs::remove_file(&self.path)
+        };
+        let _ = result;
+    }
+}
+
+impl Deref for TempPath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for TempPath {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<OsStr> for TempPath {
+    fn as_ref(&self) -> &OsStr {
+        self.path.as_os_str()
+    }
+}
+
+pub(crate) fn temp_path(prefix: &str, ext: &str) -> TempPath {
+    TempPath::new(unique_path(prefix, ext))
+}
+
+pub(crate) fn temp_dir(prefix: &str) -> TempPath {
+    TempPath::new(unique_dir(prefix))
+}
+
+pub(crate) fn temp_cache(prefix: &str) -> TempPath {
+    temp_dir(prefix)
 }
 
 #[cfg(target_os = "macos")]
@@ -227,25 +285,22 @@ pub(crate) fn copy_dir_files(source: &Path, destination: &Path) {
     }
 }
 
-pub(crate) fn fixture_copy(name: &str, prefix: &str) -> PathBuf {
+pub(crate) fn fixture_copy(name: &str, prefix: &str) -> TempPath {
     let source = fixture(name);
-    let destination = unique_dir(prefix);
+    let destination = temp_dir(prefix);
     copy_dir_files(&source, &destination);
 
     destination
 }
 
-pub(crate) fn docs_copy(prefix: &str) -> PathBuf {
+pub(crate) fn docs_copy(prefix: &str) -> TempPath {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = manifest_dir.join("docs");
     let (destination, _) = unique_dir_in(manifest_dir, prefix);
+    let destination = TempPath::new(destination);
     copy_dir_files(&source, &destination);
 
     destination
-}
-
-pub(crate) fn test_cache(prefix: &str) -> PathBuf {
-    unique_dir(prefix)
 }
 
 pub(crate) fn write_r_source_package(

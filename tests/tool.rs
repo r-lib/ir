@@ -43,7 +43,7 @@ fn install_scripts_configure_default_path_entries() {
 
 #[test]
 fn tool_run_executes_real_package_entrypoint() {
-    let cache_dir = test_cache("ir-tool-run-real-cache");
+    let cache_dir = temp_cache("ir-tool-run-real-cache");
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .args([
@@ -62,12 +62,11 @@ fn tool_run_executes_real_package_entrypoint() {
     assert_success(&out);
     assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn rx_executes_real_package_entrypoint() {
-    let cache_dir = test_cache("ir-rx-real-cache");
+    let cache_dir = temp_cache("ir-rx-real-cache");
     let out = rx()
         .env("IR_CACHE_DIR", &cache_dir)
         .args([
@@ -84,13 +83,12 @@ fn rx_executes_real_package_entrypoint() {
     assert_success(&out);
     assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn tool_install_installs_real_package_entrypoint() {
-    let cache_dir = test_cache("ir-tool-install-real-cache");
-    let bin_dir = unique_dir("ir-e2e-tool-install-bin");
+    let cache_dir = temp_cache("ir-tool-install-real-cache");
+    let bin_dir = temp_dir("ir-e2e-tool-install-bin");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -116,19 +114,16 @@ fn tool_install_installs_real_package_entrypoint() {
     assert_success(&out);
     assert_stdout_contains(&out, "Seach for CRAN packages on r-pkg.org");
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
-
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_adds_default_macos_bin_dir_to_zprofile_once() {
-    let cache_dir = unique_dir("ir-tool-install-macos-path-cache");
-    let home = unique_dir("ir-tool-install-macos-path-home");
+    let cache_dir = temp_dir("ir-tool-install-macos-path-cache");
+    let home = temp_dir("ir-tool-install-macos-path-home");
     let default_bin_dir = home.join(".local").join("bin");
     fs::create_dir_all(&default_bin_dir).unwrap();
-    let package_dir = unique_dir("ir-tool-install-macos-path-packages");
+    let package_dir = temp_dir("ir-tool-install-macos-path-packages");
     let package = write_r_source_package(&package_dir, "irmacpath", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -209,19 +204,15 @@ cat("mac.path.fixture=TRUE\n")
         fs::read_to_string(home.join(".zprofile")).unwrap(),
         zprofile
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&home);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_custom_bin_dir_skips_default_macos_path_setup() {
-    let cache_dir = unique_dir("ir-tool-install-custom-path-cache");
-    let home = unique_dir("ir-tool-install-custom-path-home");
-    let bin_dir = unique_path("ir-tool-install-custom-path-bin", "");
-    let package_dir = unique_dir("ir-tool-install-custom-path-packages");
+    let cache_dir = temp_dir("ir-tool-install-custom-path-cache");
+    let home = temp_dir("ir-tool-install-custom-path-home");
+    let bin_dir = temp_path("ir-tool-install-custom-path-bin", "");
+    let package_dir = temp_dir("ir-tool-install-custom-path-packages");
     let package = write_r_source_package(&package_dir, "irmaccustompath", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -257,18 +248,13 @@ cat("mac.custom.path.fixture=TRUE\n")
     assert!(!home.join(".local").join("bin").exists());
     assert!(!home.join(".zprofile").exists());
     assert!(!stderr(&out).contains("PATH"));
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&home);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_existing_launcher_does_not_modify_zprofile() {
-    let cache_dir = unique_dir("ir-tool-install-collision-path-cache");
-    let home = unique_dir("ir-tool-install-collision-path-home");
+    let cache_dir = temp_dir("ir-tool-install-collision-path-cache");
+    let home = temp_dir("ir-tool-install-collision-path-home");
     let default_bin_dir = home.join(".local").join("bin");
     fs::create_dir_all(&default_bin_dir).unwrap();
     fs::write(
@@ -276,7 +262,7 @@ fn tool_install_existing_launcher_does_not_modify_zprofile() {
         "existing launcher\n",
     )
     .unwrap();
-    let package_dir = unique_dir("ir-tool-install-collision-path-packages");
+    let package_dir = temp_dir("ir-tool-install-collision-path-packages");
     let package = write_r_source_package(&package_dir, "irmacpathcollision", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -315,10 +301,6 @@ cat("mac.path.collision.fixture=TRUE\n")
         !home.join(".zprofile").exists(),
         "failed install should not write .zprofile\n{text}"
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&home);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[cfg(target_os = "macos")]
@@ -326,14 +308,14 @@ cat("mac.path.collision.fixture=TRUE\n")
 fn tool_install_write_failure_does_not_modify_zprofile() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let cache_dir = unique_dir("ir-tool-install-write-failure-cache");
-    let home = unique_dir("ir-tool-install-write-failure-home");
+    let cache_dir = temp_dir("ir-tool-install-write-failure-cache");
+    let home = temp_dir("ir-tool-install-write-failure-home");
     let default_bin_dir = home.join(".local").join("bin");
     fs::create_dir_all(&default_bin_dir).unwrap();
     let original_permissions = fs::metadata(&default_bin_dir).unwrap().permissions();
     fs::set_permissions(&default_bin_dir, fs::Permissions::from_mode(0o555)).unwrap();
 
-    let package_dir = unique_dir("ir-tool-install-write-failure-packages");
+    let package_dir = temp_dir("ir-tool-install-write-failure-packages");
     let package = write_r_source_package(&package_dir, "irmacpathwritefailure", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -371,17 +353,13 @@ cat("mac.path.write.failure.fixture=TRUE\n")
         !home.join(".zprofile").exists(),
         "failed install should not write .zprofile\n{text}"
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&home);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
 fn tool_run_and_install_rapp_package_frontend() {
-    let cache_dir = unique_dir("ir-rapp-frontend-cache");
-    let bin_dir = unique_dir("ir-rapp-frontend-bin");
-    let app = unique_path("ir-rapp-frontend-app", "R");
+    let cache_dir = temp_dir("ir-rapp-frontend-cache");
+    let bin_dir = temp_dir("ir-rapp-frontend-bin");
+    let app = temp_path("ir-rapp-frontend-app", "R");
     fs::write(
         &app,
         "#!/usr/bin/env Rapp\ncat(\"ir.fixture=rapp-frontend\\n\")\n",
@@ -415,17 +393,13 @@ fn tool_run_and_install_rapp_package_frontend() {
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=rapp-frontend");
-
-    let _ = fs::remove_file(&app);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn tool_run_and_install_use_launcher_metadata() {
-    let cache_dir = unique_dir("ir-tool-launcher-metadata-cache");
-    let bin_dir = unique_dir("ir-tool-launcher-metadata-bin");
-    let package_dir = unique_dir("ir-tool-launcher-metadata-packages");
+    let cache_dir = temp_dir("ir-tool-launcher-metadata-cache");
+    let bin_dir = temp_dir("ir-tool-launcher-metadata-bin");
+    let package_dir = temp_dir("ir-tool-launcher-metadata-packages");
     let package = write_r_source_package(&package_dir, "irtoolmeta", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -531,16 +505,12 @@ cat("selected=top-level\n")
     assert_success(&out);
     assert_stdout_contains(&out, "launcher.name=top-level-tool");
     assert_stdout_contains(&out, "selected=top-level");
-
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
 fn tool_run_rejects_duplicate_launcher_metadata_names() {
-    let cache_dir = unique_dir("ir-tool-duplicate-launcher-cache");
-    let package_dir = unique_dir("ir-tool-duplicate-launcher-packages");
+    let cache_dir = temp_dir("ir-tool-duplicate-launcher-cache");
+    let package_dir = temp_dir("ir-tool-duplicate-launcher-packages");
     let package = write_r_source_package(&package_dir, "irtooldupe", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -578,15 +548,12 @@ cat("selected=metadata\n")
         "{}",
         output_text(&out)
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
 fn tool_run_ignores_non_r_direct_file_for_metadata_name() {
-    let cache_dir = unique_dir("ir-tool-non-r-direct-cache");
-    let package_dir = unique_dir("ir-tool-non-r-direct-packages");
+    let cache_dir = temp_dir("ir-tool-non-r-direct-cache");
+    let package_dir = temp_dir("ir-tool-non-r-direct-packages");
     let package = write_r_source_package(&package_dir, "irtoolnonr", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -609,17 +576,14 @@ cat("selected=metadata\n")
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "selected=metadata");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_run_and_install_support_direct_package_scripts() {
-    let cache_dir = unique_dir("ir-tool-direct-script-cache");
-    let bin_dir = unique_dir("ir-tool-direct-script-bin");
-    let package_dir = unique_dir("ir-tool-direct-script-packages");
+    let cache_dir = temp_dir("ir-tool-direct-script-cache");
+    let bin_dir = temp_dir("ir-tool-direct-script-bin");
+    let package_dir = temp_dir("ir-tool-direct-script-packages");
     let package = write_r_source_package(&package_dir, "irtooldirect", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -676,16 +640,12 @@ fn tool_run_and_install_support_direct_package_scripts() {
         assert_success(&out);
         assert_stdout_contains(&out, executable.2);
     }
-
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
 fn tool_run_skips_binary_exec_files() {
-    let cache_dir = unique_dir("ir-tool-binary-exec-cache");
-    let package_dir = unique_dir("ir-tool-binary-exec-packages");
+    let cache_dir = temp_dir("ir-tool-binary-exec-cache");
+    let package_dir = temp_dir("ir-tool-binary-exec-packages");
     let package = write_r_source_package(&package_dir, "irtoolbinary", &[]);
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -706,9 +666,6 @@ cat("selected=valid\n")
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "selected=valid");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
@@ -719,9 +676,9 @@ fn tool_install_rejects_invalid_metadata_launcher_names() {
         ("irtooldotname", "."),
         ("irtooldotdotname", ".."),
     ] {
-        let cache_dir = unique_dir("ir-tool-invalid-launcher-cache");
-        let bin_dir = unique_dir("ir-tool-invalid-launcher-bin");
-        let package_dir = unique_dir("ir-tool-invalid-launcher-packages");
+        let cache_dir = temp_dir("ir-tool-invalid-launcher-cache");
+        let bin_dir = temp_dir("ir-tool-invalid-launcher-bin");
+        let package_dir = temp_dir("ir-tool-invalid-launcher-packages");
         let package = write_r_source_package(&package_dir, package_name, &[]);
         let exec_dir = package.join("exec");
         fs::create_dir_all(&exec_dir).unwrap();
@@ -756,17 +713,13 @@ cat("not reached\n")
             "{}",
             output_text(&out)
         );
-
-        let _ = fs::remove_dir_all(&bin_dir);
-        let _ = fs::remove_dir_all(&cache_dir);
-        let _ = fs::remove_dir_all(&package_dir);
     }
 }
 
 #[test]
 fn tool_run_limits_metadata_lookup_to_primary_package() {
-    let cache_dir = unique_dir("ir-tool-primary-package-cache");
-    let package_dir = unique_dir("ir-tool-primary-package-packages");
+    let cache_dir = temp_dir("ir-tool-primary-package-cache");
+    let package_dir = temp_dir("ir-tool-primary-package-packages");
     let dep = write_r_source_package(&package_dir, "irtooldep", &[]);
     let dep_exec_dir = dep.join("exec");
     fs::create_dir_all(&dep_exec_dir).unwrap();
@@ -806,16 +759,13 @@ cat("selected=primary\n")
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "selected=primary");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[test]
 fn tool_run_and_install_apply_package_default_packages() {
-    let cache_dir = unique_dir("ir-tool-default-packages-cache");
-    let bin_dir = unique_dir("ir-tool-default-packages-bin");
-    let package_dir = unique_dir("ir-tool-default-packages-packages");
+    let cache_dir = temp_dir("ir-tool-default-packages-cache");
+    let bin_dir = temp_dir("ir-tool-default-packages-bin");
+    let package_dir = temp_dir("ir-tool-default-packages-packages");
     let package = write_r_source_package(
         &package_dir,
         "irtooldefaults",
@@ -882,19 +832,15 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
     assert_success(&out);
     assert_stdout_contains(&out, "base.attached=true");
     assert_stdout_contains(&out, "stats.attached=false");
-
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&package_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
-    let cache_dir = unique_dir("ir-warm-tool-install-cache");
-    let bin_dir = unique_dir("ir-warm-tool-install-bin");
+    let cache_dir = temp_dir("ir-warm-tool-install-cache");
+    let bin_dir = temp_dir("ir-warm-tool-install-bin");
     let rscript = rscript();
-    let profile = unique_path("ir-rprofile-fail", "R");
+    let profile = temp_path("ir-rprofile-fail", "R");
     fs::write(
         &profile,
         "stop('resolver Rscript should not be launched')\n",
@@ -937,18 +883,14 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
 
     assert_success(&cached);
     assert_stdout_contains(&cached, "Installed");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn tool_install_ignores_ir_exclude_newer_env() {
-    let cache_dir = unique_dir("ir-tool-install-ignores-exclude-newer-cache");
-    let bin_dir = unique_dir("ir-tool-install-ignores-exclude-newer-bin");
-    let library = unique_dir("ir-tool-install-ignores-exclude-newer-library");
-    let profile = unique_path("ir-tool-install-ignores-exclude-newer-profile", "R");
+    let cache_dir = temp_dir("ir-tool-install-ignores-exclude-newer-cache");
+    let bin_dir = temp_dir("ir-tool-install-ignores-exclude-newer-bin");
+    let library = temp_dir("ir-tool-install-ignores-exclude-newer-library");
+    let profile = temp_path("ir-tool-install-ignores-exclude-newer-profile", "R");
     let package = library.join("irfake");
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -986,11 +928,6 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 
     assert_success(&out);
     assert_stdout_contains(&out, "Installed");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
@@ -998,9 +935,9 @@ fn fake_tool_package_with_rscript(
     prefix: &str,
     rscript_name: &str,
     label: &str,
-) -> (PathBuf, PathBuf, PathBuf) {
-    let library = unique_dir(&format!("{prefix}-library"));
-    let rscript_dir = unique_dir(&format!("{prefix}-r"));
+) -> (TempPath, TempPath, PathBuf) {
+    let library = temp_dir(&format!("{prefix}-library"));
+    let rscript_dir = temp_dir(&format!("{prefix}-r"));
     let exec_dir = library.join("irfake").join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
     write_executable(&exec_dir.join("hello.R"), "#!/usr/bin/env Rscript\n");
@@ -1029,8 +966,8 @@ fn fake_tool_package_with_rscript(
 #[cfg(unix)]
 #[test]
 fn tool_run_accepts_cli_rscript() {
-    let cache_dir = unique_dir("ir-tool-run-cli-rscript-cache");
-    let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
+    let cache_dir = temp_dir("ir-tool-run-cli-rscript-cache");
+    let (library, _rscript_dir, rscript) = fake_tool_package_with_rscript(
         "ir-tool-run-cli-rscript",
         "Rscript",
         "selected=tool-rscript",
@@ -1048,17 +985,13 @@ fn tool_run_accepts_cli_rscript() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=tool-rscript");
-
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
-    let cache_dir = unique_dir("ir-tool-install-cli-rscript-cache");
-    let bin_dir = unique_dir("ir-tool-install-cli-rscript-bin");
+    let cache_dir = temp_dir("ir-tool-install-cli-rscript-cache");
+    let bin_dir = temp_dir("ir-tool-install-cli-rscript-bin");
     let rscript_name = "Rscript-ir-tool-install-cli-rscript";
     let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
         "ir-tool-install-cli-rscript",
@@ -1091,19 +1024,14 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
         "{launcher}"
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
-
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_install_records_env_selected_rscript_in_recovery_command() {
-    let cache_dir = unique_dir("ir-tool-install-env-rscript-cache");
-    let bin_dir = unique_dir("ir-tool-install-env-rscript-bin");
-    let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
+    let cache_dir = temp_dir("ir-tool-install-env-rscript-cache");
+    let bin_dir = temp_dir("ir-tool-install-env-rscript-bin");
+    let (library, _rscript_dir, rscript) = fake_tool_package_with_rscript(
         "ir-tool-install-env-rscript",
         "Rscript",
         "selected=env-rscript",
@@ -1127,20 +1055,15 @@ fn tool_install_records_env_selected_rscript_in_recovery_command() {
         selected.to_string_lossy()
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
-
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn tool_install_quotes_windows_recovery_rscript() {
-    let cache_dir = unique_dir("ir-tool-install-windows-rscript-cache");
-    let bin_dir = unique_dir("ir-tool-install-windows-rscript-bin");
-    let library = unique_dir("ir-tool-install-windows-rscript-library");
-    let rscript_dir = unique_dir("ir tool install windows rscript");
+    let cache_dir = temp_dir("ir-tool-install-windows-rscript-cache");
+    let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin");
+    let library = temp_dir("ir-tool-install-windows-rscript-library");
+    let rscript_dir = temp_dir("ir tool install windows rscript");
     let package = library.join("irfake");
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -1186,20 +1109,15 @@ fn tool_install_quotes_windows_recovery_rscript() {
         !launcher.contains("--rscript '"),
         "Windows recovery command should not use POSIX quoting:\n{launcher}"
     );
-
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_install_with_path_rscript_symlink_records_target() {
-    let cache_dir = unique_dir("ir-tool-install-rscript-link-cache");
-    let bin_dir = unique_dir("ir-tool-install-rscript-link-bin");
-    let link_dir = unique_dir("ir-tool-install-rscript-link-path");
-    let (library, target_dir, target_rscript) = fake_tool_package_with_rscript(
+    let cache_dir = temp_dir("ir-tool-install-rscript-link-cache");
+    let bin_dir = temp_dir("ir-tool-install-rscript-link-bin");
+    let link_dir = temp_dir("ir-tool-install-rscript-link-path");
+    let (library, _target_dir, target_rscript) = fake_tool_package_with_rscript(
         "ir-tool-install-rscript-link-target",
         "Rscript",
         "target-rscript",
@@ -1237,20 +1155,14 @@ fn tool_install_with_path_rscript_symlink_records_target() {
         !launcher.contains(&link_rscript.to_string_lossy().into_owned()),
         "{launcher}"
     );
-
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&target_dir);
-    let _ = fs::remove_dir_all(&link_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn tool_install_with_rscript_wrapper_records_primary_package_marker() {
-    let cache_dir = unique_dir("ir-wrapper-tool-install-cache");
-    let bin_dir = unique_dir("ir-wrapper-tool-install-bin");
-    let wrapper = unique_path("ir-rscript-wrapper", "sh");
+    let cache_dir = temp_dir("ir-wrapper-tool-install-cache");
+    let bin_dir = temp_dir("ir-wrapper-tool-install-bin");
+    let wrapper = temp_path("ir-rscript-wrapper", "sh");
     fs::write(
         &wrapper,
         "#!/bin/sh\nexec \"$IR_TEST_RSCRIPT_TARGET\" \"$@\"\n",
@@ -1276,10 +1188,6 @@ fn tool_install_with_rscript_wrapper_records_primary_package_marker() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "Installed");
-
-    let _ = fs::remove_file(&wrapper);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {
