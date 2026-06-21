@@ -250,11 +250,10 @@ fn run_with_missing_script_errors() {
 
 #[test]
 fn run_quarto_source_reports_render_subcommand() {
-    let source = unique_path("ir-run-qmd-uses-render", "qmd");
+    let source = temp_path("ir-run-qmd-uses-render", "qmd");
     fs::write(&source, "---\nir: [\n---\n").unwrap();
 
     let out = ir().args(["run"]).arg(&source).output().unwrap();
-    let _ = fs::remove_file(&source);
 
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -266,7 +265,7 @@ fn run_quarto_source_reports_render_subcommand() {
 
 #[test]
 fn malformed_frontmatter_errors_before_resolution() {
-    let script = unique_path("ir-malformed-frontmatter", "R");
+    let script = temp_path("ir-malformed-frontmatter", "R");
     fs::write(
         &script,
         "#!/usr/bin/env -S ir run\n#| packages: [dplyr\n\ncat('not reached')\n",
@@ -277,7 +276,6 @@ fn malformed_frontmatter_errors_before_resolution() {
         .args(["run", script.to_str().unwrap()])
         .output()
         .unwrap();
-    let _ = fs::remove_file(&script);
 
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -289,7 +287,7 @@ fn malformed_frontmatter_errors_before_resolution() {
 
 #[test]
 fn frontmatter_packages_must_be_sequence() {
-    let script = unique_path("ir-packages-scalar-frontmatter", "R");
+    let script = temp_path("ir-packages-scalar-frontmatter", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -304,7 +302,6 @@ cat('not reached')
         .args(["run", script.to_str().unwrap()])
         .output()
         .unwrap();
-    let _ = fs::remove_file(&script);
 
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -317,8 +314,8 @@ cat('not reached')
 
 #[test]
 fn frontmatter_packages_null_means_empty_sequence() {
-    let script = unique_path("ir-packages-null-frontmatter", "R");
-    let cache_dir = test_cache("ir-packages-null-cache");
+    let script = temp_path("ir-packages-null-frontmatter", "R");
+    let cache_dir = temp_cache("ir-packages-null-cache");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -334,8 +331,6 @@ cat("ir.fixture=packages-null\n")
         .args(["run", "--vanilla", script.to_str().unwrap()])
         .output()
         .unwrap();
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=packages-null");
@@ -343,8 +338,8 @@ cat("ir.fixture=packages-null\n")
 
 #[test]
 fn run_script_frontmatter_accepts_packages_and_isolated() {
-    let script = unique_path("ir-packages-frontmatter", "R");
-    let cache_dir = test_cache("ir-packages-frontmatter-cache");
+    let script = temp_path("ir-packages-frontmatter", "R");
+    let cache_dir = temp_cache("ir-packages-frontmatter-cache");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -364,7 +359,7 @@ cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "
     )
     .unwrap();
 
-    let user_library = unique_dir("ir-packages-frontmatter-user-library");
+    let user_library = temp_dir("ir-packages-frontmatter-user-library");
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_LIBS_USER", &user_library)
@@ -372,10 +367,6 @@ cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "
         .arg(&script)
         .output()
         .unwrap();
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&user_library);
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=packages-frontmatter");
@@ -385,7 +376,7 @@ cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "
 
 #[test]
 fn cache_dir_reports_override_and_process_env_defaults() {
-    let cache_dir = unique_dir("ir-cache-override");
+    let cache_dir = temp_dir("ir-cache-override");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -395,7 +386,7 @@ fn cache_dir_reports_override_and_process_env_defaults() {
     assert_success(&out);
     assert_eq!(stdout(&out), format!("{}\n", cache_dir.display()));
 
-    let r_user_cache_dir = unique_dir("ir-cache-r-user");
+    let r_user_cache_dir = temp_dir("ir-cache-r-user");
     let out = ir()
         .env_remove("IR_CACHE_DIR")
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
@@ -412,7 +403,7 @@ fn cache_dir_reports_override_and_process_env_defaults() {
             .replace('\\', "/")
     );
 
-    let xdg_cache_home = unique_dir("ir-cache-xdg-default");
+    let xdg_cache_home = temp_dir("ir-cache-xdg-default");
     let out = ir()
         .env_remove("IR_CACHE_DIR")
         .env_remove("R_USER_CACHE_DIR")
@@ -429,16 +420,12 @@ fn cache_dir_reports_override_and_process_env_defaults() {
             .to_string_lossy()
             .replace('\\', "/")
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&r_user_cache_dir);
-    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 #[cfg(windows)]
 #[test]
 fn cache_dir_falls_back_to_userprofile_without_localappdata() {
-    let user_profile = unique_dir("ir-cache-userprofile");
+    let user_profile = temp_dir("ir-cache-userprofile");
 
     let out = ir()
         .env_remove("IR_CACHE_DIR")
@@ -461,15 +448,13 @@ fn cache_dir_falls_back_to_userprofile_without_localappdata() {
         .to_string_lossy()
         .replace('\\', "/");
     assert_eq!(normalize_path_output(&out), expected);
-
-    let _ = fs::remove_dir_all(&user_profile);
 }
 
 #[test]
 fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
-    let xdg_cache_home = unique_dir("ir-cache-xdg");
-    let renviron_cache = unique_dir("ir-cache-renviron");
-    let renviron = unique_path("ir-cache-renviron", "Renviron");
+    let xdg_cache_home = temp_dir("ir-cache-xdg");
+    let renviron_cache = temp_dir("ir-cache-renviron");
+    let renviron = temp_path("ir-cache-renviron", "Renviron");
     fs::write(
         &renviron,
         format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
@@ -492,16 +477,12 @@ fn cache_dir_ignores_r_user_cache_dir_from_r_environ_user() {
         .to_string_lossy()
         .replace('\\', "/");
     assert_eq!(normalize_path_output(&out), expected);
-
-    let _ = fs::remove_file(&renviron);
-    let _ = fs::remove_dir_all(&renviron_cache);
-    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 #[test]
 fn run_with_ir_cache_dir_does_not_require_home_cache_env_for_resolver_lock() {
-    let cache_dir = unique_dir("ir-cache-lock-override");
-    let profile = unique_path("ir-cache-lock-override-profile", "R");
+    let cache_dir = temp_dir("ir-cache-lock-override");
+    let profile = temp_path("ir-cache-lock-override-profile", "R");
     fs::write(
         &profile,
         r#"
@@ -527,16 +508,13 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=cache-lock-override");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_with_ir_cache_dir_ignores_unusable_user_cache_for_resolver_lock() {
-    let cache_dir = unique_dir("ir-cache-lock-unusable-override");
-    let r_user_cache_file = unique_path("ir-cache-lock-unusable-r-cache", "txt");
-    let profile = unique_path("ir-cache-lock-unusable-profile", "R");
+    let cache_dir = temp_dir("ir-cache-lock-unusable-override");
+    let r_user_cache_file = temp_path("ir-cache-lock-unusable-r-cache", "txt");
+    let profile = temp_path("ir-cache-lock-unusable-profile", "R");
     fs::write(&r_user_cache_file, "not a directory\n").unwrap();
     fs::write(
         &profile,
@@ -559,15 +537,11 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=cache-lock-unusable-override");
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&r_user_cache_file);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn cache_clean_removes_cache_dir() {
-    let cache_dir = unique_dir("ir-cache-clean");
+    let cache_dir = temp_dir("ir-cache-clean");
     let library = cache_dir.join("libraries").join("library");
     fs::create_dir_all(&library).unwrap();
     fs::write(library.join("pkg"), "cached").unwrap();
@@ -587,7 +561,7 @@ fn cache_clean_removes_cache_dir() {
 #[test]
 fn run_script_fixture_resolves_packages_and_isolates_user_library() {
     let script = fixture("run/packages.R");
-    let cache_dir = test_cache("ir-run-script-cache");
+    let cache_dir = temp_cache("ir-run-script-cache");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -608,13 +582,12 @@ fn run_script_fixture_resolves_packages_and_isolates_user_library() {
     );
     assert_stdout_contains(&out, "script.result=a:4,b:2");
     assert_stdout_contains(&out, "script.json={\"ok\":true,\"rows\":1}");
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_script_uses_only_the_first_yaml_document() {
     let script = fixture("run/multiple-documents.R");
-    let cache_dir = test_cache("ir-multi-doc-cache");
+    let cache_dir = temp_cache("ir-multi-doc-cache");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -628,12 +601,11 @@ fn run_script_uses_only_the_first_yaml_document() {
     assert_stdout_contains(&out, "multi.packages=glue:true");
     assert_stdout_contains(&out, "multi.ignored_package=false");
     assert_stdout_contains(&out, "multi.result=5");
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_inline_expression_resolves_with_dependencies() {
-    let cache_dir = test_cache("ir-inline-cache");
+    let cache_dir = temp_cache("ir-inline-cache");
     let expr = concat!(
         "{",
         "library(cli); ",
@@ -670,12 +642,11 @@ fn run_inline_expression_resolves_with_dependencies() {
     assert_stdout_contains(&out, "inline.lib_in_cache=true");
     assert_stdout_contains(&out, "inline.pkgs_in_cache=true");
     assert_stdout_contains(&out, "inline.glue=2");
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_inline_expression_forwards_option_like_args_after_expr() {
-    let cache_dir = test_cache("ir-inline-args-cache");
+    let cache_dir = temp_cache("ir-inline-args-cache");
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .args([
@@ -697,12 +668,11 @@ fn run_inline_expression_forwards_option_like_args_after_expr() {
         "{}",
         output_text(&out)
     );
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_normalizes_version_specs_before_resolution_cache_keying() {
-    let cache_dir = unique_dir("ir-ref-normalized-cache");
+    let cache_dir = temp_dir("ir-ref-normalized-cache");
     let expr = "{ library(cli); cat('ir.fixture=normalized-cache\\n') }";
 
     for dep in ["cli==3.6.6", "cli@3.6.6"] {
@@ -720,16 +690,15 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
     let resolution_count = fs::read_dir(&resolution_dir)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
         .count();
-    let _ = fs::remove_dir_all(&cache_dir);
 
     assert_eq!(resolution_count, 1);
 }
 
 #[test]
 fn run_trims_env_exclude_newer_before_resolution_cache_keying() {
-    let cache_dir = unique_dir("ir-env-exclude-newer-normalized-cache");
-    let profile = unique_path("ir-env-exclude-newer-normalized-profile", "R");
-    let entered = unique_path("ir-env-exclude-newer-normalized-entered", "txt");
+    let cache_dir = temp_dir("ir-env-exclude-newer-normalized-cache");
+    let profile = temp_path("ir-env-exclude-newer-normalized-profile", "R");
+    let entered = temp_path("ir-env-exclude-newer-normalized-entered", "txt");
     fs::write(
         &profile,
         r#"
@@ -774,16 +743,12 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         marker_text.lines().next(),
         Some("exclude-newer: 2024-06-01")
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&entered);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_cli_exclude_newer_overrides_env_and_frontmatter() {
-    let cache_dir = unique_dir("ir-cli-exclude-newer-precedence-cache");
-    let script = unique_path("ir-cli-exclude-newer-precedence", "R");
+    let cache_dir = temp_dir("ir-cli-exclude-newer-precedence-cache");
+    let script = temp_path("ir-cli-exclude-newer-precedence", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -810,15 +775,12 @@ cat("ir.fixture=cli-exclude-newer-precedence\n")
         marker_text.lines().next(),
         Some("exclude-newer: 2024-03-01")
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_empty_cli_exclude_newer_overrides_frontmatter_with_latest() {
-    let cache_dir = unique_dir("ir-empty-cli-exclude-newer-cache");
-    let script = unique_path("ir-empty-cli-exclude-newer", "R");
+    let cache_dir = temp_dir("ir-empty-cli-exclude-newer-cache");
+    let script = temp_path("ir-empty-cli-exclude-newer", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -847,15 +809,12 @@ cat("ir.fixture=empty-cli-exclude-newer\n")
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_future_cli_exclude_newer_overrides_frontmatter_with_latest() {
-    let cache_dir = unique_dir("ir-future-cli-exclude-newer-cache");
-    let script = unique_path("ir-future-cli-exclude-newer", "R");
+    let cache_dir = temp_dir("ir-future-cli-exclude-newer-cache");
+    let script = temp_path("ir-future-cli-exclude-newer", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -884,19 +843,16 @@ cat("ir.fixture=future-cli-exclude-newer\n")
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
-    let cache_dir = unique_dir("ir-render-cli-exclude-newer-precedence-cache");
-    let library = unique_dir("ir-render-cli-exclude-newer-precedence-library");
-    let doc = unique_path("ir-render-cli-exclude-newer-precedence", "qmd");
-    let profile = unique_path("ir-render-cli-exclude-newer-precedence-profile", "R");
-    let quarto = unique_path("ir-render-cli-exclude-newer-precedence-quarto", "");
+    let cache_dir = temp_dir("ir-render-cli-exclude-newer-precedence-cache");
+    let library = temp_dir("ir-render-cli-exclude-newer-precedence-library");
+    let doc = temp_path("ir-render-cli-exclude-newer-precedence", "qmd");
+    let profile = temp_path("ir-render-cli-exclude-newer-precedence-profile", "R");
+    let quarto = temp_path("ir-render-cli-exclude-newer-precedence-quarto", "");
     fs::write(
         &doc,
         r#"---
@@ -952,18 +908,12 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         marker_text.lines().next(),
         Some("exclude-newer: 2024-03-01")
     );
-
-    let _ = fs::remove_file(&doc);
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&quarto);
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_empty_env_exclude_newer_overrides_frontmatter_with_latest() {
-    let cache_dir = unique_dir("ir-empty-env-exclude-newer-cache");
-    let script = unique_path("ir-empty-env-exclude-newer", "R");
+    let cache_dir = temp_dir("ir-empty-env-exclude-newer-cache");
+    let script = temp_path("ir-empty-env-exclude-newer", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -993,15 +943,12 @@ cat("ir.fixture=empty-env-exclude-newer\n")
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_future_env_exclude_newer_overrides_frontmatter_with_latest() {
-    let cache_dir = unique_dir("ir-future-env-exclude-newer-cache");
-    let script = unique_path("ir-future-env-exclude-newer", "R");
+    let cache_dir = temp_dir("ir-future-env-exclude-newer-cache");
+    let script = temp_path("ir-future-env-exclude-newer", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -1031,15 +978,12 @@ cat("ir.fixture=future-env-exclude-newer\n")
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_future_frontmatter_exclude_newer_resolves_latest() {
-    let cache_dir = unique_dir("ir-future-frontmatter-exclude-newer-cache");
-    let script = unique_path("ir-future-frontmatter-exclude-newer", "R");
+    let cache_dir = temp_dir("ir-future-frontmatter-exclude-newer-cache");
+    let script = temp_path("ir-future-frontmatter-exclude-newer", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -1068,19 +1012,16 @@ cat("ir.fixture=future-frontmatter-exclude-newer\n")
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn render_future_frontmatter_exclude_newer_resolves_latest() {
-    let cache_dir = unique_dir("ir-render-future-frontmatter-exclude-newer-cache");
-    let library = unique_dir("ir-render-future-frontmatter-exclude-newer-library");
-    let doc = unique_path("ir-render-future-frontmatter-exclude-newer", "qmd");
-    let profile = unique_path("ir-render-future-frontmatter-exclude-newer-profile", "R");
-    let quarto = unique_path("ir-render-future-frontmatter-exclude-newer-quarto", "");
+    let cache_dir = temp_dir("ir-render-future-frontmatter-exclude-newer-cache");
+    let library = temp_dir("ir-render-future-frontmatter-exclude-newer-library");
+    let doc = temp_path("ir-render-future-frontmatter-exclude-newer", "qmd");
+    let profile = temp_path("ir-render-future-frontmatter-exclude-newer-profile", "R");
+    let quarto = temp_path("ir-render-future-frontmatter-exclude-newer-quarto", "");
     fs::write(
         &doc,
         r#"---
@@ -1140,18 +1081,12 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
     );
-
-    let _ = fs::remove_file(&doc);
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&quarto);
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_github_ref_installs_github_package() {
-    let cache_dir = unique_dir("ir-github-ref-cache");
-    let script = unique_path("ir-github-ref", "R");
+    let cache_dir = temp_dir("ir-github-ref-cache");
+    let script = temp_path("ir-github-ref", "R");
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -1193,15 +1128,12 @@ cat("github.remote=", paste(
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=github-ref");
     assert_stdout_contains(&out, "github.remote=github/rstudio/reticulate");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_github_subdir_ref_installs_subdir_package() {
-    let cache_dir = unique_dir("ir-github-subdir-ref-cache");
-    let script = unique_path("ir-github-subdir-ref", "R");
+    let cache_dir = temp_dir("ir-github-subdir-ref-cache");
+    let script = temp_path("ir-github-subdir-ref", "R");
     let sha = "a7c16d1ea299853694af95b3cdd3b7ab3e97fb0e";
     fs::write(
         &script,
@@ -1253,15 +1185,12 @@ cat("github.remote=", paste(
         &out,
         "github.remote=github/r-lib/pkgdepends/tests/testthat/fixtures/foo",
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_preserves_transitive_source_refs() {
-    let cache_dir = unique_dir("ir-transitive-source-cache");
-    let package_dir = unique_dir("ir-transitive-source-packages");
+    let cache_dir = temp_dir("ir-transitive-source-cache");
+    let package_dir = temp_dir("ir-transitive-source-packages");
     let dep = write_r_source_package(&package_dir, "irdep", &[]);
     let parent = write_r_source_package(
         &package_dir,
@@ -1271,7 +1200,7 @@ fn run_frontmatter_preserves_transitive_source_refs() {
             format!("Remotes: irdep=local::{}", renviron_path(&dep)),
         ],
     );
-    let script = unique_path("ir-transitive-source", "R");
+    let script = temp_path("ir-transitive-source", "R");
     fs::write(
         &script,
         format!(
@@ -1302,18 +1231,14 @@ cat("ir.fixture=transitive-source\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=transitive-source");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&package_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_local_ref_reruns_resolution_when_package_changes() {
-    let cache_dir = unique_dir("ir-local-ref-cache");
-    let package_dir = unique_dir("ir-local-ref-packages");
+    let cache_dir = temp_dir("ir-local-ref-cache");
+    let package_dir = temp_dir("ir-local-ref-packages");
     let package = write_r_source_package(&package_dir, "irlocal", &[]);
-    let script = unique_path("ir-local-ref", "R");
+    let script = temp_path("ir-local-ref", "R");
     fs::write(
         &script,
         format!(
@@ -1362,18 +1287,14 @@ cat("irlocal.version=", as.character(packageVersion("irlocal")), "\n", sep = "")
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=local-ref");
     assert_stdout_contains(&out, "irlocal.version=0.0.2");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&package_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_local_ref_with_pak_params_installs_local_package() {
-    let cache_dir = unique_dir("ir-local-ref-params-cache");
-    let package_dir = unique_dir("ir-local-ref-params-packages");
+    let cache_dir = temp_dir("ir-local-ref-params-cache");
+    let package_dir = temp_dir("ir-local-ref-params-packages");
     let package = write_r_source_package(&package_dir, "irlocal", &[]);
-    let script = unique_path("ir-local-ref-params", "R");
+    let script = temp_path("ir-local-ref-params", "R");
     fs::write(
         &script,
         format!(
@@ -1399,18 +1320,14 @@ cat("ir.fixture=local-ref-params\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=local-ref-params");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&package_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_named_local_ref_installs_local_package() {
-    let cache_dir = unique_dir("ir-named-local-ref-cache");
-    let package_dir = unique_dir("ir-named-local-ref-packages");
+    let cache_dir = temp_dir("ir-named-local-ref-cache");
+    let package_dir = temp_dir("ir-named-local-ref-packages");
     let package = write_r_source_package(&package_dir, "irlocal", &[]);
-    let script = unique_path("ir-named-local-ref", "R");
+    let script = temp_path("ir-named-local-ref", "R");
     fs::write(
         &script,
         format!(
@@ -1436,18 +1353,14 @@ cat("ir.fixture=named-local-ref\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=named-local-ref");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&package_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_frontmatter_sequence_entry_preserves_space_containing_local_ref() {
-    let cache_dir = unique_dir("ir-local-ref-spaces-cache");
-    let package_dir = unique_dir("ir local ref spaces packages");
+    let cache_dir = temp_dir("ir-local-ref-spaces-cache");
+    let package_dir = temp_dir("ir local ref spaces packages");
     let package = write_r_source_package(&package_dir, "irlocal", &[]);
-    let script = unique_path("ir-local-ref-spaces", "R");
+    let script = temp_path("ir-local-ref-spaces", "R");
     fs::write(
         &script,
         format!(
@@ -1473,16 +1386,12 @@ cat("ir.fixture=local-ref-spaces\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=local-ref-spaces");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&package_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_latest_resolution_cache_marker_truncates_fractional_creation_time() {
-    let cache_dir = unique_dir("ir-latest-cache-fractional-time");
-    let profile = unique_path("ir-fractional-systime", "R");
+    let cache_dir = temp_dir("ir-latest-cache-fractional-time");
+    let profile = temp_path("ir-fractional-systime", "R");
     fs::write(
         &profile,
         "Sys.time <- function() as.POSIXct(1.9, origin = '1970-01-01', tz = 'UTC')\n",
@@ -1513,14 +1422,11 @@ fn run_latest_resolution_cache_marker_truncates_fractional_creation_time() {
     let marker_text = fs::read_to_string(&markers[0])
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()));
     assert_eq!(marker_text.lines().next(), Some("latest: 1"));
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
-    let cache_dir = unique_dir("ir-latest-cache-refresh");
+    let cache_dir = temp_dir("ir-latest-cache-refresh");
     let expr = "{ library(cli); cat('ir.fixture=latest-cache-refresh\\n') }";
 
     let out = ir()
@@ -1669,15 +1575,13 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
         "{} should record an existing library path",
         marker.display()
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_passes_rust_owned_cache_dir_to_resolver() {
-    let xdg_cache_home = unique_dir("ir-rust-owned-cache-xdg");
-    let renviron_cache = unique_dir("ir-rust-owned-cache-renviron");
-    let renviron = unique_path("ir-rust-owned-cache", "Renviron");
+    let xdg_cache_home = temp_dir("ir-rust-owned-cache-xdg");
+    let renviron_cache = temp_dir("ir-rust-owned-cache-renviron");
+    let renviron = temp_path("ir-rust-owned-cache", "Renviron");
     fs::write(
         &renviron,
         format!("R_USER_CACHE_DIR={}\n", renviron_path(&renviron_cache)),
@@ -1720,10 +1624,6 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
             .exists(),
         "R startup files should not redirect the resolver cache"
     );
-
-    let _ = fs::remove_file(&renviron);
-    let _ = fs::remove_dir_all(&renviron_cache);
-    let _ = fs::remove_dir_all(&xdg_cache_home);
 }
 
 fn resolver_probe_count(entered: &Path) -> usize {
@@ -1747,10 +1647,10 @@ fn only_resolution_marker_text(cache_dir: &Path) -> String {
 #[cfg(unix)]
 #[test]
 fn resolver_tooling_uses_compatible_user_library_packages() {
-    let cache_dir = unique_dir("ir-compatible-tooling-cache");
-    let user_library = unique_dir("ir-compatible-tooling-user-library");
-    let fake_load_marker = unique_path("ir-compatible-secretbase-loaded", "txt");
-    let profile = unique_path("ir-compatible-tooling-profile", "R");
+    let cache_dir = temp_dir("ir-compatible-tooling-cache");
+    let user_library = temp_dir("ir-compatible-tooling-user-library");
+    let fake_load_marker = temp_path("ir-compatible-secretbase-loaded", "txt");
+    let profile = temp_path("ir-compatible-tooling-profile", "R");
 
     fs::write(
         &profile,
@@ -1875,21 +1775,16 @@ utils::assignInNamespace("install.packages", function(...) {{
         fake_load_marker.exists(),
         "resolver should load compatible secretbase from R_LIBS_USER"
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&fake_load_marker);
-    let _ = fs::remove_dir_all(&user_library);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
-    let cache_dir = unique_dir("ir-ambient-tooling-cache");
-    let ambient_library = unique_dir("ir-ambient-tooling-user-library");
-    let fake_secretbase_load_marker = unique_path("ir-ambient-secretbase-loaded", "txt");
-    let fake_pillar_load_marker = unique_path("ir-ambient-pillar-loaded", "txt");
-    let profile = unique_path("ir-tooling-install-profile", "R");
+    let cache_dir = temp_dir("ir-ambient-tooling-cache");
+    let ambient_library = temp_dir("ir-ambient-tooling-user-library");
+    let fake_secretbase_load_marker = temp_path("ir-ambient-secretbase-loaded", "txt");
+    let fake_pillar_load_marker = temp_path("ir-ambient-pillar-loaded", "txt");
+    let profile = temp_path("ir-tooling-install-profile", "R");
 
     fs::write(
         &profile,
@@ -2078,18 +1973,12 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
         !fake_pillar_load_marker.exists(),
         "resolver should prune wrong-R-minor R_LIBS_USER even when private tooling is warm"
     );
-
-    let _ = fs::remove_file(&profile);
-    let _ = fs::remove_file(&fake_secretbase_load_marker);
-    let _ = fs::remove_file(&fake_pillar_load_marker);
-    let _ = fs::remove_dir_all(&ambient_library);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[test]
 fn run_reticulate_fixture_imports_python_module() {
     let script = fixture("run/reticulate.R");
-    let cache_dir = test_cache("ir-reticulate-cache");
+    let cache_dir = temp_cache("ir-reticulate-cache");
     let managed_reticulate = std::env::var_os("IR_TEST_RETICULATE_MANAGED").is_some();
 
     let mut cmd = ir();
@@ -2114,5 +2003,4 @@ fn run_reticulate_fixture_imports_python_module() {
     assert_stdout_contains(&out, "reticulate.lib_in_cache=true");
     assert_stdout_contains(&out, "reticulate.ephemeral=");
     assert_stdout_contains(&out, "reticulate.json={\"ok\": true}");
-    let _ = fs::remove_dir_all(&cache_dir);
 }

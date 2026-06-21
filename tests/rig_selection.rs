@@ -37,7 +37,7 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
     }
 
     let fixture_dir = fixture_copy("run", "ir-r-version-render-fixture");
-    let cache_dir = test_cache("ir-r-version-cache");
+    let cache_dir = temp_cache("ir-r-version-cache");
     for filename in ["r-version-select.qmd", "r-version-frontmatter.R"] {
         let path = fixture_dir.join(filename);
         let frontmatter = fs::read_to_string(&path).unwrap();
@@ -100,8 +100,6 @@ fn r_version_selection_covers_render_flag_and_run_frontmatter() {
 
     let _ = fs::remove_file(fixture_dir.join("r-version-select.html"));
     let _ = fs::remove_dir_all(fixture_dir.join("r-version-select_files"));
-    let _ = fs::remove_dir_all(&fixture_dir);
-    let _ = fs::remove_dir_all(&cache_dir);
 }
 
 #[cfg(unix)]
@@ -189,13 +187,13 @@ fn run_with_installed_r_versions(
     versions: &[(&str, &str)],
     args: &[&str],
 ) -> std::process::Output {
-    let cache_dir = unique_dir(&format!("{prefix}-cache"));
-    let bin_dir = unique_dir(&format!("{prefix}-bin"));
+    let cache_dir = temp_dir(&format!("{prefix}-cache"));
+    let bin_dir = temp_dir(&format!("{prefix}-bin"));
     let mut r_dirs = Vec::new();
     let mut rows = Vec::new();
 
     for (version, label) in versions {
-        let dir = unique_dir(&format!("{prefix}-{label}"));
+        let dir = temp_dir(&format!("{prefix}-{label}"));
         let binary = selected_r_binary(&dir, label);
         rows.push(format!(
             r#"{{"name":"{version}","version":"{version}","aliases":[],"binary":"{}"}}"#,
@@ -219,12 +217,6 @@ fn run_with_installed_r_versions(
         .args(args)
         .output()
         .unwrap();
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    for dir in r_dirs {
-        let _ = fs::remove_dir_all(dir);
-    }
 
     out
 }
@@ -276,10 +268,10 @@ fn run_with_r_version_selects_highest_matching_installed_r() {
 #[cfg(unix)]
 #[test]
 fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
-    let cache_dir = unique_dir("ir-exact-minor-missing-cache");
-    let bin_dir = unique_dir("ir-exact-minor-missing-bin");
-    let r43_dir = unique_dir("ir-exact-minor-missing-r43");
-    let r45_dir = unique_dir("ir-exact-minor-missing-r45");
+    let cache_dir = temp_dir("ir-exact-minor-missing-cache");
+    let bin_dir = temp_dir("ir-exact-minor-missing-bin");
+    let r43_dir = temp_dir("ir-exact-minor-missing-r43");
+    let r45_dir = temp_dir("ir-exact-minor-missing-r45");
 
     let r43_binary = selected_r_binary(&r43_dir, "r43");
     let r45_binary = selected_r_binary(&r45_dir, "r45");
@@ -317,20 +309,15 @@ fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
 
     assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
     assert_stderr_lacks(&out, "unexpected available");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r43_dir);
-    let _ = fs::remove_dir_all(&r45_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
-    let cache_dir = unique_dir("ir-exact-major-missing-cache");
-    let bin_dir = unique_dir("ir-exact-major-missing-bin");
-    let r3_dir = unique_dir("ir-exact-major-missing-r3");
-    let r5_dir = unique_dir("ir-exact-major-missing-r5");
+    let cache_dir = temp_dir("ir-exact-major-missing-cache");
+    let bin_dir = temp_dir("ir-exact-major-missing-bin");
+    let r3_dir = temp_dir("ir-exact-major-missing-r3");
+    let r5_dir = temp_dir("ir-exact-major-missing-r5");
 
     let r3_binary = selected_r_binary(&r3_dir, "r3");
     let r5_binary = selected_r_binary(&r5_dir, "r5");
@@ -368,18 +355,13 @@ fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
 
     assert_failure_contains(&out, &["R 4 is required", "Run `rig install 4`"]);
     assert_stderr_lacks(&out, "unexpected available");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r3_dir);
-    let _ = fs::remove_dir_all(&r5_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_missing_r_version_does_not_query_available_releases() {
-    let cache_dir = unique_dir("ir-r-version-missing-cache");
-    let bin_dir = unique_dir("ir-r-version-missing-bin");
+    let cache_dir = temp_dir("ir-r-version-missing-cache");
+    let bin_dir = temp_dir("ir-r-version-missing-bin");
 
     write_executable(
         &bin_dir.join("rig"),
@@ -414,18 +396,15 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
 
     assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
     assert_stderr_lacks(&out, "unexpected available");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_exclude_newer_selects_latest_available_minor_r() {
-    let cache_dir = unique_dir("ir-exclude-newer-r-cache");
-    let bin_dir = unique_dir("ir-exclude-newer-r-bin");
-    let r43_dir = unique_dir("ir-exclude-newer-r43");
-    let r44_dir = unique_dir("ir-exclude-newer-r44");
+    let cache_dir = temp_dir("ir-exclude-newer-r-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r-bin");
+    let r43_dir = temp_dir("ir-exclude-newer-r43");
+    let r44_dir = temp_dir("ir-exclude-newer-r44");
 
     let r43_binary = selected_r_binary(&r43_dir, "r43");
     let r44_binary = selected_r_binary(&r44_dir, "r44");
@@ -469,20 +448,15 @@ fn run_with_exclude_newer_selects_latest_available_minor_r() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=r43");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r43_dir);
-    let _ = fs::remove_dir_all(&r44_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
-    let cache_dir = unique_dir("ir-exclude-newer-r-release-date-cache");
-    let bin_dir = unique_dir("ir-exclude-newer-r-release-date-bin");
-    let r43_dir = unique_dir("ir-exclude-newer-r-release-date-r43");
-    let r44_dir = unique_dir("ir-exclude-newer-r-release-date-r44");
+    let cache_dir = temp_dir("ir-exclude-newer-r-release-date-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r-release-date-bin");
+    let r43_dir = temp_dir("ir-exclude-newer-r-release-date-r43");
+    let r44_dir = temp_dir("ir-exclude-newer-r-release-date-r44");
 
     let r43_binary = selected_r_binary(&r43_dir, "r43");
     let r44_binary = selected_r_binary(&r44_dir, "r44");
@@ -526,11 +500,6 @@ fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=r44");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r43_dir);
-    let _ = fs::remove_dir_all(&r44_dir);
 }
 
 #[cfg(unix)]
@@ -578,10 +547,10 @@ fn run_with_exclude_newer_selects_latest_installed_patch_within_minor() {
 #[cfg(unix)]
 #[test]
 fn run_with_exclude_newer_selects_r_4_0_for_2021_snapshot() {
-    let cache_dir = unique_dir("ir-exclude-newer-r40-cache");
-    let bin_dir = unique_dir("ir-exclude-newer-r40-bin");
-    let r40_dir = unique_dir("ir-exclude-newer-r40");
-    let r41_dir = unique_dir("ir-exclude-newer-r41");
+    let cache_dir = temp_dir("ir-exclude-newer-r40-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r40-bin");
+    let r40_dir = temp_dir("ir-exclude-newer-r40");
+    let r41_dir = temp_dir("ir-exclude-newer-r41");
 
     let r40_binary = selected_r_binary(&r40_dir, "r40");
     let r41_binary = selected_r_binary(&r41_dir, "r41");
@@ -625,21 +594,16 @@ fn run_with_exclude_newer_selects_r_4_0_for_2021_snapshot() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=r40");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r40_dir);
-    let _ = fs::remove_dir_all(&r41_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
-    let cache_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-cache");
-    let bin_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-bin");
-    let r46_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-r46");
-    let r47_dir = unique_dir("ir-exclude-newer-r-cache-fetch-date-r47");
-    let available_called = unique_path("ir-exclude-newer-r-cache-fetch-date-available", "txt");
+    let cache_dir = temp_dir("ir-exclude-newer-r-cache-fetch-date-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r-cache-fetch-date-bin");
+    let r46_dir = temp_dir("ir-exclude-newer-r-cache-fetch-date-r46");
+    let r47_dir = temp_dir("ir-exclude-newer-r-cache-fetch-date-r47");
+    let available_called = temp_path("ir-exclude-newer-r-cache-fetch-date-available", "txt");
 
     let r46_binary = selected_r_binary(&r46_dir, "r46");
     let r47_binary = selected_r_binary(&r47_dir, "r47");
@@ -701,8 +665,7 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
         cache.contains(&format!(r#""fetched_at": "{}""#, utc_today_string())),
         "{cache}"
     );
-
-    let _ = fs::remove_file(&available_called);
+    fs::remove_file(&available_called).unwrap();
     let out = run();
     assert_success(&out);
     assert_stdout_contains(&out, "selected=r47");
@@ -710,20 +673,14 @@ fn run_with_exclude_newer_after_metadata_fetch_caches_actual_fetch_date() {
         !available_called.exists(),
         "date-only exclude-newer should reuse refreshed minor-release cache"
     );
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&r46_dir);
-    let _ = fs::remove_dir_all(&r47_dir);
-    let _ = fs::remove_file(&available_called);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
-    let cache_dir = unique_dir("ir-env-rscript-exclude-newer-cache");
-    let bin_dir = unique_dir("ir-env-rscript-exclude-newer-bin");
-    let rscript_dir = unique_dir("ir-env-rscript-exclude-newer-r");
+    let cache_dir = temp_dir("ir-env-rscript-exclude-newer-cache");
+    let bin_dir = temp_dir("ir-env-rscript-exclude-newer-bin");
+    let rscript_dir = temp_dir("ir-env-rscript-exclude-newer-r");
 
     write_executable(
         &bin_dir.join("rig"),
@@ -754,19 +711,15 @@ fn run_with_ir_rscript_and_exclude_newer_skips_rig_selection() {
     assert_success(&out);
     assert_stdout_contains(&out, "selected=env-rscript");
     assert_stderr_lacks(&out, "unexpected rig");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn env_rscript_overrides_frontmatter_r_version_without_rig() {
-    let cache_dir = unique_dir("ir-env-rscript-frontmatter-r-version-cache");
-    let bin_dir = unique_dir("ir-env-rscript-frontmatter-r-version-bin");
-    let rscript_dir = unique_dir("ir-env-rscript-frontmatter-r-version-r");
-    let script = unique_path("ir-env-rscript-frontmatter-r-version", "R");
+    let cache_dir = temp_dir("ir-env-rscript-frontmatter-r-version-cache");
+    let bin_dir = temp_dir("ir-env-rscript-frontmatter-r-version-bin");
+    let rscript_dir = temp_dir("ir-env-rscript-frontmatter-r-version-r");
+    let script = temp_path("ir-env-rscript-frontmatter-r-version", "R");
 
     fs::write(&script, "#| r-version: \"4.4\"\ncat('ignored')\n").unwrap();
     write_executable(
@@ -788,21 +741,16 @@ fn env_rscript_overrides_frontmatter_r_version_without_rig() {
     assert_success(&out);
     assert_stdout_contains(&out, "selected=env-rscript");
     assert_stderr_lacks(&out, "unexpected rig");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn env_r_version_overrides_frontmatter_rscript() {
-    let cache_dir = unique_dir("ir-env-r-version-frontmatter-rscript-cache");
-    let bin_dir = unique_dir("ir-env-r-version-frontmatter-rscript-bin");
-    let rscript_dir = unique_dir("ir-env-r-version-frontmatter-rscript-r");
-    let rig_r_dir = unique_dir("ir-env-r-version-frontmatter-rscript-rig-r");
-    let script = unique_path("ir-env-r-version-frontmatter-rscript", "R");
+    let cache_dir = temp_dir("ir-env-r-version-frontmatter-rscript-cache");
+    let bin_dir = temp_dir("ir-env-r-version-frontmatter-rscript-bin");
+    let rscript_dir = temp_dir("ir-env-r-version-frontmatter-rscript-r");
+    let rig_r_dir = temp_dir("ir-env-r-version-frontmatter-rscript-rig-r");
+    let script = temp_path("ir-env-r-version-frontmatter-rscript", "R");
 
     let frontmatter_rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&frontmatter_rscript, "frontmatter-rscript");
@@ -841,21 +789,15 @@ fn env_r_version_overrides_frontmatter_rscript() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=env-r-version");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&rig_r_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn cli_rscript_overrides_env_r_version_and_frontmatter_r_version() {
-    let cache_dir = unique_dir("ir-cli-rscript-precedence-cache");
-    let bin_dir = unique_dir("ir-cli-rscript-precedence-bin");
-    let rscript_dir = unique_dir("ir-cli-rscript-precedence-r");
-    let script = unique_path("ir-cli-rscript-precedence", "R");
+    let cache_dir = temp_dir("ir-cli-rscript-precedence-cache");
+    let bin_dir = temp_dir("ir-cli-rscript-precedence-bin");
+    let rscript_dir = temp_dir("ir-cli-rscript-precedence-r");
+    let script = temp_path("ir-cli-rscript-precedence", "R");
 
     fs::write(&script, "#| r-version: \"4.4\"\ncat('ignored')\n").unwrap();
     write_executable(
@@ -879,20 +821,15 @@ fn cli_rscript_overrides_env_r_version_and_frontmatter_r_version() {
     assert_success(&out);
     assert_stdout_contains(&out, "selected=cli-rscript");
     assert_stderr_lacks(&out, "unexpected rig");
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn cli_r_version_overrides_env_rscript() {
-    let cache_dir = unique_dir("ir-cli-r-version-env-rscript-cache");
-    let bin_dir = unique_dir("ir-cli-r-version-env-rscript-bin");
-    let rscript_dir = unique_dir("ir-cli-r-version-env-rscript-r");
-    let rig_r_dir = unique_dir("ir-cli-r-version-env-rscript-rig-r");
+    let cache_dir = temp_dir("ir-cli-r-version-env-rscript-cache");
+    let bin_dir = temp_dir("ir-cli-r-version-env-rscript-bin");
+    let rscript_dir = temp_dir("ir-cli-r-version-env-rscript-r");
+    let rig_r_dir = temp_dir("ir-cli-r-version-env-rscript-rig-r");
 
     let env_rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&env_rscript, "env-rscript");
@@ -920,17 +857,12 @@ fn cli_r_version_overrides_env_rscript() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=cli-r-version");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&rig_r_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn cli_r_selection_conflict_errors() {
-    let rscript_dir = unique_dir("ir-cli-r-selection-conflict-r");
+    let rscript_dir = temp_dir("ir-cli-r-selection-conflict-r");
     let rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&rscript, "unused");
 
@@ -942,14 +874,12 @@ fn cli_r_selection_conflict_errors() {
         .unwrap();
 
     assert_failure_contains(&out, &["cannot set both `--r-version` and `--rscript`"]);
-
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn env_r_selection_conflict_errors() {
-    let rscript_dir = unique_dir("ir-env-r-selection-conflict-r");
+    let rscript_dir = temp_dir("ir-env-r-selection-conflict-r");
     let rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&rscript, "unused");
 
@@ -961,16 +891,14 @@ fn env_r_selection_conflict_errors() {
         .unwrap();
 
     assert_failure_contains(&out, &["cannot set both `IR_R_VERSION` and `IR_RSCRIPT`"]);
-
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn frontmatter_r_selection_conflict_errors() {
-    let cache_dir = unique_dir("ir-frontmatter-r-selection-conflict-cache");
-    let rscript_dir = unique_dir("ir-frontmatter-r-selection-conflict-r");
-    let script = unique_path("ir-frontmatter-r-selection-conflict", "R");
+    let cache_dir = temp_dir("ir-frontmatter-r-selection-conflict-cache");
+    let rscript_dir = temp_dir("ir-frontmatter-r-selection-conflict-r");
+    let script = temp_path("ir-frontmatter-r-selection-conflict", "R");
     let rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&rscript, "unused");
     fs::write(
@@ -995,18 +923,14 @@ fn frontmatter_r_selection_conflict_errors() {
         &out,
         &["frontmatter cannot set both `r-version` and `rscript`"],
     );
-
-    let _ = fs::remove_file(&script);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn cli_rscript_with_exclude_newer_uses_snapshot_without_rig_selection() {
-    let cache_dir = unique_dir("ir-cli-rscript-exclude-newer-cache");
-    let bin_dir = unique_dir("ir-cli-rscript-exclude-newer-bin");
-    let rscript_dir = unique_dir("ir-cli-rscript-exclude-newer-r");
+    let cache_dir = temp_dir("ir-cli-rscript-exclude-newer-cache");
+    let bin_dir = temp_dir("ir-cli-rscript-exclude-newer-bin");
+    let rscript_dir = temp_dir("ir-cli-rscript-exclude-newer-r");
 
     write_executable(
         &bin_dir.join("rig"),
@@ -1029,20 +953,16 @@ fn cli_rscript_with_exclude_newer_uses_snapshot_without_rig_selection() {
     assert_success(&out);
     assert_stdout_contains(&out, "selected=cli-rscript");
     assert_stderr_lacks(&out, "unexpected rig");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn render_cli_rscript_sets_quarto_r() {
-    let cache_dir = unique_dir("ir-render-cli-rscript-cache");
-    let rscript_dir = unique_dir("ir-render-cli-rscript-r");
-    let quarto_dir = unique_dir("ir-render-cli-rscript-quarto-dir");
-    let doc = unique_path("ir-render-cli-rscript", "qmd");
-    let observed = unique_path("ir-render-cli-rscript-quarto-r", "txt");
+    let cache_dir = temp_dir("ir-render-cli-rscript-cache");
+    let rscript_dir = temp_dir("ir-render-cli-rscript-r");
+    let quarto_dir = temp_dir("ir-render-cli-rscript-quarto-dir");
+    let doc = temp_path("ir-render-cli-rscript", "qmd");
+    let observed = temp_path("ir-render-cli-rscript-quarto-r", "txt");
 
     fs::write(&doc, "---\ntitle: rscript render\n---\n").unwrap();
     let rscript = rscript_dir.join("Rscript");
@@ -1075,19 +995,13 @@ fn render_cli_rscript_sets_quarto_r() {
         quarto_r.trim(),
         std::path::absolute(&rscript).unwrap().to_string_lossy()
     );
-
-    let _ = fs::remove_file(&doc);
-    let _ = fs::remove_file(&observed);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&rscript_dir);
-    let _ = fs::remove_dir_all(&quarto_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_releases() {
-    let cache_dir = unique_dir("ir-exclude-newer-missing-r-cache");
-    let bin_dir = unique_dir("ir-exclude-newer-missing-r-bin");
+    let cache_dir = temp_dir("ir-exclude-newer-missing-r-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-missing-r-bin");
 
     write_executable(
         &bin_dir.join("rig"),
@@ -1125,17 +1039,14 @@ fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_rel
         ],
     );
     assert_stderr_lacks(&out, "unexpected available");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_without_r_version_uses_rscript_on_path_when_rig_has_default() {
-    let cache_dir = unique_dir("ir-path-rscript-cache");
-    let bin_dir = unique_dir("ir-path-rscript-bin");
-    let rig_dir = unique_dir("ir-path-rscript-rig");
+    let cache_dir = temp_dir("ir-path-rscript-cache");
+    let bin_dir = temp_dir("ir-path-rscript-bin");
+    let rig_dir = temp_dir("ir-path-rscript-rig");
 
     let path_rscript = bin_dir.join("Rscript");
     write_executable(
@@ -1194,18 +1105,14 @@ fn run_without_r_version_uses_rscript_on_path_when_rig_has_default() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=path");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
-    let _ = fs::remove_dir_all(&rig_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn run_without_r_version_skips_non_executable_rscript_on_path() {
-    let cache_dir = unique_dir("ir-path-rscript-executable-cache");
-    let stale_dir = unique_dir("ir-path-rscript-stale-bin");
-    let bin_dir = unique_dir("ir-path-rscript-valid-bin");
+    let cache_dir = temp_dir("ir-path-rscript-executable-cache");
+    let stale_dir = temp_dir("ir-path-rscript-stale-bin");
+    let bin_dir = temp_dir("ir-path-rscript-valid-bin");
 
     fs::write(stale_dir.join("Rscript"), "not executable\n").unwrap();
     write_executable(
@@ -1243,18 +1150,14 @@ fn run_without_r_version_skips_non_executable_rscript_on_path() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=path");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&stale_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(unix)]
 #[test]
 fn render_without_r_version_pins_quarto_to_rscript_on_path() {
-    let cache_dir = unique_dir("ir-render-path-rscript-cache");
-    let bin_dir = unique_dir("ir-render-path-rscript-bin");
-    let doc = unique_path("ir-render-path-rscript", "qmd");
+    let cache_dir = temp_dir("ir-render-path-rscript-cache");
+    let bin_dir = temp_dir("ir-render-path-rscript-bin");
+    let doc = temp_path("ir-render-path-rscript", "qmd");
 
     let rscript = bin_dir.join("Rscript");
     write_executable(
@@ -1303,17 +1206,13 @@ fn render_without_r_version_pins_quarto_to_rscript_on_path() {
 
     assert_success(&out);
     assert_stdout_contains(&out, &format!("quarto_r={}", expected_rscript.display()));
-
-    let _ = fs::remove_file(&doc);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_without_r_version_uses_rscript_bat_on_path() {
-    let cache_dir = unique_dir("ir-path-rscript-bat-cache");
-    let bin_dir = unique_dir("ir-path-rscript-bat-bin");
+    let cache_dir = temp_dir("ir-path-rscript-bat-cache");
+    let bin_dir = temp_dir("ir-path-rscript-bat-bin");
 
     fs::write(
         bin_dir.join("Rscript.bat"),
@@ -1346,17 +1245,14 @@ fn run_without_r_version_uses_rscript_bat_on_path() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=bat");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_without_r_version_ignores_extensionless_rscript_on_path() {
-    let cache_dir = unique_dir("ir-path-rscript-extensionless-cache");
-    let stale_dir = unique_dir("ir-path-rscript-extensionless-stale");
-    let bin_dir = unique_dir("ir-path-rscript-extensionless-valid");
+    let cache_dir = temp_dir("ir-path-rscript-extensionless-cache");
+    let stale_dir = temp_dir("ir-path-rscript-extensionless-stale");
+    let bin_dir = temp_dir("ir-path-rscript-extensionless-valid");
 
     fs::write(stale_dir.join("Rscript"), "extensionless stub\r\n").unwrap();
     fs::write(
@@ -1395,18 +1291,14 @@ fn run_without_r_version_ignores_extensionless_rscript_on_path() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=bat");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&stale_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_without_r_version_skips_unsupported_pathext_rscript_on_path() {
-    let cache_dir = unique_dir("ir-path-rscript-unsupported-pathext-cache");
-    let stale_dir = unique_dir("ir-path-rscript-unsupported-pathext-stale");
-    let bin_dir = unique_dir("ir-path-rscript-unsupported-pathext-valid");
+    let cache_dir = temp_dir("ir-path-rscript-unsupported-pathext-cache");
+    let stale_dir = temp_dir("ir-path-rscript-unsupported-pathext-stale");
+    let bin_dir = temp_dir("ir-path-rscript-unsupported-pathext-valid");
 
     fs::write(stale_dir.join("Rscript.JS"), "WScript.Echo('stale')\r\n").unwrap();
     fs::write(
@@ -1446,18 +1338,14 @@ fn run_without_r_version_skips_unsupported_pathext_rscript_on_path() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=bat");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&stale_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_with_extended_rscript_command_skips_pathext_expansion() {
-    let cache_dir = unique_dir("ir-extended-rscript-command-cache");
-    let stale_dir = unique_dir("ir-extended-rscript-command-stale");
-    let bin_dir = unique_dir("ir-extended-rscript-command-valid");
+    let cache_dir = temp_dir("ir-extended-rscript-command-cache");
+    let stale_dir = temp_dir("ir-extended-rscript-command-stale");
+    let bin_dir = temp_dir("ir-extended-rscript-command-valid");
 
     fs::write(
         stale_dir.join("Rscript.bat.CMD"),
@@ -1508,17 +1396,13 @@ fn run_with_extended_rscript_command_skips_pathext_expansion() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=bat");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&stale_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_without_r_version_ignores_non_rscript_batch_targets() {
-    let cache_dir = unique_dir("ir-path-rscript-helper-target-cache");
-    let bin_dir = unique_dir("ir-path-rscript-helper-target-bin");
+    let cache_dir = temp_dir("ir-path-rscript-helper-target-cache");
+    let bin_dir = temp_dir("ir-path-rscript-helper-target-bin");
     let helper = bin_dir.join("helper.exe");
 
     fs::write(&helper, "not an executable\r\n").unwrap();
@@ -1557,18 +1441,15 @@ fn run_without_r_version_ignores_non_rscript_batch_targets() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=bat");
-
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn run_without_r_version_does_not_cache_unresolved_rscript_bat() {
-    let cache_dir = unique_dir("ir-path-rscript-bat-cache-miss");
-    let bin_dir = unique_dir("ir-path-rscript-bat-bin");
-    let library = unique_dir("ir-path-rscript-bat-library");
-    let resolver_marker = unique_path("ir-path-rscript-bat-resolver", "txt");
+    let cache_dir = temp_dir("ir-path-rscript-bat-cache-miss");
+    let bin_dir = temp_dir("ir-path-rscript-bat-bin");
+    let library = temp_dir("ir-path-rscript-bat-library");
+    let resolver_marker = temp_path("ir-path-rscript-bat-resolver", "txt");
     let resolver_script = bin_dir.join("resolve.ps1");
 
     fs::write(
@@ -1629,19 +1510,14 @@ fn run_without_r_version_does_not_cache_unresolved_rscript_bat() {
         2,
         "unresolved batch Rscript wrappers should not key the warm resolution cache"
     );
-
-    let _ = fs::remove_file(&resolver_marker);
-    let _ = fs::remove_dir_all(&library);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }
 
 #[cfg(windows)]
 #[test]
 fn render_without_r_version_pins_quarto_to_rscript_bat_target() {
-    let cache_dir = unique_dir("ir-render-rscript-bat-target-cache");
-    let bin_dir = unique_dir("ir-render-rscript-bat-target-bin");
-    let doc = unique_path("ir-render-rscript-bat-target", "qmd");
+    let cache_dir = temp_dir("ir-render-rscript-bat-target-cache");
+    let bin_dir = temp_dir("ir-render-rscript-bat-target-bin");
+    let doc = temp_path("ir-render-rscript-bat-target", "qmd");
     let target_rscript = PathBuf::from(rscript());
 
     if !target_rscript.is_file() {
@@ -1701,8 +1577,4 @@ fn render_without_r_version_pins_quarto_to_rscript_bat_target() {
 
     assert_success(&out);
     assert_stdout_contains(&out, &format!("quarto_r={}", expected_rscript.display()));
-
-    let _ = fs::remove_file(&doc);
-    let _ = fs::remove_dir_all(&cache_dir);
-    let _ = fs::remove_dir_all(&bin_dir);
 }

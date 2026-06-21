@@ -1,5 +1,10 @@
 #![allow(dead_code)]
 
+mod temp_path;
+
+#[allow(unused_imports)]
+pub(crate) use temp_path::{temp_cache, temp_dir, temp_path, TempPath};
+
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -139,26 +144,6 @@ pub(crate) fn assert_rx_help_snapshot(name: &str, args: &[&str]) {
     assert_eq!(actual, expected, "{args:?} changed {}", snapshot.display());
 }
 
-pub(crate) fn unique_path(prefix: &str, ext: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let id = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-    let mut path =
-        std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{id}", std::process::id()));
-    if !ext.is_empty() {
-        path.set_extension(ext);
-    }
-    path
-}
-
-pub(crate) fn unique_dir(prefix: &str) -> PathBuf {
-    let dir = unique_path(prefix, "");
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 #[cfg(target_os = "macos")]
 pub(crate) fn tree_contains_dir_named(root: &Path, name: &str) -> bool {
     let Ok(entries) = fs::read_dir(root) else {
@@ -227,25 +212,22 @@ pub(crate) fn copy_dir_files(source: &Path, destination: &Path) {
     }
 }
 
-pub(crate) fn fixture_copy(name: &str, prefix: &str) -> PathBuf {
+pub(crate) fn fixture_copy(name: &str, prefix: &str) -> TempPath {
     let source = fixture(name);
-    let destination = unique_dir(prefix);
+    let destination = temp_dir(prefix);
     copy_dir_files(&source, &destination);
 
     destination
 }
 
-pub(crate) fn docs_copy(prefix: &str) -> PathBuf {
+pub(crate) fn docs_copy(prefix: &str) -> TempPath {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = manifest_dir.join("docs");
     let (destination, _) = unique_dir_in(manifest_dir, prefix);
+    let destination = TempPath::new(destination);
     copy_dir_files(&source, &destination);
 
     destination
-}
-
-pub(crate) fn test_cache(prefix: &str) -> PathBuf {
-    unique_dir(prefix)
 }
 
 pub(crate) fn write_r_source_package(
