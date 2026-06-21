@@ -1884,6 +1884,179 @@ utils::assignInNamespace("install.packages", function(...) {{
 
 #[cfg(unix)]
 #[test]
+fn resolver_tooling_bootstraps_only_pak_with_install_packages() {
+    let cache_dir = unique_dir("ir-pak-tooling-cache");
+    let empty_library = unique_dir("ir-pak-tooling-empty-library");
+    let install_marker = unique_path("ir-pak-tooling-install", "txt");
+    let pak_marker = unique_path("ir-pak-tooling-pak", "txt");
+    let profile = unique_path("ir-pak-tooling-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+.libPaths(Sys.getenv("IR_TEST_EMPTY_LIB"))
+
+ir_test_write_pkg <- function(lib, pkg, namespace, code,
+                              built = as.character(getRversion())) {{
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+
+  built_field <- paste0(
+    "R ", built, "; ; 2026-01-01 00:00:00 UTC; ", .Platform$OS.type
+  )
+  description <- c(
+    Package = pkg,
+    Version = "0.0.1",
+    Title = pkg,
+    Description = paste0(pkg, "."),
+    License = "MIT",
+    Built = built_field
+  )
+
+  writeLines(paste(names(description), description, sep = ": "),
+             file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+  saveRDS(
+    list(
+      DESCRIPTION = description,
+      Built = list(
+        R = package_version(built),
+        Platform = "",
+        Date = "2026-01-01 00:00:00 UTC",
+        OStype = .Platform$OS.type
+      ),
+      Depends = NULL,
+      Imports = NULL,
+      LinkingTo = NULL,
+      Suggests = NULL
+    ),
+    file.path(path, "Meta", "package.rds")
+  )
+}}
+
+ir_test_pak_code <- paste(
+  "ir_test_write_pkg <- function(lib, pkg, namespace, code) {{",
+  "  path <- file.path(lib, pkg)",
+  "  dir.create(file.path(path, 'R'), recursive = TRUE, showWarnings = FALSE)",
+  "  description <- c(",
+  "    Package = pkg,",
+  "    Version = '0.0.1',",
+  "    Title = pkg,",
+  "    Description = paste0(pkg, '.'),",
+  "    License = 'MIT'",
+  "  )",
+  "  writeLines(paste(names(description), description, sep = ': '),",
+  "             file.path(path, 'DESCRIPTION'))",
+  "  writeLines(namespace, file.path(path, 'NAMESPACE'))",
+  "  writeLines(code, file.path(path, 'R', pkg))",
+  "}}",
+  "pkg_install <- function(refs, lib, upgrade = TRUE, ask = FALSE, dependencies = NA) {{",
+  paste0("  writeLines(as.character(refs), ", deparse({}), ")"),
+  "  for (ref in as.character(refs)) {{",
+  "    pkg <- sub('@.*$', '', ref)",
+  "    if (identical(pkg, 'renv')) {{",
+  "      ir_test_write_pkg(",
+  "        lib,",
+  "        'renv',",
+  "        'export(use)',",
+  "        paste(",
+  "          'use <- function(..., library, repos, attach, sandbox, isolate, verbose) {{',",
+  "          '  specs <- unlist(list(...), use.names = FALSE)',",
+  "          '  for (spec in specs) {{',",
+  "          '    pkg <- sub(\"@.*$\", \"\", spec)',",
+  "          '    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)',",
+  "          '  }}',",
+  "          '  invisible(TRUE)',",
+  "          '}}',",
+  "          sep = '\\n'",
+  "        )",
+  "      )",
+  "    }} else if (identical(pkg, 'secretbase')) {{",
+  "      ir_test_write_pkg(",
+  "        lib,",
+  "        'secretbase',",
+  "        'export(sha256)',",
+  "        \"sha256 <- function(x) 'privatehash'\"",
+  "      )",
+  "    }} else {{",
+  "      stop('unexpected pak install ref: ', ref, call. = FALSE)",
+  "    }}",
+  "  }}",
+  "  invisible(TRUE)",
+  "}}",
+  "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
+  "  refs <- as.character(refs)",
+  "  data.frame(",
+  "    status = rep('OK', length(refs)),",
+  "    ref = refs,",
+  "    package = sub('@.*$', '', refs),",
+  "    version = rep('0.0.1', length(refs)),",
+  "    type = rep('standard', length(refs)),",
+  "    priority = NA_character_,",
+  "    direct = TRUE,",
+  "    stringsAsFactors = FALSE",
+  "  )",
+  "}}",
+  sep = "\n"
+)
+
+utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
+  writeLines(as.character(pkgs), {})
+  if (!identical(as.character(pkgs), "pak"))
+    stop("resolver should bootstrap only pak with install.packages",
+         call. = FALSE)
+  ir_test_write_pkg(lib, "pak", "export(pkg_deps)\nexport(pkg_install)",
+                    ir_test_pak_code)
+}}, ns = "utils")
+"#,
+            r_string(&pak_marker),
+            r_string(&install_marker)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_EMPTY_LIB", &empty_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=pak-tooling\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=pak-tooling");
+
+    let install_packages = fs::read_to_string(&install_marker).unwrap();
+    assert_eq!(install_packages.trim(), "pak");
+
+    let pak_refs = fs::read_to_string(&pak_marker).unwrap();
+    assert!(pak_refs.lines().any(|line| line == "renv"), "{pak_refs}");
+    assert!(
+        pak_refs.lines().any(|line| line == "secretbase"),
+        "{pak_refs}"
+    );
+    assert!(!pak_refs.lines().any(|line| line == "pak"), "{pak_refs}");
+
+    let _ = fs::remove_file(&profile);
+    let _ = fs::remove_file(&install_marker);
+    let _ = fs::remove_file(&pak_marker);
+    let _ = fs::remove_dir_all(&empty_library);
+    let _ = fs::remove_dir_all(&cache_dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
     let cache_dir = unique_dir("ir-ambient-tooling-cache");
     let ambient_library = unique_dir("ir-ambient-tooling-user-library");
@@ -1973,8 +2146,38 @@ ir_test_write_pkg(
 ir_test_write_pkg(
   ir_test_private_lib,
   "pak",
-  "export(pkg_deps)",
+  "export(pkg_deps)\nexport(pkg_install)",
   paste(
+    "ir_test_write_pkg <- function(lib, pkg, namespace, code) {{",
+    "  path <- file.path(lib, pkg)",
+    "  dir.create(file.path(path, 'R'), recursive = TRUE, showWarnings = FALSE)",
+    "  description <- c(",
+    "    Package = pkg,",
+    "    Version = '0.0.1',",
+    "    Title = pkg,",
+    "    Description = paste0(pkg, '.'),",
+    "    License = 'MIT'",
+    "  )",
+    "  writeLines(paste(names(description), description, sep = ': '),",
+    "             file.path(path, 'DESCRIPTION'))",
+    "  writeLines(namespace, file.path(path, 'NAMESPACE'))",
+    "  writeLines(code, file.path(path, 'R', pkg))",
+    "}}",
+    "pkg_install <- function(refs, lib, upgrade = TRUE, ask = FALSE, dependencies = NA) {{",
+    "  invisible(requireNamespace('pillar', quietly = TRUE))",
+    "  for (ref in as.character(refs)) {{",
+    "    pkg <- sub('@.*$', '', ref)",
+    "    if (!identical(pkg, 'secretbase'))",
+    "      stop('unexpected pak install ref: ', ref, call. = FALSE)",
+    "    ir_test_write_pkg(",
+    "      lib,",
+    "      'secretbase',",
+    "      'export(sha256)',",
+    "      \"sha256 <- function(x) 'privatehash'\"",
+    "    )",
+    "  }}",
+    "  invisible(TRUE)",
+    "}}",
     "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
     "  invisible(requireNamespace('pillar', quietly = TRUE))",
     "  refs <- as.character(refs)",
@@ -1990,7 +2193,8 @@ ir_test_write_pkg(
     "  )",
     "}}",
     sep = "\n"
-  )
+  ),
+  built = as.character(getRversion())
 )
 ir_test_write_pkg(
   ir_test_private_lib,
@@ -2010,17 +2214,8 @@ ir_test_write_pkg(
 )
 
 utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
-  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
-  for (pkg in pkgs) {{
-    if (!identical(pkg, "secretbase"))
-      stop("unexpected resolver tooling package: ", pkg, call. = FALSE)
-    ir_test_write_pkg(
-      lib,
-      "secretbase",
-      "export(sha256)",
-      "sha256 <- function(x) 'privatehash'"
-    )
-  }}
+  stop("install.packages should not install resolver tooling when pak exists",
+       call. = FALSE)
 }}, ns = "utils")
 "#,
             r_string(&fake_secretbase_load_marker),

@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use time::macros::format_description;
 use time::{Date, OffsetDateTime};
 
+use crate::driver;
 use crate::python;
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
@@ -281,11 +282,10 @@ fn resolve_library_inner(
         });
     }
 
+    let driver = driver::cached_path(&cache_dir, "resolve.R", RESOLVE_DRIVER)?;
     let tmp = env::temp_dir();
-    let driver = unique_path(&tmp, "ir-resolve", "R");
     let result_file = unique_path(&tmp, "ir-libpath", "txt");
     let package_result_file = primary_package.then(|| unique_path(&tmp, "ir-package", "txt"));
-    fs::write(&driver, RESOLVE_DRIVER)?;
 
     let mut cmd = Command::new(rscript);
     cmd.arg(&driver)
@@ -332,7 +332,6 @@ fn resolve_library_inner(
         .wait()
         .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
 
-    let _ = fs::remove_file(&driver);
     let result = fs::read_to_string(&result_file).unwrap_or_default();
     let _ = fs::remove_file(&result_file);
     let package_result = package_result_file

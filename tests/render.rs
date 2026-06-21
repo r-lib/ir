@@ -9,6 +9,8 @@ use std::process::Command;
 
 #[cfg(unix)]
 use std::ffi::OsString;
+#[cfg(unix)]
+use std::path::Path;
 
 #[cfg(unix)]
 #[test]
@@ -330,6 +332,8 @@ fn render_quarto_uv_frontmatter_sets_quarto_python() {
     let rscript = bin_dir.join("Rscript");
     let quarto = bin_dir.join("quarto");
     let r_deps = unique_path("ir-render-uv-r-deps", "txt");
+    let r_driver = unique_path("ir-render-uv-r-driver", "txt");
+    let py_driver = unique_path("ir-render-uv-py-driver", "txt");
     let uv_packages = unique_path("ir-render-uv-packages", "txt");
     let uv_env = unique_path("ir-render-uv-env", "txt");
 
@@ -358,12 +362,14 @@ print("ok")
         &format!(
             "#!/bin/sh\n\
 if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  printf '%s\\n' \"$1\" > {}\n\
   cat > {}\n\
   mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
   printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
   exit 0\n\
 fi\n\
 if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  printf '%s\\n' \"$1\" > {}\n\
   if grep -q 'ir_ensure_python_pak' \"$1\"; then\n\
     echo python resolver should use shared tooling bootstrap >&2\n\
     exit 1\n\
@@ -384,7 +390,9 @@ if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
 fi\n\
 echo unexpected Rscript invocation >&2\n\
 exit 1\n",
+            r_driver.display(),
             r_deps.display(),
+            py_driver.display(),
             uv_packages.display(),
             uv_env.display(),
             uv_env.display(),
@@ -395,6 +403,20 @@ exit 1\n",
         &quarto,
         "#!/bin/sh\nprintf 'quarto_python=%s\\n' \"$QUARTO_PYTHON\"\nprintf 'reticulate_python=%s\\n' \"$RETICULATE_PYTHON\"\n",
     );
+    let expected_driver_dir = cache_dir.join("drivers");
+    let expected_r_driver = expected_driver_dir.join("resolve.R");
+    let expected_py_driver = expected_driver_dir.join("resolve-python.R");
+    fs::create_dir_all(&expected_driver_dir).unwrap();
+    fs::write(&expected_r_driver, "stale").unwrap();
+    fs::write(&expected_py_driver, "stale").unwrap();
+    fs::write(expected_driver_dir.join("resolve.R.version"), "old").unwrap();
+    fs::write(expected_driver_dir.join("resolve-python.R.version"), "old").unwrap();
+    let mut permissions = fs::metadata(&expected_r_driver).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&expected_r_driver, permissions).unwrap();
+    let mut permissions = fs::metadata(&expected_py_driver).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&expected_py_driver, permissions).unwrap();
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -417,6 +439,32 @@ exit 1\n",
         !deps.lines().any(|line| line == "reticulate"),
         "uv resolution should not inject user-library reticulate\n{deps}"
     );
+    let r_driver_path = Path::new(fs::read_to_string(&r_driver).unwrap().trim()).to_path_buf();
+    let py_driver_path = Path::new(fs::read_to_string(&py_driver).unwrap().trim()).to_path_buf();
+    assert_eq!(r_driver_path, expected_r_driver);
+    assert_eq!(py_driver_path, expected_py_driver);
+    assert!(fs::read_to_string(&r_driver_path)
+        .unwrap()
+        .contains("ir_ensure_tooling"));
+    assert!(fs::read_to_string(&py_driver_path)
+        .unwrap()
+        .contains("ir_ensure_tooling"));
+    assert_eq!(
+        fs::read_to_string(expected_driver_dir.join("resolve.R.version")).unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(
+        fs::read_to_string(expected_driver_dir.join("resolve-python.R.version")).unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(fs::metadata(&r_driver_path)
+        .unwrap()
+        .permissions()
+        .readonly());
+    assert!(fs::metadata(&py_driver_path)
+        .unwrap()
+        .permissions()
+        .readonly());
 
     let packages = fs::read_to_string(&uv_packages).unwrap();
     assert!(packages.contains("pandas"), "{packages}");
@@ -428,6 +476,8 @@ exit 1\n",
 
     let _ = fs::remove_file(&doc);
     let _ = fs::remove_file(&r_deps);
+    let _ = fs::remove_file(&r_driver);
+    let _ = fs::remove_file(&py_driver);
     let _ = fs::remove_file(&uv_packages);
     let _ = fs::remove_file(&uv_env);
     let _ = fs::remove_dir_all(&cache_dir);

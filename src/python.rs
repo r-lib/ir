@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::driver;
 use crate::spec::UvSpec;
 
 /// The Python resolution driver is embedded for the same reason as the R
@@ -25,10 +26,9 @@ pub(crate) fn resolve_env(
         return Ok(None);
     };
 
+    let driver = driver::cached_path(cache_dir, "resolve-python.R", PYTHON_RESOLVE_DRIVER)?;
     let tmp = std::env::temp_dir();
-    let driver = unique_path(&tmp, "ir-python", "R");
     let result_file = unique_path(&tmp, "ir-python", "txt");
-    fs::write(&driver, PYTHON_RESOLVE_DRIVER)?;
 
     let mut cmd = Command::new(rscript);
     cmd.arg(&driver)
@@ -61,7 +61,6 @@ pub(crate) fn resolve_env(
         .wait()
         .map_err(|e| format!("failed to wait for Python resolver: {e}"))?;
 
-    let _ = fs::remove_file(&driver);
     let result = fs::read_to_string(&result_file).unwrap_or_default();
     let _ = fs::remove_file(&result_file);
 

@@ -137,27 +137,25 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
   missing
 }
 
-ir_install_tooling_refs <- function(missing, refs, lib) {
-  if (!length(refs)) return(invisible())
+ir_install_tooling_with_pak <- function(missing, refs, lib) {
+  missing <- setdiff(missing, "pak")
+  if (!length(missing)) return(invisible())
 
-  ref_packages <- intersect(names(refs), missing)
-  if (!length(ref_packages)) return(invisible())
-
-  if ("pak" %in% ref_packages)
-    stop("`pak` cannot be installed through pak before pak is available",
-         call. = FALSE)
   if (!requireNamespace("pak", quietly = TRUE))
-    stop("package `pak` is required to install resolver tooling refs",
+    stop("package `pak` is required to install resolver tooling",
          call. = FALSE)
 
-  pak::pkg_install(unname(refs[ref_packages]), lib = lib, upgrade = TRUE,
+  install_refs <- vapply(missing, function(pkg) {
+    if (pkg %in% names(refs)) refs[[pkg]] else pkg
+  }, character(1), USE.NAMES = FALSE)
+
+  pak::pkg_install(install_refs, lib = lib, upgrade = TRUE,
                    ask = FALSE, dependencies = NA)
   invisible()
 }
 
-# Ensure resolver tooling is available. Missing plain packages are installed
-# with install.packages(); versioned/source refs are installed with pak after
-# pak itself is available.
+# Ensure resolver tooling is available. `pak` itself is bootstrapped with
+# install.packages(); every other tooling package is installed with pak.
 ir_ensure_tooling <- function(packages = ir_tooling_packages(),
                               refs = character(),
                               min_versions = character(),
@@ -173,13 +171,12 @@ ir_ensure_tooling <- function(packages = ir_tooling_packages(),
                                 min_versions = min_versions)
   if (!length(missing)) return(invisible())
 
-  plain_missing <- setdiff(missing, names(refs))
-  if (length(plain_missing))
-    utils::install.packages(plain_missing, lib = lib, repos = repos)
+  if ("pak" %in% missing)
+    utils::install.packages("pak", lib = lib, repos = repos)
 
   missing <- ir_missing_tooling(packages = packages, lib = lib,
                                 min_versions = min_versions)
-  ir_install_tooling_refs(missing, refs, lib)
+  ir_install_tooling_with_pak(missing, refs, lib)
 
   still_missing <- ir_missing_tooling(packages = packages, lib = lib,
                                       min_versions = min_versions)
