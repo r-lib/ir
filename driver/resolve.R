@@ -71,12 +71,6 @@ ir_cache_dir <- function() {
 # installed into a dedicated tooling library so users need not pre-install them.
 ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
-# Repository for tooling installs: always the latest PPM snapshot, independent
-# of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
-# reproducibility date. PPM serves binaries for Windows and macOS.
-ir_tooling_repos <- function()
-  c(CRAN = "https://packagemanager.posit.co/cran/latest")
-
 # Path to the tooling library, keyed by R version and platform so compiled
 # packages match the running R, mirroring renv's cache layout.
 ir_tooling_lib <- function(cache_dir = ir_cache_dir())
@@ -189,8 +183,85 @@ ir_ensure_tooling <- function(cache_dir = ir_cache_dir(),
 
 ## --- repositories -----------------------------------------------------------
 
+ir_linux_os_release <- function(path = "/etc/os-release") {
+  if (!file.exists(path)) return(character())
+
+  lines <- readLines(path, warn = FALSE)
+  values <- character()
+  for (line in lines) {
+    parts <- strsplit(line, "=", fixed = TRUE)[[1L]]
+    if (length(parts) < 2L) next
+    key <- parts[[1L]]
+    value <- paste(parts[-1L], collapse = "=")
+    values[[key]] <- gsub('^"|"$', "", value)
+  }
+  values
+}
+
+ir_linux_binary_distribution <- function() {
+  if (!identical(unname(Sys.info()[["sysname"]]), "Linux")) return(NULL)
+
+  os_release <- ir_linux_os_release()
+  id <- os_release[["ID"]]
+  ubuntu_codename <- os_release[["UBUNTU_CODENAME"]]
+  if (!is.null(ubuntu_codename) && nzchar(ubuntu_codename))
+    return(ubuntu_codename)
+
+  codename <- os_release[["VERSION_CODENAME"]]
+  if (identical(id, "ubuntu") || identical(id, "debian")) {
+    if (!is.null(codename) && nzchar(codename)) return(codename)
+  }
+
+  version <- os_release[["VERSION_ID"]]
+  if (is.null(id) || is.null(version) || !nzchar(version)) return(NULL)
+
+  major <- strsplit(version, ".", fixed = TRUE)[[1L]][[1L]]
+  if (identical(id, "centos")) return(paste0("centos", major))
+  if (id %in% c("rhel", "rocky", "almalinux")) return(paste0("rhel", major))
+  if (identical(id, "opensuse-leap"))
+    return(paste0("opensuse", gsub(".", "", version, fixed = TRUE)))
+
+  NULL
+}
+
+ir_ppm_cran_url <- function(snapshot) {
+  distro <- ir_linux_binary_distribution()
+  if (!is.null(distro))
+    return(sprintf("https://packagemanager.posit.co/cran/__linux__/%s/%s",
+                   distro, snapshot))
+
+  sprintf("https://packagemanager.posit.co/cran/%s", snapshot)
+}
+
+ir_ppm_snapshot_id <- function(url) {
+  prefix <- "https://packagemanager.posit.co/cran/"
+  if (!startsWith(url, prefix)) return(NULL)
+
+  snapshot <- sub("/+$", "", substring(url, nchar(prefix) + 1L))
+  if (!nzchar(snapshot) || grepl("/", snapshot, fixed = TRUE)) return(NULL)
+  snapshot
+}
+
+ir_linux_binary_repos <- function(repos) {
+  cran <- repos[["CRAN"]]
+  if (is.null(cran) || is.na(cran) || !nzchar(cran)) return(repos)
+
+  snapshot <- ir_ppm_snapshot_id(cran)
+  if (is.null(snapshot)) return(repos)
+
+  repos[["CRAN"]] <- ir_ppm_cran_url(snapshot)
+  repos
+}
+
+# Repository for tooling installs: always the latest PPM snapshot, independent
+# of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
+# reproducibility date. PPM serves binaries for Windows and macOS, and Linux
+# binary repositories are selected when the host distribution is known.
+ir_tooling_repos <- function()
+  c(CRAN = ir_ppm_cran_url("latest"))
+
 ir_ppm_snapshot_url <- function(exclude_newer) {
-  sprintf("https://packagemanager.posit.co/cran/%s", exclude_newer)
+  ir_ppm_cran_url(exclude_newer)
 }
 
 ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
@@ -199,9 +270,9 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 
   cran <- if (!is.null(repos)) repos[["CRAN"]] else NULL
   if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
-    c(CRAN = "https://cran.r-project.org")
+    c(CRAN = ir_ppm_cran_url("latest"))
   else
-    repos
+    ir_linux_binary_repos(repos)
 }
 
 ## --- resolution cache -------------------------------------------------------

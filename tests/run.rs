@@ -1626,6 +1626,138 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn run_uses_linux_binary_repos_for_default_and_snapshot_resolution() {
+    let latest_cache_dir = temp_dir("ir-linux-binary-repos-latest-cache");
+    let snapshot_cache_dir = temp_dir("ir-linux-binary-repos-snapshot-cache");
+    let profile = temp_path("ir-linux-binary-repos-profile", "R");
+    let latest_repos = temp_path("ir-linux-binary-repos-latest", "txt");
+    let snapshot_repos = temp_path("ir-linux-binary-repos-snapshot", "txt");
+    let distro = linux_distribution();
+
+    fs::write(
+        &profile,
+        r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code) {
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(
+    paste("Package:", pkg),
+    "Version: 0.0.1",
+    paste("Title:", pkg),
+    paste("Description:", pkg),
+    "License: MIT"
+  ), file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+}
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "secretbase",
+  "export(sha256)",
+  "sha256 <- function(x) paste(c('hash', nchar(paste(x, collapse = '\n'))), collapse = '-')"
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "pak",
+  "export(pkg_deps)",
+  paste(
+    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+    "  refs <- as.character(refs)",
+    "  data.frame(",
+    "    status = rep('OK', length(refs)),",
+    "    ref = refs,",
+    "    package = sub('@.*$', '', refs),",
+    "    version = rep('0.0.1', length(refs)),",
+    "    type = rep('standard', length(refs)),",
+    "    priority = NA_character_,",
+    "    direct = TRUE,",
+    "    stringsAsFactors = FALSE",
+    "  )",
+    "}",
+    sep = "\n"
+  )
+)
+ir_test_write_pkg(
+  ir_test_private_lib,
+  "renv",
+  "export(use)",
+  paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
+    "  writeLines(unname(repos[['CRAN']]), Sys.getenv('IR_TEST_REPOS_FILE'))",
+    "  specs <- unlist(list(...), use.names = FALSE)",
+    "  for (spec in specs) {",
+    "    pkg <- sub('@.*$', '', spec)",
+    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "  }",
+    "  invisible(TRUE)",
+    "}",
+    sep = "\n"
+  )
+)
+
+options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
+"#,
+    )
+    .unwrap();
+
+    let latest = ir()
+        .env("IR_CACHE_DIR", &latest_cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_REPOS_FILE", &latest_repos)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=linux-binary-latest\\n')",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&latest);
+    assert_stdout_contains(&latest, "ir.fixture=linux-binary-latest");
+    assert_eq!(
+        fs::read_to_string(&latest_repos).unwrap().trim(),
+        format!("https://packagemanager.posit.co/cran/__linux__/{distro}/latest")
+    );
+
+    let snapshot = ir()
+        .env("IR_CACHE_DIR", &snapshot_cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_REPOS_FILE", &snapshot_repos)
+        .args([
+            "run",
+            "--exclude-newer",
+            "2024-03-15",
+            "--isolated",
+            "--with",
+            "glue",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=linux-binary-snapshot\\n')",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&snapshot);
+    assert_stdout_contains(&snapshot, "ir.fixture=linux-binary-snapshot");
+    assert_eq!(
+        fs::read_to_string(&snapshot_repos).unwrap().trim(),
+        format!("https://packagemanager.posit.co/cran/__linux__/{distro}/2024-03-15")
+    );
+}
+
 fn resolver_probe_count(entered: &Path) -> usize {
     fs::read_to_string(entered)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", entered.display()))

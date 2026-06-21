@@ -109,6 +109,47 @@ pub(crate) fn renviron_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_distribution() -> String {
+    let os_release = fs::read_to_string("/etc/os-release").expect("failed to read /etc/os-release");
+    let mut id = String::new();
+    let mut ubuntu_codename = String::new();
+    let mut version_codename = String::new();
+    let mut version_id = String::new();
+
+    for line in os_release.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim_matches('"');
+        match key {
+            "UBUNTU_CODENAME" => ubuntu_codename = value.to_string(),
+            "VERSION_CODENAME" => version_codename = value.to_string(),
+            "ID" => id = value.to_string(),
+            "VERSION_ID" => version_id = value.to_string(),
+            _ => {}
+        }
+    }
+
+    if !ubuntu_codename.is_empty() {
+        return ubuntu_codename;
+    }
+    if (id == "ubuntu" || id == "debian") && !version_codename.is_empty() {
+        return version_codename;
+    }
+
+    let major = version_id
+        .split('.')
+        .next()
+        .expect("VERSION_ID should have a major version");
+    match id.as_str() {
+        "centos" => format!("centos{major}"),
+        "rhel" | "rocky" | "almalinux" => format!("rhel{major}"),
+        "opensuse-leap" => format!("opensuse{}", version_id.replace('.', "")),
+        _ => panic!("unsupported Linux distribution in /etc/os-release"),
+    }
+}
+
 #[cfg(unix)]
 pub(crate) fn r_string(path: &Path) -> String {
     serde_json::to_string(&renviron_path(path)).unwrap()

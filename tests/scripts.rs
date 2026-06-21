@@ -1,3 +1,8 @@
+mod support;
+
+#[cfg(target_os = "linux")]
+use support::{linux_distribution, rscript, temp_dir, temp_path};
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -230,6 +235,97 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
+    assert!(warm_script.contains("__linux__"));
+    assert!(warm_script.contains("VERSION_CODENAME"));
+    assert!(!warm_script.contains("https://cran.r-project.org"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_renv_cache_uses_linux_binary_repos_for_default_and_snapshot() {
+    let user_library = temp_dir("ir-warm-linux-binary-repos-library");
+    let profile = temp_path("ir-warm-linux-binary-repos-profile", "R");
+    let latest_repos = temp_path("ir-warm-linux-binary-repos-latest", "txt");
+    let snapshot_repos = temp_path("ir-warm-linux-binary-repos-snapshot", "txt");
+    let distro = linux_distribution();
+
+    fs::write(
+        &profile,
+        r#"
+ir_test_write_pkg <- function(lib, pkg, namespace, code) {
+  path <- file.path(lib, pkg)
+  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(
+    paste("Package:", pkg),
+    "Version: 0.0.1",
+    paste("Title:", pkg),
+    paste("Description:", pkg),
+    "License: MIT"
+  ), file.path(path, "DESCRIPTION"))
+  writeLines(namespace, file.path(path, "NAMESPACE"))
+  writeLines(code, file.path(path, "R", pkg))
+}
+
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "pak",
+  "export(ir_test_pak)",
+  "ir_test_pak <- function() TRUE"
+)
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "secretbase",
+  "export(ir_test_secretbase)",
+  "ir_test_secretbase <- function() TRUE"
+)
+ir_test_write_pkg(
+  Sys.getenv("R_LIBS_USER"),
+  "renv",
+  "export(use)",
+  paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
+    "  writeLines(unname(repos[['CRAN']]), Sys.getenv('IR_TEST_REPOS_FILE'))",
+    "  invisible(TRUE)",
+    "}",
+    sep = "\n"
+  )
+)
+"#,
+    )
+    .unwrap();
+
+    let latest = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("R_PROFILE_USER", &profile)
+        .env("R_LIBS_USER", &user_library)
+        .env("IR_TEST_REPOS_FILE", &latest_repos)
+        .args(["scripts/warm-renv-cache.R", "cli"])
+        .output()
+        .unwrap();
+    assert_success(&latest);
+    assert_eq!(
+        fs::read_to_string(&latest_repos).unwrap().trim(),
+        format!("https://packagemanager.posit.co/cran/__linux__/{distro}/latest")
+    );
+
+    let snapshot = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("R_PROFILE_USER", &profile)
+        .env("R_LIBS_USER", &user_library)
+        .env("IR_TEST_REPOS_FILE", &snapshot_repos)
+        .args([
+            "scripts/warm-renv-cache.R",
+            "--repos",
+            "https://packagemanager.posit.co/cran/2026-06-01",
+            "cli",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&snapshot);
+    assert_eq!(
+        fs::read_to_string(&snapshot_repos).unwrap().trim(),
+        format!("https://packagemanager.posit.co/cran/__linux__/{distro}/2026-06-01")
+    );
 }
 
 #[test]
