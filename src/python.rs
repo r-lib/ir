@@ -6,21 +6,19 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::spec::{RuntimeSpec, UvSpec};
+use crate::spec::UvSpec;
 
 /// The Python resolution driver is embedded for the same reason as the R
 /// package resolver: ir ships as one self-contained binary.
-const PYTHON_RESOLVE_DRIVER: &str = include_str!("../driver/resolve_python.R");
-
-pub(crate) fn prepare_render_spec(spec: &mut RuntimeSpec) {
-    if spec.uv.is_some() && !has_dependency(&spec.dependencies, "reticulate") {
-        spec.dependencies.push("reticulate".to_string());
-    }
-}
+const PYTHON_RESOLVE_DRIVER: &str = concat!(
+    include_str!("../driver/tooling.R"),
+    "\n",
+    include_str!("../driver/resolve_python.R")
+);
 
 pub(crate) fn resolve_env(
     rscript: &OsStr,
-    library: Option<&Path>,
+    cache_dir: &Path,
     uv: Option<&UvSpec>,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let Some(uv) = uv else {
@@ -38,10 +36,10 @@ pub(crate) fn resolve_env(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .env("IR_PYTHON_RESULT_FILE", &result_file)
-        .env_remove("IR_EXCLUDE_NEWER");
-    if let Some(library) = library {
-        cmd.env("R_LIBS", library);
-    }
+        .env("IR_CACHE_DIR", cache_dir)
+        .env_remove("IR_EXCLUDE_NEWER")
+        .env_remove("IR_UV_PYTHON_VERSION")
+        .env_remove("IR_UV_EXCLUDE_NEWER");
     if let Some(python_version) = &uv.python_version {
         cmd.env("IR_UV_PYTHON_VERSION", python_version);
     }
@@ -77,20 +75,6 @@ pub(crate) fn resolve_env(
     }
 
     Ok(Some(PathBuf::from(path)))
-}
-
-fn has_dependency(dependencies: &[String], package: &str) -> bool {
-    dependencies
-        .iter()
-        .any(|dependency| dependency_name(dependency) == package)
-}
-
-fn dependency_name(dependency: &str) -> &str {
-    let dependency = dependency.trim();
-    let end = dependency
-        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '.'))
-        .unwrap_or(dependency.len());
-    &dependency[..end]
 }
 
 fn uv_packages(uv: &UvSpec) -> Vec<String> {

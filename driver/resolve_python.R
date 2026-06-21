@@ -8,8 +8,14 @@ ir_python_env_main <- function() {
   if (is.na(python_version) || !nzchar(python_version)) python_version <- NULL
   if (is.na(exclude_newer) || !nzchar(exclude_newer)) exclude_newer <- NULL
 
-  if (!requireNamespace("reticulate", quietly = TRUE)) {
-    stop("package `reticulate` is required to resolve `uv` frontmatter",
+  ir_ensure_tooling(
+    packages = c("pak", "reticulate"),
+    refs = c(reticulate = "reticulate@>=1.41.0"),
+    min_versions = c(reticulate = "1.41.0")
+  )
+  if (!exists("uv_get_or_create_env", asNamespace("reticulate"),
+              inherits = FALSE)) {
+    stop("package `reticulate` must provide `uv_get_or_create_env()",
          call. = FALSE)
   }
 

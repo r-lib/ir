@@ -329,6 +329,7 @@ fn render_quarto_uv_frontmatter_sets_quarto_python() {
     let fake_python = bin_dir.join("python");
     let rscript = bin_dir.join("Rscript");
     let quarto = bin_dir.join("quarto");
+    let r_deps = unique_path("ir-render-uv-r-deps", "txt");
     let uv_packages = unique_path("ir-render-uv-packages", "txt");
     let uv_env = unique_path("ir-render-uv-env", "txt");
 
@@ -357,12 +358,24 @@ print("ok")
         &format!(
             "#!/bin/sh\n\
 if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
-  cat > /dev/null\n\
+  cat > {}\n\
   mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
   printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
   exit 0\n\
 fi\n\
 if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  if grep -q 'ir_ensure_python_pak' \"$1\"; then\n\
+    echo python resolver should use shared tooling bootstrap >&2\n\
+    exit 1\n\
+  fi\n\
+  if grep -q 'ir_ensure_python_tooling' \"$1\"; then\n\
+    echo python resolver should add reticulate through shared tooling >&2\n\
+    exit 1\n\
+  fi\n\
+  if ! grep -q 'ir_ensure_tooling' \"$1\"; then\n\
+    echo python resolver should include shared tooling bootstrap >&2\n\
+    exit 1\n\
+  fi\n\
   cat > {}\n\
   printf 'python_version=%s\\n' \"${{IR_UV_PYTHON_VERSION:-}}\" > {}\n\
   printf 'exclude_newer=%s\\n' \"${{IR_UV_EXCLUDE_NEWER:-}}\" >> {}\n\
@@ -371,6 +384,7 @@ if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
 fi\n\
 echo unexpected Rscript invocation >&2\n\
 exit 1\n",
+            r_deps.display(),
             uv_packages.display(),
             uv_env.display(),
             uv_env.display(),
@@ -398,6 +412,12 @@ exit 1\n",
         &format!("reticulate_python={}", fake_python.display()),
     );
 
+    let deps = fs::read_to_string(&r_deps).unwrap();
+    assert!(
+        !deps.lines().any(|line| line == "reticulate"),
+        "uv resolution should not inject user-library reticulate\n{deps}"
+    );
+
     let packages = fs::read_to_string(&uv_packages).unwrap();
     assert!(packages.contains("pandas"), "{packages}");
     assert!(packages.contains("jupyter"), "{packages}");
@@ -407,7 +427,81 @@ exit 1\n",
     assert!(env.contains("exclude_newer=2026-06-01"), "{env}");
 
     let _ = fs::remove_file(&doc);
+    let _ = fs::remove_file(&r_deps);
     let _ = fs::remove_file(&uv_packages);
+    let _ = fs::remove_file(&uv_env);
+    let _ = fs::remove_dir_all(&cache_dir);
+    let _ = fs::remove_dir_all(&bin_dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_uv_frontmatter_clears_ambient_internal_uv_env() {
+    let cache_dir = unique_dir("ir-render-uv-env-cache");
+    let bin_dir = unique_dir("ir-render-uv-env-bin");
+    let doc = unique_path("ir-render-uv-env", "qmd");
+    let fake_python = bin_dir.join("python");
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+    let uv_env = unique_path("ir-render-uv-env-observed", "txt");
+
+    fs::write(
+        &doc,
+        r#"---
+title: uv render env
+format: html
+jupyter: python3
+uv:
+  packages:
+    - pandas
+---
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_python, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  printf 'python_version=%s\\n' \"${{IR_UV_PYTHON_VERSION:-}}\" > {}\n\
+  printf 'exclude_newer=%s\\n' \"${{IR_UV_EXCLUDE_NEWER:-}}\" >> {}\n\
+  printf '%s\\n' {} > \"$IR_PYTHON_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+            uv_env.display(),
+            uv_env.display(),
+            fake_python.display()
+        ),
+    );
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .env("IR_UV_PYTHON_VERSION", "9.99")
+        .env("IR_UV_EXCLUDE_NEWER", "1999-01-01")
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let env = fs::read_to_string(&uv_env).unwrap();
+    assert!(env.contains("python_version=\n"), "{env}");
+    assert!(env.contains("exclude_newer=\n"), "{env}");
+
+    let _ = fs::remove_file(&doc);
     let _ = fs::remove_file(&uv_env);
     let _ = fs::remove_dir_all(&cache_dir);
     let _ = fs::remove_dir_all(&bin_dir);

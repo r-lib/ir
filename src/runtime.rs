@@ -19,7 +19,11 @@ use crate::spec::RuntimeSpec;
 
 /// The R resolution driver, embedded at compile time so `ir` ships as one
 /// self-contained binary while the source stays editable as real R.
-const RESOLVE_DRIVER: &str = include_str!("../driver/resolve.R");
+const RESOLVE_DRIVER: &str = concat!(
+    include_str!("../driver/tooling.R"),
+    "\n",
+    include_str!("../driver/resolve.R")
+);
 
 /// Resolve dependencies for `source`, then run it against the resulting
 /// library. Exits the process with the program's own exit code.
@@ -69,12 +73,12 @@ pub(crate) fn cmd_render(
     apply_exclude_newer_override(&mut spec, exclude_newer)?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
-    python::prepare_render_spec(&mut spec);
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
     let library = resolve_library(&rscript, &spec)?;
-    let python = python::resolve_env(&rscript, library.as_deref(), spec.uv.as_ref())?;
+    let cache_dir = ir_cache_dir()?;
+    let python = python::resolve_env(&rscript, &cache_dir, spec.uv.as_ref())?;
     let code = quarto::run(
         &rscript,
         library.as_deref(),

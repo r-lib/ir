@@ -61,6 +61,7 @@ Set `IR_QUARTO` to use a specific Quarto executable.
 Use a top-level `uv:` key to ask `ir render` for a Python environment before launching Quarto.
 `ir` resolves the environment with `reticulate:::uv_get_or_create_env()`, injects `jupyter`, and passes the resulting Python executable to Quarto with `QUARTO_PYTHON`.
 It also sets `RETICULATE_PYTHON` for knitr documents that use reticulate.
+Python environment resolution uses `ir`'s private reticulate tooling, not any reticulate version declared by the document under `ir.packages`.
 
 ```yaml
 ---
