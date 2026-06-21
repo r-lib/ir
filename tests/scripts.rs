@@ -238,11 +238,12 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("__linux__"));
     assert!(warm_script.contains("VERSION_CODENAME"));
     assert!(!warm_script.contains("https://cran.r-project.org"));
+    assert!(!warm_script.contains("default_repos"));
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn warm_renv_cache_uses_linux_binary_repos_for_default_and_snapshot() {
+fn warm_renv_cache_uses_linux_binary_repos_for_ambient_ppm_and_snapshot() {
     let user_library = temp_dir("ir-warm-linux-binary-repos-library");
     let profile = temp_path("ir-warm-linux-binary-repos-profile", "R");
     let latest_repos = temp_path("ir-warm-linux-binary-repos-latest", "txt");
@@ -290,6 +291,8 @@ ir_test_write_pkg(
     sep = "\n"
   )
 )
+
+options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 "#,
     )
     .unwrap();

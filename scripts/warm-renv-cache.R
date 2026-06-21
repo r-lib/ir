@@ -2,9 +2,11 @@
 
 args <- commandArgs(TRUE)
 repos <- NULL
+explicit_repos <- FALSE
 
 if (length(args) >= 2L && identical(args[[1L]], "--repos")) {
   repos <- args[[2L]]
+  explicit_repos <- TRUE
   args <- args[-c(1L, 2L)]
 }
 
@@ -80,16 +82,14 @@ linux_binary_repos <- function(repos) {
   repos
 }
 
-tooling_repos <- c(CRAN = ppm_cran_url("latest"))
-default_repos <- c(CRAN = ppm_cran_url("latest"))
-if (is.null(repos)) {
-  repos <- default_repos
-} else {
-  repos <- c(CRAN = repos)
-}
+tooling_repos <- linux_binary_repos(
+  c(CRAN = "https://packagemanager.posit.co/cran/latest")
+)
+repos <- if (is.null(repos)) getOption("repos") else c(CRAN = repos)
 repos <- linux_binary_repos(repos)
 
-Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+if (explicit_repos)
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
 options(repos = repos, renv.consent = TRUE)
 
 r_libs_user <- Sys.getenv("R_LIBS_USER", unset = "")

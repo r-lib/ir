@@ -258,7 +258,7 @@ ir_linux_binary_repos <- function(repos) {
 # reproducibility date. PPM serves binaries for Windows and macOS, and Linux
 # binary repositories are selected when the host distribution is known.
 ir_tooling_repos <- function()
-  c(CRAN = ir_ppm_cran_url("latest"))
+  ir_linux_binary_repos(c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 
 ir_ppm_snapshot_url <- function(exclude_newer) {
   ir_ppm_cran_url(exclude_newer)
@@ -270,7 +270,7 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 
   cran <- if (!is.null(repos)) repos[["CRAN"]] else NULL
   if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
-    c(CRAN = ir_ppm_cran_url("latest"))
+    c(CRAN = "https://cran.r-project.org")
   else
     ir_linux_binary_repos(repos)
 }

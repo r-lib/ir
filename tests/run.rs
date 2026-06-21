@@ -1628,7 +1628,7 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn run_uses_linux_binary_repos_for_default_and_snapshot_resolution() {
+fn run_uses_linux_binary_repos_for_ambient_ppm_and_snapshot_resolution() {
     let latest_cache_dir = temp_dir("ir-linux-binary-repos-latest-cache");
     let snapshot_cache_dir = temp_dir("ir-linux-binary-repos-snapshot-cache");
     let profile = temp_path("ir-linux-binary-repos-profile", "R");
