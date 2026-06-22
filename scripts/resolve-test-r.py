@@ -91,7 +91,7 @@ def rscript_for_binary(binary: str) -> str:
 def release_metadata(rscript: str) -> tuple[str, str, str]:
     output = run_rscript(
         rscript,
-        ["--vanilla", "-"],
+        ["-"],
         # fmt: r
         stdin="""
             rscript <- normalizePath(

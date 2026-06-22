@@ -31,6 +31,14 @@ pub(crate) fn paths(
     exclude_newer: Option<&str>,
     quarto_render: bool,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
+    // Linux binary repository selection is owned by the R resolver because it
+    // depends on the distro-specific PPM URL selected there. Let Linux runs
+    // enter the resolver so the R-side marker key can include that distro
+    // without duplicating OS-release parsing in Rust.
+    if cfg!(target_os = "linux") {
+        return Ok(None);
+    }
+
     if !dependencies
         .iter()
         .all(|dependency| is_standard_ref(dependency))
@@ -391,6 +399,7 @@ mod tests {
         path
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn runtime_selection_env_changes_resolution_marker() {
         let _guard = ENV_LOCK
@@ -473,18 +482,25 @@ mod tests {
 
         for dependency in ["cli", "cli@3.6.6", "cli@>=3.6.6"] {
             let dependencies = vec![dependency.to_string()];
-            assert!(
-                paths(
-                    &cache_dir,
-                    rscript.as_os_str(),
-                    &dependencies,
-                    Some("2026-06-01"),
-                    false
-                )
-                .unwrap()
-                .is_some(),
-                "{dependency} should use a warm resolution marker",
-            );
+            let marker = paths(
+                &cache_dir,
+                rscript.as_os_str(),
+                &dependencies,
+                Some("2026-06-01"),
+                false,
+            )
+            .unwrap();
+            if cfg!(target_os = "linux") {
+                assert!(
+                    marker.is_none(),
+                    "{dependency} should let the R resolver own Linux cache markers",
+                );
+            } else {
+                assert!(
+                    marker.is_some(),
+                    "{dependency} should use a warm resolution marker",
+                );
+            }
         }
 
         let _ = fs::remove_dir_all(&dir);

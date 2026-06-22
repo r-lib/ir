@@ -244,6 +244,7 @@ fn warm_renv_cache_uses_ppm_latest_for_default_repos_and_rewrites_ppm_snapshots(
     let user_library = temp_dir("ir-warm-linux-binary-repos-library");
     let profile = temp_path("ir-warm-linux-binary-repos-profile", "R");
     let default_repos = temp_path("ir-warm-linux-binary-repos-default", "txt");
+    let default_override = temp_path("ir-warm-linux-binary-repos-default-override", "txt");
     let latest_repos = temp_path("ir-warm-linux-binary-repos-latest", "txt");
     let dated_repos = temp_path("ir-warm-linux-binary-repos-dated", "txt");
     let snapshot_repos = temp_path("ir-warm-linux-binary-repos-snapshot", "txt");
@@ -298,6 +299,9 @@ ir_test_write_pkg(
   paste(
     "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
     "  writeLines(paste(names(repos), unname(repos), sep = '='), Sys.getenv('IR_TEST_REPOS_FILE'))",
+    "  override_file <- Sys.getenv('IR_TEST_OVERRIDE_FILE', unset = '')",
+    "  if (nzchar(override_file))",
+    "    writeLines(Sys.getenv('RENV_CONFIG_REPOS_OVERRIDE', unset = ''), override_file)",
     "  options_file <- Sys.getenv('IR_TEST_OPTIONS_FILE', unset = '')",
     "  if (nzchar(options_file)) {",
     "    writeLines(c(",
@@ -344,6 +348,8 @@ if (nzchar(ir_test_download_method))
         .env("R_LIBS_USER", &user_library)
         .env("IR_TEST_PROFILE_REPOS", "@CRAN@")
         .env("IR_TEST_REPOS_FILE", &default_repos)
+        .env("IR_TEST_OVERRIDE_FILE", &default_override)
+        .env("RENV_CONFIG_REPOS_OVERRIDE", "https://stale.example.test")
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
@@ -352,6 +358,7 @@ if (nzchar(ir_test_download_method))
         read_repos(&default_repos),
         format!("CRAN={}", expected_ppm_latest_url())
     );
+    assert_eq!(read_repos(&default_override), "");
 
     let latest = Command::new(rscript())
         .current_dir(repo_root())
@@ -757,7 +764,7 @@ fn test_r_metadata_resolution_is_shared() {
     assert!(helper_text.contains("stdin=\"\"\""));
     assert!(helper_text.contains("write.dcf"));
     assert!(helper_text.contains("from email.parser import Parser"));
-    assert!(helper_text.contains("\"--vanilla\""));
+    assert!(!helper_text.contains("\"--vanilla\""));
     assert!(!helper_text.contains("\"--slave\""));
     assert!(!helper_text.contains("cat(sprintf"));
     assert!(!helper_text.contains("def output_field"));
@@ -852,7 +859,7 @@ exit 99
         format!(
             r#"#!/usr/bin/env sh
 set -eu
-if [ "$1" = "--vanilla" ] && [ "$2" = "-" ]; then
+if [ "$#" -eq 1 ] && [ "$1" = "-" ]; then
   script="$(cat)"
   printf '%s\n' "$script" | grep -q 'write[.]dcf' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
   printf '%s\n' "$script" | grep -q 'width *= *100000' || {{ echo "metadata script should disable DCF wrapping" >&2; exit 98; }}

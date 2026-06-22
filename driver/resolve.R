@@ -349,10 +349,10 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 
 ## --- resolution cache -------------------------------------------------------
 
-# Legacy fallback key identifying a resolution request when Rust does not pass
-# IR_RESOLUTION_MARKER. Normal CLI runs compute the marker path in Rust so warm
-# caches can return before this R resolver is launched. Latest resolution keeps
-# a stable key and stores the creation time in the marker value.
+# Fallback key identifying a resolution request when Rust does not pass
+# IR_RESOLUTION_MARKER. Linux uses this R-side key so distro-specific PPM
+# repository selection stays in one layer. Latest resolution keeps a stable key
+# and stores the creation time in the marker value.
 ir_input_key <- function(deps,
                          rversion      = getRversion(),
                          platform      = ir_cache_platform(),

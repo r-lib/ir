@@ -165,8 +165,7 @@ repos <- if (!is.null(snapshot)) {
   default_repos(c(CRAN = repos))
 }
 
-if (explicit_repos)
-  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
 options(repos = repos, renv.consent = TRUE)
 configure_ppm_user_agent(repos)
 configure_renv_cache_prefix()

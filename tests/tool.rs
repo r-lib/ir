@@ -834,7 +834,7 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
     assert_stdout_contains(&out, "stats.attached=false");
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 #[test]
 fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
     let cache_dir = temp_dir("ir-warm-tool-install-cache");
