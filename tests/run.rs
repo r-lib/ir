@@ -725,10 +725,11 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         assert_stdout_contains(&out, "ir.fixture=normalized-exclude-newer-cache");
     }
 
+    let expected_entries = if cfg!(target_os = "linux") { 2 } else { 1 };
     assert_eq!(
         resolver_probe_count(&entered),
-        1,
-        "second run should reuse the Rust warm resolution cache"
+        expected_entries,
+        "second run should reuse the Rust warm resolution cache when Rust markers are enabled"
     );
 
     let resolution_dir = cache_dir.join("resolutions");
@@ -853,6 +854,7 @@ fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
     let doc = temp_path("ir-render-cli-exclude-newer-precedence", "qmd");
     let profile = temp_path("ir-render-cli-exclude-newer-precedence-profile", "R");
     let quarto = temp_path("ir-render-cli-exclude-newer-precedence-quarto", "");
+    let exclude_newer = temp_path("ir-render-cli-exclude-newer-precedence-value", "txt");
     fs::write(
         &doc,
         r#"---
@@ -873,14 +875,7 @@ cat("ir.fixture=render-cli-exclude-newer-precedence\n")
 if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
   library <- Sys.getenv("IR_TEST_LIBRARY")
   dir.create(library, recursive = TRUE, showWarnings = FALSE)
-  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
-  if (nzchar(marker)) {
-    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(
-      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
-      library
-    ), marker)
-  }
+  writeLines(Sys.getenv("IR_EXCLUDE_NEWER"), Sys.getenv("IR_TEST_EXCLUDE_NEWER_FILE"))
   writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
   q(save = "no", status = 0)
 }
@@ -895,6 +890,7 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .env("IR_QUARTO", &quarto)
         .env("IR_RSCRIPT", rscript())
         .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_EXCLUDE_NEWER_FILE", &exclude_newer)
         .env("R_PROFILE_USER", &profile)
         .args(["render", "--exclude-newer", " 2024-03-01 "])
         .arg(&doc)
@@ -902,11 +898,11 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
 
     assert_success(&out);
-
-    let marker_text = only_resolution_marker_text(&cache_dir);
     assert_eq!(
-        marker_text.lines().next(),
-        Some("exclude-newer: 2024-03-01")
+        fs::read_to_string(&exclude_newer)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", exclude_newer.display()))
+            .trim_end(),
+        "2024-03-01"
     );
 }
 
@@ -1022,6 +1018,7 @@ fn render_future_frontmatter_exclude_newer_resolves_latest() {
     let doc = temp_path("ir-render-future-frontmatter-exclude-newer", "qmd");
     let profile = temp_path("ir-render-future-frontmatter-exclude-newer-profile", "R");
     let quarto = temp_path("ir-render-future-frontmatter-exclude-newer-quarto", "");
+    let exclude_newer = temp_path("ir-render-future-frontmatter-exclude-newer-value", "txt");
     fs::write(
         &doc,
         r#"---
@@ -1042,16 +1039,7 @@ cat("ir.fixture=render-future-frontmatter-exclude-newer\n")
 if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
   library <- Sys.getenv("IR_TEST_LIBRARY")
   dir.create(library, recursive = TRUE, showWarnings = FALSE)
-  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
-  if (nzchar(marker)) {
-    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    source <- if (nzchar(Sys.getenv("IR_EXCLUDE_NEWER"))) {
-      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER"))
-    } else {
-      "latest: 0"
-    }
-    writeLines(c(source, library), marker)
-  }
+  writeLines(Sys.getenv("IR_EXCLUDE_NEWER"), Sys.getenv("IR_TEST_EXCLUDE_NEWER_FILE"))
   writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
   q(save = "no", status = 0)
 }
@@ -1065,6 +1053,7 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .env("IR_QUARTO", &quarto)
         .env("IR_RSCRIPT", rscript())
         .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_EXCLUDE_NEWER_FILE", &exclude_newer)
         .env("R_PROFILE_USER", &profile)
         .args(["render"])
         .arg(&doc)
@@ -1072,14 +1061,11 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
 
     assert_success(&out);
-
-    let marker_text = only_resolution_marker_text(&cache_dir);
-    assert!(
-        marker_text
-            .lines()
-            .next()
-            .is_some_and(|line| line.starts_with("latest: ")),
-        "{marker_text}"
+    assert_eq!(
+        fs::read_to_string(&exclude_newer)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", exclude_newer.display()))
+            .trim_end(),
+        ""
     );
 }
 

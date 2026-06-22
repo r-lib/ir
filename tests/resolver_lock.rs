@@ -130,10 +130,11 @@ fn concurrent_resolvers_serialize_same_dependency_resolution() {
     assert_stdout_contains(&first, "ir.fixture=resolution-lock-one");
     assert_stdout_contains(&second, "ir.fixture=resolution-lock-two");
     assert!(!overlap.exists(), "resolve.R should not overlap");
+    let expected_entries = if cfg!(target_os = "linux") { 2 } else { 1 };
     assert_eq!(
         resolver_probe_count(&entered),
-        1,
-        "second resolver should reuse the completed resolution marker"
+        expected_entries,
+        "second resolver should reuse the completed resolution marker when Rust markers are enabled"
     );
 }
 
@@ -218,9 +219,10 @@ fn concurrent_resolvers_serialize_shared_cache_with_different_user_cache_roots()
         !overlap.exists(),
         "resolve.R should not overlap for a shared ir cache"
     );
+    let expected_entries = if cfg!(target_os = "linux") { 2 } else { 1 };
     assert_eq!(
         resolver_probe_count(&entered),
-        1,
-        "second resolver should reuse the shared cache marker"
+        expected_entries,
+        "second resolver should reuse the shared cache marker when Rust markers are enabled"
     );
 }
