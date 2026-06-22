@@ -1,6 +1,6 @@
 mod support;
 
-use support::{expected_ppm_latest_url, rscript, temp_dir, temp_path};
+use support::{rscript, temp_dir, temp_path};
 
 use std::fs;
 use std::path::Path;
@@ -359,6 +359,7 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
+        .env_remove("RSPM")
         .env("IR_TEST_AT_CRAN", "1")
         .env("IR_TEST_REPOS_FILE", &cran_fallback_repos)
         .args(["scripts/warm-renv-cache.R", "cli"])
@@ -367,7 +368,7 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
     assert_success(&cran_fallback);
     assert_eq!(
         read_repos(&cran_fallback_repos),
-        format!("CRAN={}", expected_ppm_latest_url())
+        "CRAN=https://packagemanager.posit.co/cran/latest"
     );
 
     let unnamed_default = Command::new(rscript())
@@ -479,6 +480,7 @@ options(repos = c(CRAN = "https://internal.example.test/repo"))
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
+        .env_remove("RSPM")
         .env("IR_TEST_REPOS_FILE", &package_repos)
         .env("IR_TEST_TOOLING_REPOS_FILE", &tooling_repos)
         .args(["scripts/warm-renv-cache.R", "cli"])
@@ -491,7 +493,7 @@ options(repos = c(CRAN = "https://internal.example.test/repo"))
     );
     assert_eq!(
         read_repos(&tooling_repos),
-        format!("CRAN={}", expected_ppm_latest_url())
+        "CRAN=https://packagemanager.posit.co/cran/latest"
     );
 }
 
