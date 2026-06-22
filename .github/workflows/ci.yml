@@ -14,8 +14,6 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    env:
-      R_USER_CACHE_DIR: ${{ runner.temp }}/ir-r-user-cache
     strategy:
       fail-fast: false
       matrix:
@@ -36,13 +34,15 @@ jobs:
         id: r-cache-date
         shell: Rscript {0}
         run: |
-          dir.create(Sys.getenv("R_USER_CACHE_DIR"), recursive = TRUE, showWarnings = FALSE)
+          r_user_cache_dir <- file.path(Sys.getenv("RUNNER_TEMP"), "ir-r-user-cache")
+          dir.create(r_user_cache_dir, recursive = TRUE, showWarnings = FALSE)
+          cat("R_USER_CACHE_DIR=", r_user_cache_dir, "\n", sep = "", file = Sys.getenv("GITHUB_ENV"), append = TRUE)
           date <- format(as.Date(Sys.time(), tz = "UTC"))
           cat("date=", date, "\n", sep = "", file = Sys.getenv("GITHUB_OUTPUT"), append = TRUE)
       - name: Cache R user cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.R_USER_CACHE_DIR }}
+          path: ${{ runner.temp }}/ir-r-user-cache
           # No restore key: the UTC date bucket makes the first run each day cold.
           key: r-user-cache-${{ runner.os }}-${{ steps.r-cache-date.outputs.date }}-${{ hashFiles('.github/workflows/ci.yml', 'driver/resolve.R', 'scripts/warm-renv-cache.R') }}
       # No DESCRIPTION in this repo, so list the end-to-end fixture deps

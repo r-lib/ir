@@ -169,15 +169,17 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow
         .lines()
         .any(|line| line == "  R_USER_CACHE_DIR: ${{ github.workspace }}/.cache"));
-    assert!(workflow
+    assert!(!workflow
         .lines()
         .any(|line| line == "      R_USER_CACHE_DIR: ${{ runner.temp }}/ir-r-user-cache"));
     assert!(workflow.contains("id: r-cache-date"));
     assert!(workflow.contains("shell: Rscript {0}"));
-    assert!(workflow.contains("dir.create(Sys.getenv(\"R_USER_CACHE_DIR\")"));
+    assert!(workflow.contains("Sys.getenv(\"RUNNER_TEMP\")"));
+    assert!(workflow.contains("R_USER_CACHE_DIR="));
+    assert!(workflow.contains("file = Sys.getenv(\"GITHUB_ENV\")"));
     assert!(workflow.contains("tz = \"UTC\""));
     assert!(workflow.contains("actions/cache@v4"));
-    assert!(workflow.contains("path: ${{ env.R_USER_CACHE_DIR }}"));
+    assert!(workflow.contains("path: ${{ runner.temp }}/ir-r-user-cache"));
     assert!(workflow
         .contains("key: r-user-cache-${{ runner.os }}-${{ steps.r-cache-date.outputs.date }}-"));
     assert!(workflow.contains("cache-version: ${{ steps.r-cache-date.outputs.date }}"));
