@@ -11,7 +11,7 @@ use time::macros::format_description;
 use time::{Date, OffsetDateTime};
 
 use crate::driver;
-use crate::lock::{resolver_lock_path, FileLock};
+use crate::lock::{package_cache_lock_path, resolver_lock_path, FileLock};
 use crate::python;
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
@@ -303,6 +303,10 @@ fn resolve_library_inner(
         });
     }
 
+    let _package_cache_lock = r_user_cache_dir()
+        .ok()
+        .map(|root| FileLock::acquire(&package_cache_lock_path(&root)))
+        .transpose()?;
     let _resolver_lock = FileLock::acquire(&resolver_lock_path(&cache_dir))?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {

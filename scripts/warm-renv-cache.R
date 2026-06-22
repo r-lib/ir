@@ -16,9 +16,17 @@ public_repos <- function() {
   else c(CRAN = "https://packagemanager.posit.co/cran/latest")
 }
 
+named_value <- function(values, name) {
+  if (is.null(values) || !(name %in% names(values))) return(NULL)
+  unname(values[[name]])
+}
+
 default_repos <- function() {
   repos <- getOption("repos")
-  cran <- repos[["CRAN"]]
+  if (is.null(names(repos)) && length(repos) == 1L)
+    names(repos) <- "CRAN"
+
+  cran <- named_value(repos, "CRAN")
   rspm <- Sys.getenv("RSPM", unset = "")
 
   if (nzchar(rspm) &&
@@ -33,6 +41,7 @@ default_repos <- function() {
 }
 
 if (is.null(repos)) {
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
   repos <- default_repos()
 } else {
   Sys.setenv(RENV_CONFIG_REPOS_OVERRIDE = repos)

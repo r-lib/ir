@@ -56,16 +56,23 @@ ir_resolve_refs <- function(refs) {
 
 ## --- repositories -----------------------------------------------------------
 
-ir_plain_ppm_snapshot <- function(url) {
+ir_ppm_snapshot <- function(url) {
   if (is.null(url) || is.na(url)) return(NULL)
 
   url <- sub("/+$", "", url)
   prefix <- "https://packagemanager.posit.co/cran/"
   if (!startsWith(url, prefix)) return(NULL)
 
-  snapshot <- substring(url, nchar(prefix) + 1L)
-  if (!nzchar(snapshot) || grepl("/", snapshot, fixed = TRUE)) return(NULL)
-  snapshot
+  path <- substring(url, nchar(prefix) + 1L)
+  parts <- strsplit(path, "/", fixed = TRUE)[[1L]]
+  if (length(parts) == 1L && nzchar(parts[[1L]]))
+    return(parts[[1L]])
+  if (length(parts) == 3L &&
+      identical(parts[[1L]], "__linux__") &&
+      nzchar(parts[[2L]]) &&
+      nzchar(parts[[3L]]))
+    return(parts[[3L]])
+  NULL
 }
 
 ir_normalize_repos <- function(repos) {
@@ -73,7 +80,7 @@ ir_normalize_repos <- function(repos) {
     return(c(CRAN = ir_ppm_cran_url("latest")))
 
   snapshots <- vapply(repos, function(repo) {
-    snapshot <- ir_plain_ppm_snapshot(repo)
+    snapshot <- ir_ppm_snapshot(repo)
     if (is.null(snapshot)) NA_character_ else snapshot
   }, character(1))
   ppm <- !is.na(snapshots)

@@ -16,6 +16,9 @@ use sha2::{Digest, Sha256};
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
 const PACKAGE_TYPE_ENV: &str = "IR_PACKAGE_TYPE";
+const PACKAGE_PLATFORMS_ENV: &str = "PKG_PLATFORMS";
+const R_STARTUP_FILE_ENVS: &[&str] =
+    &["R_PROFILE_USER", "R_PROFILE", "R_ENVIRON_USER", "R_ENVIRON"];
 
 pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
@@ -54,12 +57,14 @@ pub(crate) fn paths(
     };
     let source = resolution_cache_source(exclude_newer)?;
     let package_type = package_type_key()?;
+    let startup_files = startup_files_key();
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
         quarto_render,
         &rscript_identity,
         package_type.as_deref(),
+        &startup_files,
     ));
     let marker_name = marker
         .file_name()
@@ -131,6 +136,7 @@ fn resolution_cache_key(
     quarto_render: bool,
     rscript_identity: &str,
     package_type: Option<&str>,
+    startup_files: &[String],
 ) -> String {
     let source_key = exclude_newer
         .map(|date| format!("exclude-newer: {date}"))
@@ -145,24 +151,85 @@ fn resolution_cache_key(
     if let Some(package_type) = package_type {
         parts.push(format!("package-type: {package_type}"));
     }
+    parts.extend(startup_files.iter().cloned());
     append_resolution_platform_key(&mut parts);
 
     sha256_fields(&parts)
 }
 
 fn package_type_key() -> Result<Option<String>, Box<dyn Error>> {
-    let Ok(value) = env::var(PACKAGE_TYPE_ENV) else {
-        return Ok(None);
-    };
-    let value = value.trim().to_ascii_lowercase();
-    if value.is_empty() || value == "auto" {
-        return Ok(None);
-    }
-    if matches!(value.as_str(), "source" | "binary") {
-        return Ok(Some(value));
+    if let Ok(value) = env::var(PACKAGE_TYPE_ENV) {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() || value == "auto" {
+            return Ok(source_platforms_key());
+        }
+        if matches!(value.as_str(), "source" | "binary") {
+            return Ok(Some(value));
+        }
+
+        return Err(format!("{PACKAGE_TYPE_ENV} must be one of: auto, source, binary").into());
     }
 
-    Err(format!("{PACKAGE_TYPE_ENV} must be one of: auto, source, binary").into())
+    Ok(source_platforms_key())
+}
+
+fn source_platforms_key() -> Option<String> {
+    let value = env::var(PACKAGE_PLATFORMS_ENV).ok()?;
+    if value
+        .split([',', ';', ' ', '\t', '\n'])
+        .any(|part| part.trim().eq_ignore_ascii_case("source"))
+    {
+        Some("source".to_string())
+    } else {
+        None
+    }
+}
+
+fn startup_files_key() -> Vec<String> {
+    R_STARTUP_FILE_ENVS
+        .iter()
+        .filter_map(|name| {
+            let value = env::var_os(name)?;
+            if value.is_empty() {
+                return None;
+            }
+            let path = Path::new(&value);
+            if !startup_file_can_affect_package_policy(path) {
+                return None;
+            }
+            let mut key = format!("{name}={}", value.to_string_lossy());
+            append_file_identity(&mut key, path);
+            Some(format!("r-startup: {key}"))
+        })
+        .collect()
+}
+
+fn startup_file_can_affect_package_policy(path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    [
+        "pkgType",
+        "pkg.platforms",
+        "PKG_PLATFORMS",
+        PACKAGE_TYPE_ENV,
+    ]
+    .iter()
+    .any(|needle| contents.contains(needle))
+}
+
+fn append_file_identity(identity: &mut String, path: &Path) {
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    identity.push_str(&format!(";len={}", metadata.len()));
+    if let Ok(modified) = metadata.modified() {
+        let nanos = modified
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        identity.push_str(&format!(";mtime={nanos}"));
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -499,6 +566,78 @@ mod tests {
 
         assert_ne!(x64_marker, i386_marker);
         assert_ne!(x64_marker, r_home_marker);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_platforms_source_changes_resolution_marker() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _package_type = EnvVarGuard::capture(PACKAGE_TYPE_ENV);
+        let _platforms = EnvVarGuard::capture(PACKAGE_PLATFORMS_ENV);
+        let dir = unique_dir("ir-platforms-cache-unit");
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let rscript = dummy_rscript(&dir);
+        let dependencies = vec!["cli".to_string()];
+
+        env::remove_var(PACKAGE_TYPE_ENV);
+        env::remove_var(PACKAGE_PLATFORMS_ENV);
+        let default_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
+            .unwrap()
+            .unwrap()
+            .marker;
+
+        env::set_var(PACKAGE_PLATFORMS_ENV, "source");
+        let source_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
+            .unwrap()
+            .unwrap()
+            .marker;
+
+        assert_ne!(default_marker, source_marker);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn startup_file_env_changes_resolution_marker() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _profile_user = EnvVarGuard::capture("R_PROFILE_USER");
+        let dir = unique_dir("ir-startup-cache-unit");
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let rscript = dummy_rscript(&dir);
+        let profile = dir.join("profile.R");
+        let unrelated_profile = dir.join("unrelated-profile.R");
+        fs::write(&profile, "options(pkgType = 'source')\n").unwrap();
+        fs::write(&unrelated_profile, "stop('do not launch resolver')\n").unwrap();
+        let dependencies = vec!["cli".to_string()];
+
+        env::remove_var("R_PROFILE_USER");
+        let no_profile_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
+            .unwrap()
+            .unwrap()
+            .marker;
+
+        env::set_var("R_PROFILE_USER", &unrelated_profile);
+        let unrelated_profile_marker =
+            paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
+                .unwrap()
+                .unwrap()
+                .marker;
+
+        env::set_var("R_PROFILE_USER", &profile);
+        let profile_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
+            .unwrap()
+            .unwrap()
+            .marker;
+
+        assert_eq!(no_profile_marker, unrelated_profile_marker);
+        assert_ne!(no_profile_marker, profile_marker);
 
         let _ = fs::remove_dir_all(&dir);
     }

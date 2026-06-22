@@ -1617,6 +1617,7 @@ fn run_uses_ppm_latest_for_default_repos_and_rewrites_ppm_snapshots() {
     let snapshot_cache_dir = temp_dir("ir-linux-binary-repos-snapshot-cache");
     let profile = temp_path("ir-linux-binary-repos-profile", "R");
     let default_repos = temp_path("ir-linux-binary-repos-default", "txt");
+    let existing_linux_repos = temp_path("ir-linux-binary-repos-existing-linux", "txt");
     let alias_repos = temp_path("ir-linux-binary-repos-alias", "txt");
     let alias_options = temp_path("ir-linux-binary-repos-alias-options", "txt");
     let alias_prefix = temp_path("ir-linux-binary-repos-alias-prefix", "txt");
@@ -1663,6 +1664,7 @@ ir_test_private_libs <- unique(file.path(
     R.version$platform,
     ir_test_cache_platform(),
     paste0(R.version$platform, ";package-type=source"),
+    paste0(ir_test_cache_platform(), ";package-type=source"),
     paste0(ir_test_cache_platform(), ";package-type=binary")
   ))
 ))
@@ -1726,10 +1728,9 @@ if (nzchar(ir_test_download_method))
         ),
     )
     .unwrap();
-
     let read_repos = |path: &Path| {
         fs::read_to_string(path)
-            .unwrap()
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
             .replace("\r\n", "\n")
             .trim()
             .to_string()
@@ -1764,6 +1765,36 @@ if (nzchar(ir_test_download_method))
     assert_stdout_contains(&default, "ir.fixture=ppm-default");
     assert_eq!(
         read_repos(&default_repos),
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
+    );
+
+    let existing_linux_cache_dir = temp_dir("ir-linux-binary-repos-existing-linux-cache");
+    let mut existing_linux_cmd = ir();
+    configure_manylinux(&mut existing_linux_cmd);
+    let existing_linux = existing_linux_cmd
+        .env("IR_CACHE_DIR", &existing_linux_cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("R_PROFILE_USER", &profile)
+        .env(
+            "IR_TEST_PROFILE_REPOS",
+            "https://packagemanager.posit.co/cran/__linux__/noble/latest",
+        )
+        .env("IR_TEST_REPOS_FILE", &existing_linux_repos)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=existing-linux-ppm\\n')",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&existing_linux);
+    assert_stdout_contains(&existing_linux, "ir.fixture=existing-linux-ppm");
+    assert_eq!(
+        read_repos(&existing_linux_repos),
         "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
     );
 
@@ -1824,9 +1855,11 @@ if (nzchar(ir_test_download_method))
         "RSPM=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest\nCRAN=https://cran.r-project.org"
     );
     let options = read_repos(&alias_options);
-    assert!(options.contains("HTTPUserAgent=R/"));
+    assert!(options.contains("HTTPUserAgent=R ("));
+    assert!(!options.contains("HTTPUserAgent=R/"));
     assert!(options.contains("download.file.extra=--compressed"));
     assert!(options.contains("--user-agent"));
+    assert!(options.contains("R ("));
     assert_eq!(read_repos(&alias_prefix), "manylinux_2_28");
 
     let source_cache_dir = temp_dir("ir-linux-binary-repos-source-cache");
@@ -1871,6 +1904,7 @@ if (nzchar(ir_test_download_method))
         .env("IR_TEST_REPOS_FILE", &auto_source_repos)
         .env("IR_TEST_OPTIONS_FILE", &auto_source_options)
         .env("IR_TEST_SOURCE_STARTUP", "1")
+        .env("PKG_PLATFORMS", "source")
         .args([
             "run",
             "--isolated",
@@ -1951,68 +1985,74 @@ ir_test_write_pkg <- function(lib, pkg, namespace, code) {
   writeLines(code, file.path(path, "R", pkg))
 }
 
-ir_test_private_lib <- file.path(
+ir_test_private_libs <- unique(file.path(
   Sys.getenv("IR_CACHE_DIR"),
   "tooling",
-  paste0(getRversion(), "-", R.version$platform)
-)
+  paste0(getRversion(), "-", c(
+    R.version$platform,
+    paste0(R.version$platform, ";ppm-linux=manylinux_2_28"),
+    paste0(R.version$platform, ";ppm-linux=manylinux_2_28;package-type=source")
+  ))
+))
 
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "secretbase",
-  "export(sha256)",
-  "sha256 <- function(x) paste(c('hash', nchar(paste(x, collapse = '\n'))), collapse = '-')"
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "pak",
-  "export(pkg_deps)",
-  paste(
-    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
-    "  refs <- as.character(refs)",
-    "  packages <- sub('[?].*$', '', refs)",
-    "  packages <- sub('@.*$', '', packages)",
-    "  data.frame(",
-    "    status = rep('OK', length(refs)),",
-    "    ref = refs,",
-    "    package = packages,",
-    "    version = rep('0.0.1', length(refs)),",
-    "    type = rep('standard', length(refs)),",
-    "    priority = NA_character_,",
-    "    direct = TRUE,",
-    "    stringsAsFactors = FALSE",
-    "  )",
-    "}",
-    sep = "\n"
+for (ir_test_private_lib in ir_test_private_libs) {
+  ir_test_write_pkg(
+    ir_test_private_lib,
+    "secretbase",
+    "export(sha256)",
+    "sha256 <- function(x) paste(c('hash', nchar(paste(x, collapse = '\n'))), collapse = '-')"
   )
-)
-ir_test_write_pkg(
-  ir_test_private_lib,
-  "renv",
-  "export(use)",
-  paste(
-    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-    "  specs <- unlist(list(...), use.names = FALSE)",
-    "  cat(",
-    "    paste0('library=', library),",
-    "    paste0('pkgType=', getOption('pkgType', '')),",
-    "    paste0('pkg.platforms=', paste(getOption('pkg.platforms', ''), collapse = ',')),",
-    "    paste0('PKG_PLATFORMS=', Sys.getenv('PKG_PLATFORMS', unset = '')),",
-    "    paste0('specs=', paste(specs, collapse = ',')),",
-    "    sep = '\n',",
-    "    file = Sys.getenv('IR_TEST_INSTALLS_FILE'),",
-    "    append = TRUE",
-    "  )",
-    "  cat('\n---\n', file = Sys.getenv('IR_TEST_INSTALLS_FILE'), append = TRUE)",
-    "  for (spec in specs) {",
-    "    pkg <- sub('@.*$', '', spec)",
-    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
-    "  }",
-    "  invisible(TRUE)",
-    "}",
-    sep = "\n"
+  ir_test_write_pkg(
+    ir_test_private_lib,
+    "pak",
+    "export(pkg_deps)",
+    paste(
+      "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
+      "  refs <- as.character(refs)",
+      "  packages <- sub('[?].*$', '', refs)",
+      "  packages <- sub('@.*$', '', packages)",
+      "  data.frame(",
+      "    status = rep('OK', length(refs)),",
+      "    ref = refs,",
+      "    package = packages,",
+      "    version = rep('0.0.1', length(refs)),",
+      "    type = rep('standard', length(refs)),",
+      "    priority = NA_character_,",
+      "    direct = TRUE,",
+      "    stringsAsFactors = FALSE",
+      "  )",
+      "}",
+      sep = "\n"
+    )
   )
-)
+  ir_test_write_pkg(
+    ir_test_private_lib,
+    "renv",
+    "export(use)",
+    paste(
+      "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
+      "  specs <- unlist(list(...), use.names = FALSE)",
+      "  cat(",
+      "    paste0('library=', library),",
+      "    paste0('pkgType=', getOption('pkgType', '')),",
+      "    paste0('pkg.platforms=', paste(getOption('pkg.platforms', ''), collapse = ',')),",
+      "    paste0('PKG_PLATFORMS=', Sys.getenv('PKG_PLATFORMS', unset = '')),",
+      "    paste0('specs=', paste(specs, collapse = ',')),",
+      "    sep = '\n',",
+      "    file = Sys.getenv('IR_TEST_INSTALLS_FILE'),",
+      "    append = TRUE",
+      "  )",
+      "  cat('\n---\n', file = Sys.getenv('IR_TEST_INSTALLS_FILE'), append = TRUE)",
+      "  for (spec in specs) {",
+      "    pkg <- sub('@.*$', '', spec)",
+      "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+      "  }",
+      "  invisible(TRUE)",
+      "}",
+      sep = "\n"
+    )
+  )
+}
 options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 "#,
     )

@@ -73,12 +73,26 @@ ir_linux_binary_distribution <- function(package_type = ir_package_type()) {
   ir_manylinux_binary_distribution()
 }
 
+ir_effective_package_type <- function(package_type = ir_package_type()) {
+  if (!identical(package_type, "auto"))
+    return(package_type)
+
+  values <- c(
+    getOption("pkgType"),
+    getOption("pkg.platforms"),
+    Sys.getenv("PKG_PLATFORMS", unset = NA_character_)
+  )
+  values <- tolower(trimws(as.character(stats::na.omit(values))))
+  if ("source" %in% values) "source" else NULL
+}
+
 ir_cache_platform <- function(platform = R.version$platform) {
   package_type <- ir_package_type()
   distro <- ir_linux_binary_distribution(package_type)
+  effective_package_type <- ir_effective_package_type(package_type)
   platform <- if (is.null(distro)) platform else paste0(platform, ";ppm-linux=", distro)
-  if (!identical(package_type, "auto"))
-    platform <- paste0(platform, ";package-type=", package_type)
+  if (!is.null(effective_package_type))
+    platform <- paste0(platform, ";package-type=", effective_package_type)
   platform
 }
 
@@ -103,10 +117,11 @@ ir_configure_ppm_user_agent <- function(repos) {
     return(invisible())
 
   user_agent <- sprintf(
-    "R/%s R (%s)",
+    "R (%s %s %s %s)",
     getRversion(),
-    paste(getRversion(), R.version["platform"], R.version["arch"],
-          R.version["os"])
+    R.version[["platform"]],
+    R.version[["arch"]],
+    R.version[["os"]]
   )
   options(HTTPUserAgent = user_agent)
 

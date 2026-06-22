@@ -173,7 +173,8 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("Warm non-default R package cache"));
-    assert!(workflow.contains("--repos \"${RSPM%/latest}/2026-06-01\""));
+    assert!(workflow.contains("cran=\"${RSPM:-https://packagemanager.posit.co/cran/latest}\""));
+    assert!(workflow.contains("--repos \"${cran%/latest}/2026-06-01\""));
     assert!(workflow.contains("github::rstudio/reticulate fansi"));
     assert!(workflow.contains("rmarkdown xfun quarto"));
     assert!(workflow.contains("rmarkdown bookdown tinytex xfun"));
@@ -188,7 +189,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
         .and_then(|block| block.split("      - run: cargo nextest").next())
         .expect("workflow should warm the non-default R package cache before tests");
     assert!(
-        warm_non_default_cache.contains("--repos \"${RSPM%/latest}/${IR_TEST_R_EXCLUDE_NEWER}\"")
+        warm_non_default_cache.contains("--repos \"${cran%/latest}/${IR_TEST_R_EXCLUDE_NEWER}\"")
     );
     assert!(!warm_non_default_cache.contains("2026-06-01"));
     assert!(warm_non_default_cache.contains("R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library"));
@@ -248,7 +249,9 @@ fn warm_renv_cache_uses_session_repos_rspm_and_explicit_repos() {
     let profile_repos = temp_path("ir-warm-repos-profile-output", "txt");
     let rspm_repos = temp_path("ir-warm-repos-rspm-output", "txt");
     let cran_fallback_repos = temp_path("ir-warm-repos-cran-fallback-output", "txt");
+    let unnamed_repos = temp_path("ir-warm-repos-unnamed-output", "txt");
     let explicit_repos = temp_path("ir-warm-repos-explicit-output", "txt");
+    let profile_override = temp_path("ir-warm-repos-profile-override", "txt");
     let explicit_override = temp_path("ir-warm-repos-explicit-override", "txt");
 
     fs::write(
@@ -296,7 +299,9 @@ ir_test_write_pkg(
   )
 )
 
-if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
+if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
+  options(repos = "https://cran.r-project.org")
+} else if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
   options(repos = c(CRAN = "@CRAN@"))
 } else {
   options(repos = c(CRAN = "https://profile.example.test/repo",
@@ -319,6 +324,8 @@ if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
         .env("IR_TEST_REPOS_FILE", &profile_repos)
+        .env("IR_TEST_OVERRIDE_FILE", &profile_override)
+        .env("RENV_CONFIG_REPOS_OVERRIDE", "https://stale.example.test")
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
@@ -327,6 +334,7 @@ if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
         read_repos(&profile_repos),
         "CRAN=https://profile.example.test/repo\nInternal=https://internal.example.test/repo"
     );
+    assert_eq!(read_repos(&profile_override), "");
 
     let rspm_default = Command::new(rscript())
         .current_dir(repo_root())
@@ -360,6 +368,21 @@ if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
     assert_eq!(
         read_repos(&cran_fallback_repos),
         "CRAN=https://packagemanager.posit.co/cran/latest"
+    );
+
+    let unnamed_default = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("R_PROFILE_USER", &profile)
+        .env("R_LIBS_USER", &user_library)
+        .env("IR_TEST_UNNAMED_REPO", "1")
+        .env("IR_TEST_REPOS_FILE", &unnamed_repos)
+        .args(["scripts/warm-renv-cache.R", "cli"])
+        .output()
+        .unwrap();
+    assert_success(&unnamed_default);
+    assert_eq!(
+        read_repos(&unnamed_repos),
+        "CRAN=https://cran.r-project.org"
     );
 
     let explicit = Command::new(rscript())

@@ -333,3 +333,51 @@ fn concurrent_resolvers_serialize_shared_cache_with_different_user_cache_roots()
         "second resolver should reuse the shared cache marker"
     );
 }
+
+#[test]
+fn concurrent_resolvers_serialize_different_ir_caches_with_shared_user_cache() {
+    let first_cache_dir = temp_dir("ir-different-cache-shared-user-cache-one");
+    let second_cache_dir = temp_dir("ir-different-cache-shared-user-cache-two");
+    let user_cache_dir = temp_dir("ir-different-cache-shared-user-cache-user");
+    let profile = temp_path("ir-different-cache-shared-user-cache-profile", "R");
+    let active = temp_path("ir-different-cache-shared-user-cache-active", "");
+    let entered = temp_path("ir-different-cache-shared-user-cache-entered", "txt");
+    let overlap = temp_path("ir-different-cache-shared-user-cache-overlap", "txt");
+    let probe = ResolverLockProbe {
+        user_cache_dir: &user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
+
+    write_resolver_lock_profile(&profile);
+
+    let first =
+        spawn_resolver_for_lock_test(&first_cache_dir, &probe, None, "shared-user-cache-one");
+    let first = wait_for_resolver_probe(first, &active);
+
+    let second = resolver_lock_command(
+        &second_cache_dir,
+        &probe,
+        Some("cli"),
+        "shared-user-cache-two",
+    )
+    .output()
+    .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=shared-user-cache-one");
+    assert_stdout_contains(&second, "ir.fixture=shared-user-cache-two");
+    assert!(
+        !overlap.exists(),
+        "resolve.R should not overlap for a shared R user cache"
+    );
+    assert_eq!(
+        resolver_probe_count(&entered),
+        2,
+        "different IR caches should both resolve, but not concurrently"
+    );
+}
