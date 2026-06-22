@@ -102,9 +102,9 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 ## --- resolution cache -------------------------------------------------------
 
 # Fallback key identifying a resolution request when Rust does not pass
-# IR_RESOLUTION_MARKER. It includes the Linux PPM distro in the platform string
-# for direct driver runs. Latest resolution keeps a stable key and stores the
-# creation time in the marker value.
+# IR_RESOLUTION_MARKER. It includes the Linux PPM binary target in the platform
+# string for direct driver runs. Latest resolution keeps a stable key and
+# stores the creation time in the marker value.
 ir_input_key <- function(deps,
                          rversion      = getRversion(),
                          platform      = ir_cache_platform(),

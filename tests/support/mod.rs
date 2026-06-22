@@ -111,67 +111,7 @@ pub(crate) fn renviron_path(path: &Path) -> String {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn linux_distribution() -> Option<String> {
-    let os_release = fs::read_to_string("/etc/os-release").expect("failed to read /etc/os-release");
-    let mut id = String::new();
-    let mut ubuntu_codename = String::new();
-    let mut version_codename = String::new();
-    let mut version_id = String::new();
-
-    for line in os_release.lines() {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim_matches('"');
-        match key {
-            "UBUNTU_CODENAME" => ubuntu_codename = value.to_string(),
-            "VERSION_CODENAME" => version_codename = value.to_string(),
-            "ID" => id = value.to_string(),
-            "VERSION_ID" => version_id = value.to_string(),
-            _ => {}
-        }
-    }
-
-    let arch = linux_arch();
-    let ubuntu_supported = |codename: &str| match codename {
-        "jammy" => supported_distribution(codename, arch.as_deref(), &["x86_64"]),
-        "noble" | "resolute" => {
-            supported_distribution(codename, arch.as_deref(), &["x86_64", "aarch64"])
-        }
-        _ => None,
-    };
-    if let Some(distribution) = ubuntu_supported(&ubuntu_codename) {
-        return Some(distribution);
-    }
-    if id == "ubuntu" {
-        if let Some(distribution) = ubuntu_supported(&version_codename) {
-            return Some(distribution);
-        }
-        return manylinux_distribution(arch.as_deref());
-    }
-    if id == "debian" {
-        match version_codename.as_str() {
-            "bookworm" | "trixie" => {
-                return supported_distribution(&version_codename, arch.as_deref(), &["x86_64"]);
-            }
-            _ => return manylinux_distribution(arch.as_deref()),
-        }
-    }
-
-    let major = version_id.split('.').next().unwrap_or_default();
-    match id.as_str() {
-        "rhel" | "redhat" | "rocky" | "almalinux" => match major {
-            "8" => supported_distribution("centos8", arch.as_deref(), &["x86_64"]),
-            "9" => supported_distribution("rhel9", arch.as_deref(), &["x86_64", "aarch64"]),
-            "10" => supported_distribution("rhel10", arch.as_deref(), &["x86_64", "aarch64"]),
-            _ => manylinux_distribution(arch.as_deref()),
-        },
-        "opensuse-leap" | "sles" => match (id.as_str(), version_id.as_str()) {
-            (_, "15.6") => supported_distribution("opensuse156", arch.as_deref(), &["x86_64"]),
-            ("sles", "15.7") => supported_distribution("opensuse156", arch.as_deref(), &["x86_64"]),
-            _ => manylinux_distribution(arch.as_deref()),
-        },
-        _ => manylinux_distribution(arch.as_deref()),
-    }
+    manylinux_distribution(linux_arch().as_deref())
 }
 
 #[cfg(target_os = "linux")]
@@ -186,19 +126,6 @@ fn linux_arch() -> Option<String> {
         "x86_64" | "amd64" => Some("x86_64".to_string()),
         "aarch64" | "arm64" => Some("aarch64".to_string()),
         _ => None,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn supported_distribution(
-    distribution: &str,
-    arch: Option<&str>,
-    supported: &[&str],
-) -> Option<String> {
-    if arch.is_some_and(|arch| supported.contains(&arch)) {
-        Some(distribution.to_string())
-    } else {
-        manylinux_distribution(arch)
     }
 }
 

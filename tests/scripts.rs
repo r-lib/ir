@@ -1,6 +1,6 @@
 mod support;
 
-use support::{expected_ppm_cran_url, expected_ppm_latest_url, rscript, temp_dir, temp_path};
+use support::{rscript, temp_dir, temp_path};
 
 use std::fs;
 use std::path::Path;
@@ -173,8 +173,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("Warm non-default R package cache"));
-    assert!(workflow.contains("--snapshot latest"));
-    assert!(workflow.contains("--snapshot 2026-06-01"));
+    assert!(workflow.contains("--repos \"${RSPM%/latest}/2026-06-01\""));
     assert!(workflow.contains("github::rstudio/reticulate fansi"));
     assert!(workflow.contains("rmarkdown xfun quarto"));
     assert!(workflow.contains("rmarkdown bookdown tinytex xfun"));
@@ -188,7 +187,9 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
         .nth(1)
         .and_then(|block| block.split("      - run: cargo nextest").next())
         .expect("workflow should warm the non-default R package cache before tests");
-    assert!(warm_non_default_cache.contains("--snapshot ${IR_TEST_R_EXCLUDE_NEWER}"));
+    assert!(
+        warm_non_default_cache.contains("--repos \"${RSPM%/latest}/${IR_TEST_R_EXCLUDE_NEWER}\"")
+    );
     assert!(!warm_non_default_cache.contains("2026-06-01"));
     assert!(warm_non_default_cache.contains("R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library"));
     let warm_default_cache = workflow
@@ -234,26 +235,20 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
-    assert!(warm_script.contains("__linux__"));
-    assert!(warm_script.contains("VERSION_CODENAME"));
+    assert!(warm_script.contains("Sys.getenv(\"RSPM\", unset = \"\")"));
+    assert!(!warm_script.contains("__linux__"));
+    assert!(!warm_script.contains("VERSION_CODENAME"));
     assert!(!warm_script.contains("https://cran.r-project.org"));
 }
 
 #[test]
-fn warm_renv_cache_uses_ppm_latest_for_default_repos_and_rewrites_ppm_snapshots() {
-    let user_library = temp_dir("ir-warm-linux-binary-repos-library");
-    let profile = temp_path("ir-warm-linux-binary-repos-profile", "R");
-    let default_repos = temp_path("ir-warm-linux-binary-repos-default", "txt");
-    let default_override = temp_path("ir-warm-linux-binary-repos-default-override", "txt");
-    let latest_repos = temp_path("ir-warm-linux-binary-repos-latest", "txt");
-    let dated_repos = temp_path("ir-warm-linux-binary-repos-dated", "txt");
-    let snapshot_repos = temp_path("ir-warm-linux-binary-repos-snapshot", "txt");
-    let source_repos = temp_path("ir-warm-linux-binary-repos-source", "txt");
-    let source_options = temp_path("ir-warm-linux-binary-repos-source-options", "txt");
-    let eol_repos = temp_path("ir-warm-linux-binary-repos-eol", "txt");
-    let arm_repos = temp_path("ir-warm-linux-binary-repos-arm", "txt");
-    let binary_repos = temp_path("ir-warm-linux-binary-repos-binary", "txt");
-    let binary_options = temp_path("ir-warm-linux-binary-repos-binary-options", "txt");
+fn warm_renv_cache_uses_session_repos_rspm_and_explicit_repos() {
+    let user_library = temp_dir("ir-warm-repos-library");
+    let profile = temp_path("ir-warm-repos-profile", "R");
+    let profile_repos = temp_path("ir-warm-repos-profile-output", "txt");
+    let rspm_repos = temp_path("ir-warm-repos-rspm-output", "txt");
+    let explicit_repos = temp_path("ir-warm-repos-explicit-output", "txt");
+    let explicit_override = temp_path("ir-warm-repos-explicit-override", "txt");
 
     fs::write(
         &profile,
@@ -271,31 +266,6 @@ ir_test_write_pkg <- function(lib, pkg, namespace, code) {
   writeLines(namespace, file.path(path, "NAMESPACE"))
   writeLines(code, file.path(path, "R", pkg))
 }
-
-ir_test_simulated_os_release <- Sys.getenv("IR_TEST_OS_RELEASE", unset = "")
-if (nzchar(ir_test_simulated_os_release)) {
-  Sys.info <- function() c(sysname = "Linux")
-  file.exists <- function(path) {
-    if (identical(path, "/etc/os-release")) TRUE else base::file.exists(path)
-  }
-  readLines <- function(con, warn = TRUE, ...) {
-    if (identical(con, "/etc/os-release"))
-      strsplit(ir_test_simulated_os_release, "\n", fixed = TRUE)[[1]]
-    else
-      base::readLines(con, warn = warn, ...)
-  }
-}
-ir_test_glibc_version <- Sys.getenv("IR_TEST_GLIBC_VERSION", unset = "")
-if (nzchar(ir_test_glibc_version)) {
-  system2 <- function(command, args = character(), stdout = FALSE, stderr = FALSE, ...) {
-    if (identical(command, "ldd") && "--version" %in% args)
-      return(paste("ldd (GNU libc)", ir_test_glibc_version))
-    base::system2(command, args = args, stdout = stdout, stderr = stderr, ...)
-  }
-}
-ir_test_r_arch <- Sys.getenv("IR_TEST_R_ARCH", unset = "")
-if (nzchar(ir_test_r_arch))
-  R.version$arch <- ir_test_r_arch
 
 ir_test_write_pkg(
   Sys.getenv("R_LIBS_USER"),
@@ -319,47 +289,18 @@ ir_test_write_pkg(
     "  override_file <- Sys.getenv('IR_TEST_OVERRIDE_FILE', unset = '')",
     "  if (nzchar(override_file))",
     "    writeLines(Sys.getenv('RENV_CONFIG_REPOS_OVERRIDE', unset = ''), override_file)",
-    "  options_file <- Sys.getenv('IR_TEST_OPTIONS_FILE', unset = '')",
-    "  if (nzchar(options_file)) {",
-    "    writeLines(c(",
-    "      paste0('HTTPUserAgent=', getOption('HTTPUserAgent', '')),",
-    "      paste0('download.file.extra=', getOption('download.file.extra', '')),",
-    "      paste0('pkgType=', getOption('pkgType', '')),",
-    "      paste0('pkg.platforms=', paste(getOption('pkg.platforms', ''), collapse = ',')),",
-    "      paste0('PKG_PLATFORMS=', Sys.getenv('PKG_PLATFORMS', unset = ''))",
-    "    ), options_file)",
-    "  }",
-    "  prefix_file <- Sys.getenv('IR_TEST_PREFIX_FILE', unset = '')",
-    "  if (nzchar(prefix_file))",
-    "    writeLines(Sys.getenv('RENV_PATHS_PREFIX', unset = ''), prefix_file)",
     "  invisible(TRUE)",
     "}",
     sep = "\n"
   )
 )
 
-ir_test_profile_repos <- Sys.getenv(
-  "IR_TEST_PROFILE_REPOS",
-  unset = "https://packagemanager.posit.co/cran/latest"
-)
-ir_test_ppm_alias <- Sys.getenv("IR_TEST_PPM_ALIAS", unset = "")
-ir_test_repos <- if (nzchar(ir_test_ppm_alias)) {
-  c(stats::setNames(ir_test_profile_repos, ir_test_ppm_alias),
-    CRAN = "https://cran.r-project.org")
+if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
+  options(repos = c(CRAN = "@CRAN@"))
 } else {
-  c(CRAN = ir_test_profile_repos)
+  options(repos = c(CRAN = "https://profile.example.test/repo",
+                    Internal = "https://internal.example.test/repo"))
 }
-if (identical(Sys.getenv("IR_TEST_INCLUDE_INTERNAL_REPO", unset = ""), "1"))
-  ir_test_repos <- c(ir_test_repos, Internal = "https://internal.example.test/repo")
-options(repos = ir_test_repos)
-if (identical(Sys.getenv("IR_TEST_SOURCE_STARTUP", unset = ""), "1")) {
-  options(pkgType = "source", pkg.platforms = "source")
-  Sys.setenv(PKG_PLATFORMS = "source")
-}
-ir_test_download_method <- Sys.getenv("IR_TEST_DOWNLOAD_METHOD", unset = "")
-if (nzchar(ir_test_download_method))
-  options(download.file.method = ir_test_download_method,
-          download.file.extra = "--compressed")
 "#,
     )
     .unwrap();
@@ -372,277 +313,63 @@ if (nzchar(ir_test_download_method))
             .to_string()
     };
 
-    let default = Command::new(rscript())
+    let profile_default = Command::new(rscript())
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_PROFILE_REPOS", "@CRAN@")
-        .env("IR_TEST_REPOS_FILE", &default_repos)
-        .env("IR_TEST_OVERRIDE_FILE", &default_override)
-        .env("RENV_CONFIG_REPOS_OVERRIDE", "https://stale.example.test")
+        .env("IR_TEST_REPOS_FILE", &profile_repos)
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
-    assert_success(&default);
+    assert_success(&profile_default);
     assert_eq!(
-        read_repos(&default_repos),
-        format!("CRAN={}", expected_ppm_latest_url())
+        read_repos(&profile_repos),
+        "CRAN=https://profile.example.test/repo\nInternal=https://internal.example.test/repo"
     );
-    assert_eq!(read_repos(&default_override), "");
 
-    let latest = Command::new(rscript())
+    let rspm_default = Command::new(rscript())
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &latest_repos)
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&latest);
-    assert_eq!(
-        read_repos(&latest_repos),
-        format!(
-            "CRAN={}\nInternal=https://internal.example.test/repo",
-            expected_ppm_latest_url()
-        )
-    );
-
-    let dated = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
+        .env("IR_TEST_AT_CRAN", "1")
         .env(
-            "IR_TEST_PROFILE_REPOS",
-            "https://packagemanager.posit.co/cran/2026-06-01",
+            "RSPM",
+            "https://packagemanager.posit.co/cran/__linux__/noble/latest",
         )
-        .env("IR_TEST_REPOS_FILE", &dated_repos)
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
-        .env("IR_TEST_R_ARCH", "x86_64")
+        .env("IR_TEST_REPOS_FILE", &rspm_repos)
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
-    assert_success(&dated);
+    assert_success(&rspm_default);
     assert_eq!(
-        read_repos(&dated_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/opensuse156/2026-06-01\nInternal=https://internal.example.test/repo"
-    );
-
-    let snapshot = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &snapshot_repos)
-        .args([
-            "scripts/warm-renv-cache.R",
-            "--snapshot",
-            "2026-06-01",
-            "cli",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&snapshot);
-    assert_eq!(
-        read_repos(&snapshot_repos),
-        format!("CRAN={}", expected_ppm_cran_url("2026-06-01"))
-    );
-
-    let sles_repos = temp_path("ir-warm-linux-binary-repos-sles", "txt");
-    let sles_options = temp_path("ir-warm-linux-binary-repos-sles-options", "txt");
-    let sles_prefix = temp_path("ir-warm-linux-binary-repos-sles-prefix", "txt");
-    let sles = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &sles_repos)
-        .env("IR_TEST_OPTIONS_FILE", &sles_options)
-        .env("IR_TEST_PREFIX_FILE", &sles_prefix)
-        .env("IR_TEST_DOWNLOAD_METHOD", "wget")
-        .env("IR_TEST_PPM_ALIAS", "RSPM")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
-        .env("IR_TEST_R_ARCH", "x86_64")
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&sles);
-    assert_eq!(
-        read_repos(&sles_repos),
-        "RSPM=https://packagemanager.posit.co/cran/__linux__/opensuse156/latest\nCRAN=https://cran.r-project.org"
-    );
-    let options = read_repos(&sles_options);
-    assert!(options.contains("HTTPUserAgent=R/"));
-    assert!(options.contains("download.file.extra=--compressed"));
-    assert!(options.contains("--user-agent"));
-    assert_eq!(read_repos(&sles_prefix), "opensuse156");
-
-    let source = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_PACKAGE_TYPE", "source")
-        .env("IR_TEST_REPOS_FILE", &source_repos)
-        .env("IR_TEST_OPTIONS_FILE", &source_options)
-        .env("IR_TEST_PPM_ALIAS", "RSPM")
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&source);
-    assert_eq!(
-        read_repos(&source_repos),
-        "RSPM=https://packagemanager.posit.co/cran/latest\nCRAN=https://cran.r-project.org\nInternal=https://internal.example.test/repo"
-    );
-    let source_options = read_repos(&source_options);
-    assert!(source_options.contains("pkgType=source"));
-    assert!(source_options.contains("pkg.platforms=source"));
-    assert!(source_options.contains("PKG_PLATFORMS=source"));
-
-    let eol = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &eol_repos)
-        .env(
-            "IR_TEST_OS_RELEASE",
-            "ID=ubuntu\nVERSION_CODENAME=focal\nUBUNTU_CODENAME=focal",
-        )
-        .env("IR_TEST_GLIBC_VERSION", "2.31")
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&eol);
-    assert_eq!(
-        read_repos(&eol_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
-    let arm = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &arm_repos)
-        .env("IR_TEST_OS_RELEASE", "ID=debian\nVERSION_CODENAME=bookworm")
-        .env("IR_TEST_GLIBC_VERSION", "2.36")
-        .env("IR_TEST_R_ARCH", "aarch64")
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&arm);
-    assert_eq!(
-        read_repos(&arm_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
-    let binary = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_PACKAGE_TYPE", "binary")
-        .env("IR_TEST_REPOS_FILE", &binary_repos)
-        .env("IR_TEST_OPTIONS_FILE", &binary_options)
-        .env("IR_TEST_SOURCE_STARTUP", "1")
-        .env(
-            "IR_TEST_OS_RELEASE",
-            "ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble",
-        )
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&binary);
-    assert_eq!(
-        read_repos(&binary_repos),
+        read_repos(&rspm_repos),
         "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/latest"
     );
-    let binary_options = read_repos(&binary_options);
-    assert!(binary_options.contains("pkgType=both"));
-    assert!(binary_options.contains("pkg.platforms="));
-    assert!(binary_options.contains("PKG_PLATFORMS="));
-    assert!(!binary_options.contains("pkg.platforms=source"));
-    assert!(!binary_options.contains("PKG_PLATFORMS=source"));
-}
 
-#[test]
-fn warm_renv_cache_configures_ppm_user_agent_for_tooling_installs() {
-    let user_library = temp_dir("ir-warm-tooling-user-agent-library");
-    let profile = temp_path("ir-warm-tooling-user-agent-profile", "R");
-    let options_file = temp_path("ir-warm-tooling-user-agent-options", "txt");
-
-    fs::write(
-        &profile,
-        r#"
-ir_test_write_pkg <- function(lib, pkg, namespace, code) {
-  path <- file.path(lib, pkg)
-  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(
-    paste("Package:", pkg),
-    "Version: 0.0.1",
-    paste("Title:", pkg),
-    paste("Description:", pkg),
-    "License: MIT"
-  ), file.path(path, "DESCRIPTION"))
-  writeLines(namespace, file.path(path, "NAMESPACE"))
-  writeLines(code, file.path(path, "R", pkg))
-}
-
-Sys.info <- function() c(sysname = "Linux")
-file.exists <- function(path) {
-  if (identical(path, "/etc/os-release")) TRUE else base::file.exists(path)
-}
-readLines <- function(con, warn = TRUE, ...) {
-  if (identical(con, "/etc/os-release"))
-    c("ID=sles", "VERSION_ID=\"15.7\"")
-  else
-    base::readLines(con, warn = warn, ...)
-}
-options(download.file.method = "curl", download.file.extra = "--compressed")
-
-utils::assignInNamespace("install.packages", function(pkgs, repos, ...) {
-  writeLines(c(
-    paste0("repos=", unname(repos[["CRAN"]])),
-    paste0("HTTPUserAgent=", getOption("HTTPUserAgent", "")),
-    paste0("download.file.extra=", getOption("download.file.extra", ""))
-  ), Sys.getenv("IR_TEST_OPTIONS_FILE"))
-
-  for (pkg in pkgs) {
-    namespace <- if (identical(pkg, "renv")) "export(use)" else paste0("export(ir_test_", pkg, ")")
-    code <- if (identical(pkg, "renv")) {
-      "use <- function(..., library, repos, attach, sandbox, isolate, verbose) invisible(TRUE)"
-    } else {
-      paste0("ir_test_", pkg, " <- function() TRUE")
-    }
-    ir_test_write_pkg(Sys.getenv("R_LIBS_USER"), pkg, namespace, code)
-  }
-}, ns = "utils")
-"#,
-    )
-    .unwrap();
-
-    let output = Command::new(rscript())
+    let explicit = Command::new(rscript())
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_OPTIONS_FILE", &options_file)
+        .env("IR_TEST_REPOS_FILE", &explicit_repos)
+        .env("IR_TEST_OVERRIDE_FILE", &explicit_override)
+        .env("RENV_CONFIG_REPOS_OVERRIDE", "https://stale.example.test")
         .args([
             "scripts/warm-renv-cache.R",
             "--repos",
-            "https://cran.r-project.org",
+            "https://packagemanager.posit.co/cran/__linux__/noble/2026-06-01",
             "cli",
         ])
         .output()
         .unwrap();
-
-    assert_success(&output);
-    let options = fs::read_to_string(&options_file)
-        .unwrap()
-        .replace("\r\n", "\n");
-    assert!(
-        options.contains("repos=https://packagemanager.posit.co/cran/__linux__/opensuse156/latest")
+    assert_success(&explicit);
+    assert_eq!(
+        read_repos(&explicit_repos),
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/2026-06-01"
     );
-    assert!(options.contains("HTTPUserAgent=R/"));
-    assert!(options.contains("download.file.extra=--compressed"));
-    assert!(options.contains("--user-agent"));
+    assert_eq!(
+        read_repos(&explicit_override),
+        "https://packagemanager.posit.co/cran/__linux__/noble/2026-06-01"
+    );
 }
 
 #[test]

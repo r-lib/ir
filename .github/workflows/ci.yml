@@ -103,7 +103,6 @@ jobs:
         shell: bash
         run: |
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
-            --snapshot latest \
             cli glue jsonlite dplyr tidyr github::rstudio/reticulate fansi htmltools knitr rmarkdown xfun quarto \
             btw Rapp docopt pkgsearch prettyunits
         env:
@@ -113,7 +112,7 @@ jobs:
         shell: bash
         run: |
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
-            --snapshot 2026-06-01 \
+            --repos "${RSPM%/latest}/2026-06-01" \
             dplyr tidyr glue jsonlite rmarkdown bookdown tinytex xfun
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
@@ -122,7 +121,7 @@ jobs:
         shell: bash
         run: |
           "$IR_TEST_RSCRIPT" scripts/warm-renv-cache.R \
-            --snapshot ${IR_TEST_R_EXCLUDE_NEWER} \
+            --repos "${RSPM%/latest}/${IR_TEST_R_EXCLUDE_NEWER}" \
             jsonlite knitr rmarkdown
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R

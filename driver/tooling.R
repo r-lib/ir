@@ -8,21 +8,6 @@ ir_cache_dir <- function() {
   if (nzchar(env)) env else tools::R_user_dir("ir", "cache")
 }
 
-ir_linux_os_release <- function(path = "/etc/os-release") {
-  if (!file.exists(path)) return(character())
-
-  lines <- readLines(path, warn = FALSE)
-  values <- character()
-  for (line in lines) {
-    parts <- strsplit(line, "=", fixed = TRUE)[[1L]]
-    if (length(parts) < 2L) next
-    key <- parts[[1L]]
-    value <- paste(parts[-1L], collapse = "=")
-    values[[key]] <- gsub('^"|"$', "", value)
-  }
-  values
-}
-
 ir_named_value <- function(values, name) {
   if (is.null(values) || !(name %in% names(values))) return(NULL)
   unname(values[[name]])
@@ -81,71 +66,11 @@ ir_manylinux_binary_distribution <- function(arch = ir_linux_arch()) {
   NULL
 }
 
-ir_supported_binary_distribution <- function(distro, arch, supported) {
-  if (!is.null(arch) && arch %in% supported) return(distro)
-  ir_manylinux_binary_distribution(arch)
-}
-
 ir_linux_binary_distribution <- function(package_type = ir_package_type()) {
   if (identical(package_type, "source")) return(NULL)
-
   if (!ir_linux_host()) return(NULL)
 
-  os_release <- ir_linux_os_release()
-  id <- ir_named_value(os_release, "ID")
-  arch <- ir_linux_arch()
-  ubuntu_codename <- ir_named_value(os_release, "UBUNTU_CODENAME")
-  ubuntu_supported <- list(
-    jammy = c("x86_64"),
-    noble = c("x86_64", "aarch64"),
-    resolute = c("x86_64", "aarch64")
-  )
-  if (!is.null(ubuntu_codename) &&
-      ubuntu_codename %in% names(ubuntu_supported)) {
-    return(ir_supported_binary_distribution(
-      ubuntu_codename, arch, ubuntu_supported[[ubuntu_codename]]
-    ))
-  }
-
-  codename <- ir_named_value(os_release, "VERSION_CODENAME")
-  if (identical(id, "ubuntu")) {
-    if (!is.null(codename) && codename %in% names(ubuntu_supported)) {
-      return(ir_supported_binary_distribution(
-        codename, arch, ubuntu_supported[[codename]]
-      ))
-    }
-  }
-  if (identical(id, "debian")) {
-    debian_supported <- list(bookworm = c("x86_64"), trixie = c("x86_64"))
-    if (!is.null(codename) && codename %in% names(debian_supported)) {
-      return(ir_supported_binary_distribution(
-        codename, arch, debian_supported[[codename]]
-      ))
-    }
-  }
-  if (is.null(id)) return(NULL)
-
-  if (id %in% c("opensuse-leap", "sles")) {
-    suse_supported <- c("15.6" = "opensuse156")
-    if (identical(id, "sles"))
-      suse_supported <- c(suse_supported, "15.7" = "opensuse156")
-    version <- ir_named_value(os_release, "VERSION_ID")
-    distro <- if (!is.null(version)) suse_supported[[version]] else NULL
-    if (!is.null(distro))
-      return(ir_supported_binary_distribution(distro, arch, c("x86_64")))
-  }
-  if (id %in% c("rhel", "redhat", "rocky", "almalinux")) {
-    rhel_supported <- c("8" = "centos8", "9" = "rhel9", "10" = "rhel10")
-    version <- ir_named_value(os_release, "VERSION_ID")
-    major <- if (!is.null(version)) strsplit(version, ".", fixed = TRUE)[[1L]][[1L]] else NULL
-    distro <- rhel_supported[[major]]
-    if (!is.null(distro)) {
-      supported <- if (identical(major, "8")) c("x86_64") else c("x86_64", "aarch64")
-      return(ir_supported_binary_distribution(distro, arch, supported))
-    }
-  }
-
-  ir_manylinux_binary_distribution(arch)
+  ir_manylinux_binary_distribution()
 }
 
 ir_cache_platform <- function(platform = R.version$platform) {
@@ -165,8 +90,8 @@ ir_ppm_cran_url <- function(snapshot) {
                    distro, snapshot))
 
   if (identical(package_type, "binary") && ir_linux_host())
-    stop("IR_PACKAGE_TYPE=binary requires a Linux distribution supported by ",
-         "Posit Package Manager", call. = FALSE)
+    stop("IR_PACKAGE_TYPE=binary requires x86_64 or ARM64 Linux with ",
+         "glibc 2.28 or newer", call. = FALSE)
 
   sprintf("https://packagemanager.posit.co/cran/%s", snapshot)
 }
@@ -216,8 +141,8 @@ ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
-# reproducibility date. PPM serves binaries for Windows and macOS, and Linux
-# binary repositories are selected when the host distribution is known.
+# reproducibility date. PPM serves binaries for Windows and macOS, and
+# manylinux binaries for modern Linux hosts.
 ir_tooling_repos <- function()
   c(CRAN = ir_ppm_cran_url("latest"))
 

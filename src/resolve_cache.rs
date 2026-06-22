@@ -8,6 +8,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "linux")]
+use std::process::Command;
+
 use sha2::{Digest, Sha256};
 
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
@@ -164,51 +167,47 @@ fn package_type_key() -> Result<Option<String>, Box<dyn Error>> {
 
 #[cfg(target_os = "linux")]
 fn append_resolution_platform_key(parts: &mut Vec<String>) {
-    // R remains the source of truth for selecting PPM repository URLs. Rust
-    // only needs a Linux host identity so pre-R cache hits cannot cross distro
-    // boundaries when the selected repository serves distro-specific binaries.
-    parts.push(linux_os_release_key());
+    let distribution = linux_binary_distribution().unwrap_or("none");
+    parts.push(format!("linux-ppm: {distribution}"));
 }
 
 #[cfg(not(target_os = "linux"))]
 fn append_resolution_platform_key(_parts: &mut Vec<String>) {}
 
 #[cfg(target_os = "linux")]
-fn linux_os_release_key() -> String {
-    fs::read_to_string("/etc/os-release")
-        .ok()
-        .and_then(|contents| linux_os_release_key_from_str(&contents))
-        .unwrap_or_else(|| "linux-os-release:unknown".to_string())
+fn linux_binary_distribution() -> Option<&'static str> {
+    if !matches!(env::consts::ARCH, "x86_64" | "aarch64") {
+        return None;
+    }
+
+    let (major, minor) = glibc_version()?;
+    if (major, minor) >= (2, 28) {
+        Some("manylinux_2_28")
+    } else {
+        None
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn linux_os_release_key_from_str(contents: &str) -> Option<String> {
-    let fields = ["ID", "VERSION_ID", "VERSION_CODENAME", "UBUNTU_CODENAME"];
-    let mut parts = Vec::new();
-    for field in fields {
-        let Some(value) = os_release_value(contents, field) else {
+fn glibc_version() -> Option<(u64, u64)> {
+    let output = Command::new("ldd").arg("--version").output().ok()?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for part in text.split(|ch: char| !(ch.is_ascii_digit() || ch == '.')) {
+        let Some((major, minor)) = part.split_once('.') else {
             continue;
         };
-        if !value.is_empty() {
-            parts.push(format!("{field}={value}"));
-        }
-    }
-
-    (!parts.is_empty()).then(|| format!("linux-os-release:{}", parts.join(";")))
-}
-
-#[cfg(target_os = "linux")]
-fn os_release_value(contents: &str, field: &str) -> Option<String> {
-    for line in contents.lines() {
-        let Some((key, value)) = line.split_once('=') else {
+        let Ok(major) = major.parse::<u64>() else {
             continue;
         };
-        if key != field {
+        let Ok(minor) = minor.parse::<u64>() else {
             continue;
-        }
-        return Some(value.trim_matches(['"', '\'']).to_string());
+        };
+        return Some((major, minor));
     }
-
     None
 }
 
@@ -562,25 +561,5 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_marker_key_uses_os_release_identity() {
-        let key = linux_os_release_key_from_str(
-            r#"
-NAME="Ubuntu"
-ID=ubuntu
-VERSION_ID="24.04"
-VERSION_CODENAME=noble
-UBUNTU_CODENAME=noble
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            key,
-            "linux-os-release:ID=ubuntu;VERSION_ID=24.04;VERSION_CODENAME=noble;UBUNTU_CODENAME=noble"
-        );
     }
 }

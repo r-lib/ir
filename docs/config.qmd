@@ -60,7 +60,7 @@ Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newe
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
-On Linux distributions known to Posit Package Manager, `ir` resolves public PPM repositories through distro-specific binary URLs such as `https://packagemanager.posit.co/cran/__linux__/noble/latest`.
+On modern x86_64 and ARM64 Linux hosts with glibc 2.28 or newer, `ir` resolves public PPM repositories through Posit Package Manager's manylinux binary URL, such as `https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest`.
 Set `IR_PACKAGE_TYPE=source` to leave public PPM repositories on their source-style URLs and set the resolver session's package type to source.
 Set `IR_PACKAGE_TYPE=binary` to require a supported Linux PPM binary repository when `ir` selects public PPM for Linux.
 R selection precedence is command line, then environment, then frontmatter.

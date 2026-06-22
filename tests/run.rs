@@ -1614,51 +1614,26 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
 #[test]
 fn run_uses_ppm_latest_for_default_repos_and_rewrites_ppm_snapshots() {
     let default_cache_dir = temp_dir("ir-linux-binary-repos-default-cache");
-    let latest_cache_dir = temp_dir("ir-linux-binary-repos-latest-cache");
-    let dated_cache_dir = temp_dir("ir-linux-binary-repos-dated-cache");
     let snapshot_cache_dir = temp_dir("ir-linux-binary-repos-snapshot-cache");
     let profile = temp_path("ir-linux-binary-repos-profile", "R");
     let default_repos = temp_path("ir-linux-binary-repos-default", "txt");
-    let latest_repos = temp_path("ir-linux-binary-repos-latest", "txt");
-    let dated_repos = temp_path("ir-linux-binary-repos-dated", "txt");
+    let alias_repos = temp_path("ir-linux-binary-repos-alias", "txt");
+    let alias_options = temp_path("ir-linux-binary-repos-alias-options", "txt");
+    let alias_prefix = temp_path("ir-linux-binary-repos-alias-prefix", "txt");
     let snapshot_repos = temp_path("ir-linux-binary-repos-snapshot", "txt");
     let source_repos = temp_path("ir-linux-binary-repos-source", "txt");
     let source_options = temp_path("ir-linux-binary-repos-source-options", "txt");
-    let eol_repos = temp_path("ir-linux-binary-repos-eol", "txt");
-    let arm_repos = temp_path("ir-linux-binary-repos-arm", "txt");
     let binary_repos = temp_path("ir-linux-binary-repos-binary", "txt");
     let binary_options = temp_path("ir-linux-binary-repos-binary-options", "txt");
 
     fs::write(
         &profile,
-        r#"
-ir_test_write_pkg <- function(lib, pkg, namespace, code) {
-  path <- file.path(lib, pkg)
-  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(
-    paste("Package:", pkg),
-    "Version: 0.0.1",
-    paste("Title:", pkg),
-    paste("Description:", pkg),
-    "License: MIT"
-  ), file.path(path, "DESCRIPTION"))
-  writeLines(namespace, file.path(path, "NAMESPACE"))
-  writeLines(code, file.path(path, "R", pkg))
-}
-
-ir_test_simulated_os_release <- Sys.getenv("IR_TEST_OS_RELEASE", unset = "")
-if (nzchar(ir_test_simulated_os_release)) {
+        format!(
+            "source({})\n{}",
+            r_string(&fixture("resolver-tooling.R")),
+            r#"
+if (identical(Sys.getenv("IR_TEST_LINUX", unset = ""), "1"))
   Sys.info <- function() c(sysname = "Linux")
-  file.exists <- function(path) {
-    if (identical(path, "/etc/os-release")) TRUE else base::file.exists(path)
-  }
-  readLines <- function(con, warn = TRUE, ...) {
-    if (identical(con, "/etc/os-release"))
-      strsplit(ir_test_simulated_os_release, "\n", fixed = TRUE)[[1]]
-    else
-      base::readLines(con, warn = warn, ...)
-  }
-}
 ir_test_glibc_version <- Sys.getenv("IR_TEST_GLIBC_VERSION", unset = "")
 if (nzchar(ir_test_glibc_version)) {
   system2 <- function(command, args = character(), stdout = FALSE, stderr = FALSE, ...) {
@@ -1691,38 +1666,11 @@ ir_test_private_libs <- unique(file.path(
 ))
 
 for (ir_test_private_lib in ir_test_private_libs) {
-  ir_test_write_pkg(
+  ir_test_write_secretbase(ir_test_private_lib)
+  ir_test_write_pak(ir_test_private_lib)
+  ir_test_write_renv(
     ir_test_private_lib,
-    "secretbase",
-    "export(sha256)",
-    "sha256 <- function(x) paste(c('hash', nchar(paste(x, collapse = '\n'))), collapse = '-')"
-  )
-  ir_test_write_pkg(
-    ir_test_private_lib,
-    "pak",
-    "export(pkg_deps)",
-    paste(
-      "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
-      "  refs <- as.character(refs)",
-      "  data.frame(",
-      "    status = rep('OK', length(refs)),",
-      "    ref = refs,",
-      "    package = sub('@.*$', '', refs),",
-      "    version = rep('0.0.1', length(refs)),",
-      "    type = rep('standard', length(refs)),",
-      "    priority = NA_character_,",
-      "    direct = TRUE,",
-      "    stringsAsFactors = FALSE",
-      "  )",
-      "}",
-      sep = "\n"
-    )
-  )
-  ir_test_write_pkg(
-    ir_test_private_lib,
-    "renv",
-    "export(use)",
-    paste(
+    code = paste(
       "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
       "  writeLines(paste(names(repos), unname(repos), sep = '='), Sys.getenv('IR_TEST_REPOS_FILE'))",
       "  options_file <- Sys.getenv('IR_TEST_OPTIONS_FILE', unset = '')",
@@ -1773,6 +1721,7 @@ if (nzchar(ir_test_download_method))
   options(download.file.method = ir_test_download_method,
           download.file.extra = "--compressed")
 "#,
+        ),
     )
     .unwrap();
 
@@ -1783,9 +1732,15 @@ if (nzchar(ir_test_download_method))
             .trim()
             .to_string()
     };
+    let configure_manylinux = |cmd: &mut Command| {
+        cmd.env("IR_TEST_LINUX", "1")
+            .env("IR_TEST_GLIBC_VERSION", "2.36")
+            .env("IR_TEST_R_ARCH", "x86_64")
+            .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "manylinux_2_28");
+    };
 
     let mut default_cmd = ir();
-    set_ppm_linux_distribution_env(&mut default_cmd);
+    configure_manylinux(&mut default_cmd);
     let default = default_cmd
         .env("IR_CACHE_DIR", &default_cache_dir)
         .env("IR_RSCRIPT", rscript())
@@ -1807,73 +1762,11 @@ if (nzchar(ir_test_download_method))
     assert_stdout_contains(&default, "ir.fixture=ppm-default");
     assert_eq!(
         read_repos(&default_repos),
-        format!("CRAN={}", expected_ppm_latest_url())
-    );
-
-    let mut latest_cmd = ir();
-    set_ppm_linux_distribution_env(&mut latest_cmd);
-    let latest = latest_cmd
-        .env("IR_CACHE_DIR", &latest_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &latest_repos)
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=linux-binary-latest\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&latest);
-    assert_stdout_contains(&latest, "ir.fixture=linux-binary-latest");
-    assert_eq!(
-        read_repos(&latest_repos),
-        format!(
-            "CRAN={}\nInternal=https://internal.example.test/repo",
-            expected_ppm_latest_url()
-        )
-    );
-
-    let mut dated_cmd = ir();
-    set_ppm_linux_distribution_env(&mut dated_cmd);
-    let dated = dated_cmd
-        .env("IR_CACHE_DIR", &dated_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env(
-            "IR_TEST_PROFILE_REPOS",
-            "https://packagemanager.posit.co/cran/2026-06-01",
-        )
-        .env("IR_TEST_REPOS_FILE", &dated_repos)
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "opensuse156")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
-        .env("IR_TEST_R_ARCH", "x86_64")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=linux-binary-dated\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&dated);
-    assert_stdout_contains(&dated, "ir.fixture=linux-binary-dated");
-    assert_eq!(
-        read_repos(&dated_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/opensuse156/2026-06-01\nInternal=https://internal.example.test/repo"
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
     );
 
     let mut snapshot_cmd = ir();
-    set_ppm_linux_distribution_env(&mut snapshot_cmd);
+    configure_manylinux(&mut snapshot_cmd);
     let snapshot = snapshot_cmd
         .env("IR_CACHE_DIR", &snapshot_cache_dir)
         .env("IR_RSCRIPT", rscript())
@@ -1896,25 +1789,21 @@ if (nzchar(ir_test_download_method))
     assert_stdout_contains(&snapshot, "ir.fixture=linux-binary-snapshot");
     assert_eq!(
         read_repos(&snapshot_repos),
-        format!("CRAN={}", expected_ppm_cran_url("2024-03-15"))
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/2024-03-15"
     );
 
-    let sles_cache_dir = temp_dir("ir-linux-binary-repos-sles-cache");
-    let sles_repos = temp_path("ir-linux-binary-repos-sles", "txt");
-    let sles_options = temp_path("ir-linux-binary-repos-sles-options", "txt");
-    let sles_prefix = temp_path("ir-linux-binary-repos-sles-prefix", "txt");
-    let sles = ir()
-        .env("IR_CACHE_DIR", &sles_cache_dir)
+    let alias_cache_dir = temp_dir("ir-linux-binary-repos-alias-cache");
+    let mut alias_cmd = ir();
+    configure_manylinux(&mut alias_cmd);
+    let alias = alias_cmd
+        .env("IR_CACHE_DIR", &alias_cache_dir)
         .env("IR_RSCRIPT", rscript())
         .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &sles_repos)
-        .env("IR_TEST_OPTIONS_FILE", &sles_options)
-        .env("IR_TEST_PREFIX_FILE", &sles_prefix)
+        .env("IR_TEST_REPOS_FILE", &alias_repos)
+        .env("IR_TEST_OPTIONS_FILE", &alias_options)
+        .env("IR_TEST_PREFIX_FILE", &alias_prefix)
         .env("IR_TEST_DOWNLOAD_METHOD", "curl")
         .env("IR_TEST_PPM_ALIAS", "RSPM")
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "opensuse156")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
-        .env("IR_TEST_R_ARCH", "x86_64")
         .args([
             "run",
             "--isolated",
@@ -1922,21 +1811,21 @@ if (nzchar(ir_test_download_method))
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=sles-binary-latest\\n')",
+            "cat('ir.fixture=alias-binary-latest\\n')",
         ])
         .output()
         .unwrap();
-    assert_success(&sles);
-    assert_stdout_contains(&sles, "ir.fixture=sles-binary-latest");
+    assert_success(&alias);
+    assert_stdout_contains(&alias, "ir.fixture=alias-binary-latest");
     assert_eq!(
-        read_repos(&sles_repos),
-        "RSPM=https://packagemanager.posit.co/cran/__linux__/opensuse156/latest\nCRAN=https://cran.r-project.org"
+        read_repos(&alias_repos),
+        "RSPM=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest\nCRAN=https://cran.r-project.org"
     );
-    let options = read_repos(&sles_options);
+    let options = read_repos(&alias_options);
     assert!(options.contains("HTTPUserAgent=R/"));
     assert!(options.contains("download.file.extra=--compressed"));
     assert!(options.contains("--user-agent"));
-    assert_eq!(read_repos(&sles_prefix), "opensuse156");
+    assert_eq!(read_repos(&alias_prefix), "manylinux_2_28");
 
     let source_cache_dir = temp_dir("ir-linux-binary-repos-source-cache");
     let source = ir()
@@ -1948,8 +1837,6 @@ if (nzchar(ir_test_download_method))
         .env("IR_TEST_OPTIONS_FILE", &source_options)
         .env("IR_TEST_PPM_ALIAS", "RSPM")
         .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "opensuse156")
-        .env("IR_TEST_OS_RELEASE", "ID=sles\nVERSION_ID=\"15.7\"")
         .args([
             "run",
             "--isolated",
@@ -1972,66 +1859,10 @@ if (nzchar(ir_test_download_method))
     assert!(source_options.contains("pkg.platforms=source"));
     assert!(source_options.contains("PKG_PLATFORMS=source"));
 
-    let eol_cache_dir = temp_dir("ir-linux-binary-repos-eol-cache");
-    let eol = ir()
-        .env("IR_CACHE_DIR", &eol_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &eol_repos)
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "manylinux_2_28")
-        .env(
-            "IR_TEST_OS_RELEASE",
-            "ID=ubuntu\nVERSION_CODENAME=focal\nUBUNTU_CODENAME=focal",
-        )
-        .env("IR_TEST_GLIBC_VERSION", "2.31")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=eol-manylinux\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&eol);
-    assert_stdout_contains(&eol, "ir.fixture=eol-manylinux");
-    assert_eq!(
-        read_repos(&eol_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
-    let arm_cache_dir = temp_dir("ir-linux-binary-repos-arm-cache");
-    let arm = ir()
-        .env("IR_CACHE_DIR", &arm_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &arm_repos)
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "manylinux_2_28")
-        .env("IR_TEST_OS_RELEASE", "ID=debian\nVERSION_CODENAME=bookworm")
-        .env("IR_TEST_GLIBC_VERSION", "2.36")
-        .env("IR_TEST_R_ARCH", "aarch64")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=arm-manylinux\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&arm);
-    assert_stdout_contains(&arm, "ir.fixture=arm-manylinux");
-    assert_eq!(
-        read_repos(&arm_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
     let binary_cache_dir = temp_dir("ir-linux-binary-repos-binary-cache");
-    let binary = ir()
+    let mut binary_cmd = ir();
+    configure_manylinux(&mut binary_cmd);
+    let binary = binary_cmd
         .env("IR_CACHE_DIR", &binary_cache_dir)
         .env("IR_RSCRIPT", rscript())
         .env("R_PROFILE_USER", &profile)
@@ -2039,11 +1870,6 @@ if (nzchar(ir_test_download_method))
         .env("IR_TEST_REPOS_FILE", &binary_repos)
         .env("IR_TEST_OPTIONS_FILE", &binary_options)
         .env("IR_TEST_SOURCE_STARTUP", "1")
-        .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "noble")
-        .env(
-            "IR_TEST_OS_RELEASE",
-            "ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble",
-        )
         .args([
             "run",
             "--isolated",
@@ -2059,7 +1885,7 @@ if (nzchar(ir_test_download_method))
     assert_stdout_contains(&binary, "ir.fixture=binary-package-type");
     assert_eq!(
         read_repos(&binary_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/latest"
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
     );
     let binary_options = read_repos(&binary_options);
     assert!(binary_options.contains("pkgType=both"));
