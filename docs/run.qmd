@@ -37,6 +37,8 @@ The script frontmatter supports:
 - `packages`: package refs resolved with pak.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig.
 - `rscript`: an optional Rscript executable path or command.
+- `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
+- `python-version`: an optional Python version requirement.
 - `isolated`: `true` disables the user library for the run.
 - `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When no R selector is set, it also selects the latest R major.minor version available on that date.
 
@@ -54,6 +56,29 @@ Local packages may be written as `local::path`, as a bare file-system path in pa
 `packages` must be a YAML sequence; each sequence entry is one package ref.
 Omit `packages`, use `packages: []`, or use `packages: null` when no package refs are needed.
 Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.
+
+## Python environments
+
+Use `python-packages` or `python-version` to ask `ir run` for a Python environment before launching the script.
+`ir` resolves the environment with `reticulate:::uv_get_or_create_env()` and passes the resulting Python executable to the script with `RETICULATE_PYTHON`.
+Declare `reticulate` under `packages` when the R script loads reticulate.
+Use either `r-version` or `python-version`, not both.
+
+```r
+#!/usr/bin/env -S ir run
+#| packages:
+#|   - reticulate
+#| python-packages:
+#|   - pandas
+#|   - matplotlib
+#| python-version: "3.11"
+#| exclude-newer: "2026-06-01"
+
+library(reticulate)
+pd <- import("pandas")
+```
+
+When Python metadata is present, `exclude-newer` is passed to Python environment resolution instead of R package resolution.
 
 ## Inline runs
 

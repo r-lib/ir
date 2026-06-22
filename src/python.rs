@@ -22,6 +22,7 @@ pub(crate) fn resolve_env(
     rscript: &OsStr,
     cache_dir: &Path,
     python: Option<&PythonSpec>,
+    include_jupyter: bool,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let Some(python) = python else {
         return Ok(None);
@@ -59,7 +60,7 @@ pub(crate) fn resolve_env(
             .stdin
             .take()
             .ok_or("failed to open Python resolver stdin")?;
-        for package in python_packages(python) {
+        for package in python_packages(python, include_jupyter) {
             writeln!(stdin, "{package}")?;
         }
     }
@@ -82,11 +83,12 @@ pub(crate) fn resolve_env(
     Ok(Some(PathBuf::from(path)))
 }
 
-fn python_packages(python: &PythonSpec) -> Vec<String> {
+fn python_packages(python: &PythonSpec, include_jupyter: bool) -> Vec<String> {
     let mut packages = python.packages.clone();
-    if !packages
-        .iter()
-        .any(|package| python_package_name(package) == "jupyter")
+    if include_jupyter
+        && !packages
+            .iter()
+            .any(|package| python_package_name(package) == "jupyter")
     {
         packages.push("jupyter".to_string());
     }

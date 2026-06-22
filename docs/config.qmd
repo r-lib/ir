@@ -59,6 +59,7 @@ Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newe
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
+When Python metadata is present, the selected `exclude-newer` value is passed to Python environment resolution instead of R package resolution.
 R selection precedence is command line, then environment, then frontmatter.
 Use `--rscript`, `IR_RSCRIPT`, or frontmatter `rscript` to select a specific Rscript executable.
 Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.

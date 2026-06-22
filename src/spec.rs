@@ -31,7 +31,7 @@ pub(crate) fn parse_r_frontmatter(frontmatter: &str) -> Result<RuntimeSpec, Box<
         return Ok(RuntimeSpec::default());
     };
 
-    runtime_spec_from_yaml_mapping(&doc)
+    runtime_spec_from_yaml_mapping(&doc, "")
 }
 
 pub(crate) fn parse_quarto_frontmatter(document: &str) -> Result<RuntimeSpec, Box<dyn Error>> {
@@ -59,13 +59,13 @@ pub(crate) fn parse_quarto_frontmatter(document: &str) -> Result<RuntimeSpec, Bo
         return Err("frontmatter `ir` must be a YAML mapping".into());
     }
 
-    let mut spec = runtime_spec_from_yaml_mapping(spec_node)?;
-    reject_r_python_version_conflict(spec_node)?;
-    spec.python = frontmatter_python_spec(spec_node)?;
-    Ok(spec)
+    runtime_spec_from_yaml_mapping(spec_node, "ir.")
 }
 
-fn runtime_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<RuntimeSpec, Box<dyn Error>> {
+fn runtime_spec_from_yaml_mapping(
+    doc: &Yaml<'_>,
+    python_key_prefix: &str,
+) -> Result<RuntimeSpec, Box<dyn Error>> {
     if doc.is_null() {
         return Ok(RuntimeSpec::default());
     }
@@ -73,12 +73,15 @@ fn runtime_spec_from_yaml_mapping(doc: &Yaml<'_>) -> Result<RuntimeSpec, Box<dyn
         return Err("script frontmatter must be a YAML mapping".into());
     }
 
+    reject_r_python_version_conflict(doc, python_key_prefix)?;
+
     Ok(RuntimeSpec {
         dependencies: frontmatter_dependencies(doc)?,
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
         isolated: frontmatter_optional_bool(doc, "isolated")?.unwrap_or(false),
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
         rscript: frontmatter_optional_string(doc, "rscript")?,
+        python: frontmatter_python_spec(doc, python_key_prefix)?,
         // Quarto rendering is a property of the command, not the frontmatter.
         // cmd_render sets it after parsing.
         ..RuntimeSpec::default()
@@ -115,15 +118,26 @@ fn frontmatter_dependencies(doc: &Yaml<'_>) -> Result<Vec<String>, Box<dyn Error
     Ok(dependencies)
 }
 
-fn reject_r_python_version_conflict(doc: &Yaml<'_>) -> Result<(), Box<dyn Error>> {
+fn reject_r_python_version_conflict(
+    doc: &Yaml<'_>,
+    python_key_prefix: &str,
+) -> Result<(), Box<dyn Error>> {
     if doc.as_mapping_get("r-version").is_some() && doc.as_mapping_get("python-version").is_some() {
-        return Err("frontmatter cannot set both `ir.r-version` and `ir.python-version`".into());
+        return Err(format!(
+            "frontmatter cannot set both `{}` and `{}`",
+            frontmatter_key(python_key_prefix, "r-version"),
+            frontmatter_key(python_key_prefix, "python-version")
+        )
+        .into());
     }
     Ok(())
 }
 
-fn frontmatter_python_spec(doc: &Yaml<'_>) -> Result<Option<PythonSpec>, Box<dyn Error>> {
-    let packages = frontmatter_python_packages(doc)?;
+fn frontmatter_python_spec(
+    doc: &Yaml<'_>,
+    python_key_prefix: &str,
+) -> Result<Option<PythonSpec>, Box<dyn Error>> {
+    let packages = frontmatter_python_packages(doc, python_key_prefix)?;
     let python_version = frontmatter_optional_string(doc, "python-version")?;
 
     if packages.is_none() && python_version.is_none() {
@@ -137,7 +151,10 @@ fn frontmatter_python_spec(doc: &Yaml<'_>) -> Result<Option<PythonSpec>, Box<dyn
     }))
 }
 
-fn frontmatter_python_packages(doc: &Yaml<'_>) -> Result<Option<Vec<String>>, Box<dyn Error>> {
+fn frontmatter_python_packages(
+    doc: &Yaml<'_>,
+    python_key_prefix: &str,
+) -> Result<Option<Vec<String>>, Box<dyn Error>> {
     let Some(value) = doc.as_mapping_get("python-packages") else {
         return Ok(None);
     };
@@ -146,15 +163,27 @@ fn frontmatter_python_packages(doc: &Yaml<'_>) -> Result<Option<Vec<String>>, Bo
     }
     let mut packages = Vec::new();
     let Some(seq) = value.as_vec() else {
-        return Err("frontmatter `ir.python-packages` must be a YAML sequence".into());
+        return Err(format!(
+            "frontmatter `{}` must be a YAML sequence",
+            frontmatter_key(python_key_prefix, "python-packages")
+        )
+        .into());
     };
     for item in seq {
         let Some(value) = item.as_str() else {
-            return Err("frontmatter `ir.python-packages` entries must be strings".into());
+            return Err(format!(
+                "frontmatter `{}` entries must be strings",
+                frontmatter_key(python_key_prefix, "python-packages")
+            )
+            .into());
         };
         packages.push(value.to_owned());
     }
     Ok(Some(packages))
+}
+
+fn frontmatter_key(prefix: &str, key: &str) -> String {
+    format!("{prefix}{key}")
 }
 
 fn push_dependency_entry(

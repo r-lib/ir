@@ -64,6 +64,7 @@ It passes the resulting Python executable to Quarto with `QUARTO_PYTHON` and to 
 Python environment resolution uses `ir`'s private reticulate tooling.
 Declare render-time R dependencies with `ir.packages` and Python dependencies with `ir.python-packages`.
 Likewise, use either `ir.r-version` or `ir.python-version`, not both.
+When Python metadata is present, `ir.exclude-newer` is passed to Python environment resolution instead of R package resolution.
 
 ```yaml
 ---

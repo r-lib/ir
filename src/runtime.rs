@@ -47,12 +47,15 @@ pub(crate) fn cmd_run(
     // Reuse a warm resolution marker, or launch the private resolver R session
     // to resolve deps and materialise the library.
     let library = resolve_library(&rscript, &spec)?;
+    let cache_dir = ir_cache_dir()?;
+    let python = python::resolve_env(&rscript, &cache_dir, spec.python.as_ref(), false)?;
 
     // Render the document, or run the user's program, in an isolated R session.
     let code = run_user_code(
         source,
         &rscript,
         library.as_deref(),
+        python.as_deref(),
         rscript_args,
         script_args,
         isolated,
@@ -80,7 +83,7 @@ pub(crate) fn cmd_render(
 
     let library = resolve_library(&rscript, &spec)?;
     let cache_dir = ir_cache_dir()?;
-    let python = python::resolve_env(&rscript, &cache_dir, spec.python.as_ref())?;
+    let python = python::resolve_env(&rscript, &cache_dir, spec.python.as_ref(), true)?;
     let code = quarto::run(
         &rscript,
         library.as_deref(),
@@ -486,6 +489,7 @@ fn run_user_code(
     source: &RunSource,
     rscript: &OsStr,
     library: Option<&Path>,
+    python: Option<&Path>,
     rscript_args: &[String],
     script_args: &[String],
     isolated: bool,
@@ -494,6 +498,7 @@ fn run_user_code(
         RunSource::Script(script) => run_script(
             rscript,
             library,
+            python,
             RscriptSource::Script(script),
             rscript_args,
             script_args,
@@ -502,6 +507,7 @@ fn run_user_code(
         RunSource::Expressions(expressions) => run_script(
             rscript,
             library,
+            python,
             RscriptSource::Expressions(expressions),
             rscript_args,
             script_args,
@@ -510,6 +516,7 @@ fn run_user_code(
         RunSource::Stdin => run_script(
             rscript,
             library,
+            python,
             RscriptSource::Stdin,
             rscript_args,
             script_args,
@@ -542,6 +549,7 @@ fn run_user_code(
 fn run_script(
     rscript: &OsStr,
     library: Option<&Path>,
+    python: Option<&Path>,
     source: RscriptSource<'_>,
     rscript_args: &[String],
     script_args: &[String],
@@ -566,6 +574,9 @@ fn run_script(
 
     if let Some(lib) = library {
         cmd.env("R_LIBS", lib);
+    }
+    if let Some(python) = python {
+        cmd.env("RETICULATE_PYTHON", python);
     }
 
     if isolated {
