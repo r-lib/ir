@@ -331,7 +331,7 @@ ir:
   python-packages:
     - pandas
   python-version: "3.11"
-  python-exclude-newer: "2026-06-01"
+  exclude-newer: "2026-06-01T12:34:56Z"
 ---
 
 ```{python}
@@ -346,6 +346,10 @@ print("ok")
         &format!(
             "#!/bin/sh\n\
 if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  if [ -n \"${{IR_EXCLUDE_NEWER:-}}\" ]; then\n\
+    echo shared Python exclude-newer should not reach R dependency resolution >&2\n\
+    exit 1\n\
+  fi\n\
   printf '%s\\n' \"$1\" > {}\n\
   cat > {}\n\
   mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
@@ -458,7 +462,7 @@ exit 1\n",
 
     let env = fs::read_to_string(&python_env).unwrap();
     assert!(env.contains("python_version=3.11"), "{env}");
-    assert!(env.contains("exclude_newer=2026-06-01"), "{env}");
+    assert!(env.contains("exclude_newer=2026-06-01T12:34:56Z"), "{env}");
 }
 
 #[cfg(unix)]

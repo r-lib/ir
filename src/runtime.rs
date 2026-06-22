@@ -190,6 +190,11 @@ fn apply_exclude_newer_override(
     spec: &mut RuntimeSpec,
     cli_exclude_newer: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
+    if spec.python.is_some() {
+        apply_python_exclude_newer_override(spec, cli_exclude_newer)?;
+        return Ok(());
+    }
+
     if let Some(exclude_newer) = cli_exclude_newer {
         spec.exclude_newer = normalize_exclude_newer_override(exclude_newer)?;
         return Ok(());
@@ -206,6 +211,32 @@ fn apply_exclude_newer_override(
     }
 
     Ok(())
+}
+
+fn apply_python_exclude_newer_override(
+    spec: &mut RuntimeSpec,
+    cli_exclude_newer: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    spec.exclude_newer = None;
+    let Some(python) = spec.python.as_mut() else {
+        return Ok(());
+    };
+
+    if let Some(exclude_newer) = cli_exclude_newer {
+        python.exclude_newer = nonempty_raw_exclude_newer(exclude_newer);
+        return Ok(());
+    }
+
+    if let Some(exclude_newer) = env::var_os("IR_EXCLUDE_NEWER") {
+        let exclude_newer = env_string("IR_EXCLUDE_NEWER", exclude_newer)?;
+        python.exclude_newer = nonempty_raw_exclude_newer(&exclude_newer);
+    }
+
+    Ok(())
+}
+
+fn nonempty_raw_exclude_newer(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn normalize_exclude_newer_override(value: &str) -> Result<Option<String>, Box<dyn Error>> {

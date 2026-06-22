@@ -64,6 +64,7 @@ It also sets `RETICULATE_PYTHON` for knitr documents that use reticulate.
 Python environment resolution uses `ir`'s private reticulate tooling.
 Declare R dependencies with `ir.packages` or Python dependencies with `ir.python-packages`, not both.
 Likewise, use either `ir.r-version` or `ir.python-version`, not both.
+For Python environments, `ir.exclude-newer` is forwarded to reticulate without date normalization.
 
 ```yaml
 ---
@@ -74,7 +75,7 @@ ir:
     - pandas
     - matplotlib
   python-version: "3.11"
-  python-exclude-newer: 2026-06-01
+  exclude-newer: 2026-06-01T12:34:56Z
 ---
 ```
 

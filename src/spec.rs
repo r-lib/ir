@@ -128,16 +128,15 @@ fn reject_r_python_conflicts(doc: &Yaml<'_>) -> Result<(), Box<dyn Error>> {
 fn frontmatter_python_spec(doc: &Yaml<'_>) -> Result<Option<PythonSpec>, Box<dyn Error>> {
     let packages = frontmatter_python_packages(doc)?;
     let python_version = frontmatter_optional_string(doc, "python-version")?;
-    let exclude_newer = frontmatter_optional_string(doc, "python-exclude-newer")?;
 
-    if packages.is_none() && python_version.is_none() && exclude_newer.is_none() {
+    if packages.is_none() && python_version.is_none() {
         return Ok(None);
     }
 
     Ok(Some(PythonSpec {
         packages: packages.unwrap_or_default(),
         python_version,
-        exclude_newer,
+        exclude_newer: frontmatter_optional_raw_string(doc, "exclude-newer")?,
     }))
 }
 
@@ -206,4 +205,21 @@ fn frontmatter_optional_string(
     } else {
         Some(value.to_owned())
     })
+}
+
+fn frontmatter_optional_raw_string(
+    doc: &Yaml<'_>,
+    key: &str,
+) -> Result<Option<String>, Box<dyn Error>> {
+    let Some(value) = doc.as_mapping_get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+
+    value
+        .as_str()
+        .map(|value| Some(value.to_owned()))
+        .ok_or_else(|| format!("frontmatter `{key}` must be a string").into())
 }
