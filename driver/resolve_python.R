@@ -1,4 +1,7 @@
 ir_python_env_main <- function() {
+  ir_configure_child_tempdir()
+  on.exit(ir_close_pak_remote(), add = TRUE)
+
   result_file <- Sys.getenv("IR_PYTHON_RESULT_FILE", unset = NA_character_)
   stopifnot(!is.na(result_file), nzchar(result_file))
 

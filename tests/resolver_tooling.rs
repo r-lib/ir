@@ -44,6 +44,95 @@ fn assert_pak_installed_resolver_tooling(install_marker: &Path, pak_marker: &Pat
 }
 
 #[test]
+fn resolver_configures_and_closes_pak_subprocess() {
+    let cache_dir = temp_dir("ir-pak-subprocess-cache");
+    let tmp_dir = temp_dir("ir-pak-subprocess-tmp");
+    let user_library = temp_dir("ir-pak-subprocess-user-library");
+    let temp_marker = temp_path("ir-pak-subprocess-temp-marker", "txt");
+    let close_marker = temp_path("ir-pak-subprocess-close-marker", "txt");
+    let profile = temp_path("ir-pak-subprocess-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+{}
+ir_test_write_secretbase(Sys.getenv("R_LIBS_USER"))
+ir_test_write_renv(Sys.getenv("R_LIBS_USER"))
+ir_test_write_pak(
+  Sys.getenv("R_LIBS_USER"),
+  namespace = "export(pkg_deps)",
+  code = paste(
+    "pkg_data <- new.env(parent = emptyenv())",
+    paste0(
+      "pkg_data$remote <- list(close = function(grace = 1000) {{",
+      "  writeLines(paste0('closed=', grace), ", deparse({}), ")",
+      "}})"
+    ),
+    "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {{",
+    "  writeLines(c(",
+    "    paste0('tempdir=', normalizePath(tempdir(), winslash = '/', mustWork = TRUE)),",
+    "    paste0('TMPDIR=', Sys.getenv('TMPDIR', unset = '')),",
+    "    paste0('TMP=', Sys.getenv('TMP', unset = '')),",
+    "    paste0('TEMP=', Sys.getenv('TEMP', unset = ''))",
+    paste0("  ), ", deparse({}), ")"),
+    ir_test_pak_deps_code(),
+    "  pkg_deps(refs, dependencies = dependencies, upgrade = upgrade)",
+    "}}",
+    sep = "\n"
+  )
+)
+"#,
+            resolver_tooling_fixture_source(),
+            r_string(&close_marker),
+            r_string(&temp_marker)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("TMPDIR", &tmp_dir)
+        .env("TMP", &tmp_dir)
+        .env("TEMP", &tmp_dir)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=pak-subprocess\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=pak-subprocess");
+
+    let temp_settings = fs::read_to_string(temp_marker).unwrap();
+    let lines: Vec<&str> = temp_settings.lines().collect();
+    let resolver_temp = lines
+        .iter()
+        .find_map(|line| line.strip_prefix("tempdir="))
+        .unwrap();
+    assert!(resolver_temp.contains("Rtmp"), "{temp_settings}");
+    for name in ["TMPDIR", "TMP", "TEMP"] {
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == &format!("{name}={resolver_temp}")),
+            "{temp_settings}"
+        );
+    }
+
+    let close = fs::read_to_string(close_marker).unwrap();
+    assert_eq!(close.trim(), "closed=5000");
+}
+
+#[test]
 fn resolver_tooling_uses_compatible_user_library_packages() {
     let cache_dir = temp_dir("ir-compatible-tooling-cache");
     let user_library = temp_dir("ir-compatible-tooling-user-library");

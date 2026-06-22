@@ -8,6 +8,35 @@ ir_cache_dir <- function() {
   if (nzchar(env)) env else tools::R_user_dir("ir", "cache")
 }
 
+ir_configure_child_tempdir <- function(tmp = tempdir()) {
+  stopifnot(length(tmp) == 1L, nzchar(tmp), dir.exists(tmp))
+  tmp <- normalizePath(tmp, winslash = "/", mustWork = TRUE)
+  Sys.setenv(TMPDIR = tmp, TMP = tmp, TEMP = tmp)
+  invisible(tmp)
+}
+
+ir_close_pak_remote <- function(grace = 5000) {
+  if (!isNamespaceLoaded("pak")) return(invisible())
+  ns <- asNamespace("pak")
+  if (!exists("pkg_data", ns, inherits = FALSE)) return(invisible())
+
+  pkg_data <- get("pkg_data", ns, inherits = FALSE)
+  remote <- pkg_data[["remote"]]
+  if (is.null(remote)) return(invisible())
+  close <- remote[["close"]]
+  if (!is.function(close)) return(invisible())
+
+  tryCatch(
+    close(grace),
+    error = function(e) {
+      warning("could not close pak subprocess: ", conditionMessage(e),
+              call. = FALSE)
+    }
+  )
+  pkg_data[["remote"]] <- NULL
+  invisible()
+}
+
 ## --- resolver tooling bootstrap ---------------------------------------------
 
 # Packages the resolver itself needs. pak resolves dependencies, renv
