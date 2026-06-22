@@ -93,6 +93,63 @@ ir_tooling_loaded_too_old <- function(package, min_version) {
   is.null(version) || version < package_version(min_version)
 }
 
+ir_user_libs <- function() {
+  r_libs_user <- Sys.getenv("R_LIBS_USER")
+  if (!nzchar(r_libs_user)) return(character())
+
+  user_libs <- strsplit(r_libs_user, .Platform$path.sep, fixed = TRUE)[[1L]]
+  user_libs <- user_libs[nzchar(user_libs)]
+  normalizePath(user_libs, winslash = "/", mustWork = FALSE)
+}
+
+ir_tooling_package_r_minor <- function(path) {
+  metadata <- file.path(path, "Meta", "package.rds")
+  info <- if (file.exists(metadata)) {
+    tryCatch(readRDS(metadata), error = function(e) NULL)
+  } else {
+    NULL
+  }
+
+  built_r <- if (is.null(info)) character() else as.character(info$Built$R)
+  if (length(built_r))
+    built_r <- strsplit(built_r[[1L]], ".", fixed = TRUE)[[1L]][1:2]
+  built_r
+}
+
+ir_prune_wrong_r_minor_user_tooling <- function(packages) {
+  user_libs <- ir_user_libs()
+  if (!length(user_libs)) return(invisible())
+
+  current_r <- strsplit(as.character(getRversion()), ".", fixed = TRUE)[[1L]][1:2]
+  bad_user_libs <- character()
+
+  for (pkg in packages) {
+    path <- find.package(pkg, lib.loc = user_libs, quiet = TRUE)
+    if (!length(path)) next
+
+    pkg_lib <- normalizePath(dirname(path[[1L]]), winslash = "/",
+                             mustWork = FALSE)
+    if (!identical(ir_tooling_package_r_minor(path[[1L]]), current_r))
+      bad_user_libs <- c(bad_user_libs, pkg_lib)
+  }
+
+  if (!length(bad_user_libs)) return(invisible())
+
+  bad_user_libs <- unique(bad_user_libs)
+  current_libs <- .libPaths()
+  current_libs_normalized <- normalizePath(current_libs, winslash = "/",
+                                           mustWork = FALSE)
+  .libPaths(current_libs[!current_libs_normalized %in% bad_user_libs])
+
+  user_libs <- user_libs[!user_libs %in% bad_user_libs]
+  if (length(user_libs))
+    Sys.setenv(R_LIBS_USER = paste(user_libs, collapse = .Platform$path.sep))
+  else
+    Sys.setenv(R_LIBS_USER = "NULL")
+
+  invisible()
+}
+
 ir_tooling_available <- function(package, min_version = NULL) {
   if (ir_tooling_loaded_too_old(package, min_version)) return(FALSE)
 
@@ -166,6 +223,7 @@ ir_ensure_tooling <- function(packages = ir_tooling_packages(),
                         min_versions = min_versions)
   dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   .libPaths(c(lib, .libPaths()))
+  ir_prune_wrong_r_minor_user_tooling(packages)
   old_repos <- options(repos = repos)
   on.exit(options(old_repos), add = TRUE)
 
