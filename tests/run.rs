@@ -1951,6 +1951,7 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 fn resolver_tooling_bootstraps_pak_after_pruning_bad_user_library() {
     let cache_dir = temp_dir("ir-pruned-pak-tooling-cache");
     let user_library = temp_dir("ir-pruned-pak-tooling-user-library");
+    let empty_library = temp_dir("ir-pruned-pak-tooling-empty-library");
     let install_marker = temp_path("ir-pruned-pak-tooling-install", "txt");
     let pak_marker = temp_path("ir-pruned-pak-tooling-pak", "txt");
     let profile = temp_path("ir-pruned-pak-tooling-profile", "R");
@@ -1959,6 +1960,8 @@ fn resolver_tooling_bootstraps_pak_after_pruning_bad_user_library() {
         &profile,
         format!(
             r#"
+.libPaths(c(Sys.getenv("R_LIBS_USER"), Sys.getenv("IR_TEST_EMPTY_LIB")))
+
 ir_test_write_pkg <- function(lib, pkg, namespace, code,
                               built = as.character(getRversion())) {{
   path <- file.path(lib, pkg)
@@ -2106,6 +2109,8 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_EMPTY_LIB", &empty_library)
+        .env("R_LIBS_SITE", &empty_library)
         .env("R_LIBS_USER", &user_library)
         .env("R_PROFILE_USER", &profile)
         .args([
