@@ -37,6 +37,23 @@ fn assert_stdout_contains(output: &Output, expected: &str) {
     );
 }
 
+#[test]
+fn readme_install_commands_are_copyable() {
+    let readme = fs::read_to_string(repo_root().join("README.md")).unwrap();
+    let install = readme
+        .split_once("## Install\n")
+        .and_then(|(_, rest)| rest.split_once("\n## Development setup"))
+        .map(|(section, _)| section)
+        .unwrap_or_else(|| panic!("README.md should have an Install section"));
+
+    assert!(
+        !install
+            .lines()
+            .any(|line| line.starts_with("$ ") || line.starts_with("> ")),
+        "{install}"
+    );
+}
+
 #[cfg(unix)]
 fn dev_deps_sh_plan(platform: &str) -> Output {
     Command::new("sh")

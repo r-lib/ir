@@ -20,9 +20,9 @@ library(tidyr)
 1 + 1
 ```
 
-```console
-$ ir run script.R
-$ ./script.R
+```sh
+ir run script.R
+./script.R
 ```
 
 Full documentation: <https://t-kalinowski.github.io/ir/>
@@ -39,31 +39,31 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 
 ## Common commands
 
-```console
-$ ir run script.R
-$ ir run --vanilla script.R
-$ ir render report.qmd --to html
-$ ir run --with cli -e 'cli::cli_alert_success("works")'
-$ ir run --r-version 4.5 script.R
-$ ir run --exclude-newer 2024-01-15 script.R
-$ rx btw --help
-$ ir tool run --from btw btw --help
-$ ir tool install btw
-$ ir cache dir
+```sh
+ir run script.R
+ir run --vanilla script.R
+ir render report.qmd --to html
+ir run --with cli -e 'cli::cli_alert_success("works")'
+ir run --r-version 4.5 script.R
+ir run --exclude-newer 2024-01-15 script.R
+rx btw --help
+ir tool run --from btw btw --help
+ir tool install btw
+ir cache dir
 ```
 
 ## Install
 
 Install a pre-built binary on Linux or macOS:
 
-```console
-$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
+```sh
+curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
 ```
 
 Install on Windows PowerShell:
 
-```console
-> irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
+```powershell
+irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
 ```
 
 The installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
@@ -75,8 +75,8 @@ Set `IR_INSTALL_DIR` to choose another directory.
 
 You can also build from source with Rust:
 
-```console
-$ cargo build --release
+```sh
+cargo build --release
 ```
 
 This builds `target/release/ir` and `target/release/rx`.
@@ -86,14 +86,14 @@ This builds `target/release/ir` and `target/release/rx`.
 To install the system dependencies needed to build the project and run tests on
 a new machine, run:
 
-```console
-$ scripts/install-dev-deps.sh
+```sh
+scripts/install-dev-deps.sh
 ```
 
 On Windows PowerShell, run:
 
-```console
-> .\scripts\install-dev-deps.ps1
+```powershell
+.\scripts\install-dev-deps.ps1
 ```
 
 The setup scripts install Rust, Python, rig, the current R release, rig's
