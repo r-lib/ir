@@ -218,3 +218,62 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
         "resolver should prune stale R_LIBS_USER before pak loads auxiliary packages"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn resolver_tooling_restart_retries_after_stdin_broken_pipe() {
+    let cache_dir = temp_dir("ir-restart-broken-pipe-cache");
+    let bin_dir = temp_dir("ir-restart-broken-pipe-bin");
+    let library = temp_dir("ir-restart-broken-pipe-library");
+    let script = temp_path("ir-restart-broken-pipe-script", "R");
+    let rscript = bin_dir.join("Rscript");
+    let attempts = temp_path("ir-restart-broken-pipe-attempts", "txt");
+    let first_attempt = temp_path("ir-restart-broken-pipe-first", "txt");
+
+    let mut source = String::from("#!/usr/bin/env -S ir run\n#| packages:\n");
+    for index in 0..20_000 {
+        source.push_str(&format!("#|   - restartpipepkg{index}\n"));
+    }
+    source.push_str("\ncat(\"ir.fixture=restart-broken-pipe\\n\")\n");
+    fs::write(&script, source).unwrap();
+
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  printf 'attempt\\n' >> {}\n\
+  if [ ! -f {} ]; then\n\
+    printf 'seen\\n' > {}\n\
+    if [ -z \"${{IR_TOOLING_RESTART_FILE:-}}\" ]; then\n\
+      echo missing tooling restart file >&2\n\
+      exit 1\n\
+    fi\n\
+    printf 'pak\\n' > \"$IR_TOOLING_RESTART_FILE\"\n\
+    exit 86\n\
+  fi\n\
+  cat > /dev/null\n\
+  printf '%s\\n' {} > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+printf 'ir.fixture=restart-broken-pipe\\n'\n",
+            attempts.display(),
+            first_attempt.display(),
+            first_attempt.display(),
+            library.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=restart-broken-pipe");
+    let attempts = fs::read_to_string(&attempts).unwrap();
+    assert_eq!(attempts.lines().count(), 2, "{attempts}");
+}

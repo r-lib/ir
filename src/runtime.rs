@@ -362,12 +362,13 @@ fn resolve_library_inner(
         }
 
         let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
-        {
+        let stdin_result = (|| -> Result<(), Box<dyn Error>> {
             let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
             for dependency in &dependencies {
                 writeln!(stdin, "{dependency}")?;
             }
-        }
+            Ok(())
+        })();
         let current_status = child
             .wait()
             .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
@@ -381,6 +382,7 @@ fn resolve_library_inner(
             );
         }
 
+        stdin_result?;
         status = Some(current_status);
         break;
     }
