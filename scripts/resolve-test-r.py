@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 from email.parser import Parser
+from pathlib import Path
 
 
 def die(message: str) -> None:
@@ -30,10 +32,19 @@ def run_rig(args: list[str], stdin: str | None = None) -> str:
     return result.stdout
 
 
-def run_r(binary: str, args: list[str], stdin: str) -> str:
+def run_rscript(
+    binary: str,
+    args: list[str],
+    stdin: str,
+    env: dict[str, str] | None = None,
+) -> str:
+    full_env = os.environ.copy()
+    if env is not None:
+        full_env.update(env)
     result = subprocess.run(
         [binary, *args],
         check=False,
+        env=full_env,
         input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -62,31 +73,47 @@ def installed_r_for_version(version: str, spec: str) -> tuple[str, str]:
             binary = install.get("binary", "")
             if not name or not binary:
                 die(f"rig did not report a name and R binary for R {version} from {spec}")
-            return name, binary
+            return name, rscript_for_binary(binary)
     die(f"R {version} from {spec} is not installed by rig")
 
 
-def release_metadata(binary: str) -> tuple[str, str, str]:
-    output = run_r(
-        binary,
-        ["--vanilla", "--slave", "-e", 'source(file("stdin"))'],
+def rscript_for_binary(binary: str) -> str:
+    binary_path = Path(binary)
+    if binary_path.name.lower() == "r.exe":
+        rscript = binary_path.with_name("Rscript.exe")
+    else:
+        rscript = binary_path.with_name("Rscript")
+    if not rscript.exists():
+        die(f"rig reported R binary `{binary}`, but `{rscript}` does not exist")
+    return str(rscript)
+
+
+def release_metadata(rscript: str) -> tuple[str, str, str]:
+    output = run_rscript(
+        rscript,
+        # Do not use --vanilla here. The version-selection tests should
+        # observe the same site/user startup files as the resolved Rscript that
+        # CI will run, especially repository configuration from profiles.
+        ["-"],
         # fmt: r
         stdin="""
-            rscript <- file.path(
-              R.home("bin"),
-              if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
+            rscript <- normalizePath(
+              Sys.getenv("IR_TEST_METADATA_RSCRIPT"),
+              winslash = "/",
+              mustWork = TRUE
             )
 
             metadata <- data.frame(
               version = as.character(getRversion()),
               date = sprintf("%s-%s-%s", R.version$year, R.version$month, R.version$day),
-              rscript = normalizePath(rscript, winslash = "/", mustWork = TRUE)
+              rscript = rscript
             )
 
             write.dcf(metadata, stdout(), width = 100000)
         """,
+        env={"IR_TEST_METADATA_RSCRIPT": rscript},
     )
-    metadata = parse_metadata(output, binary)
+    metadata = parse_metadata(output, rscript)
     return (
         metadata["version"],
         metadata["date"],
@@ -109,8 +136,8 @@ def main() -> None:
 
     spec = sys.argv[1]
     version = resolve_spec(spec)
-    name, binary = installed_r_for_version(version, spec)
-    reported_version, date, rscript = release_metadata(binary)
+    name, rscript = installed_r_for_version(version, spec)
+    reported_version, date, rscript = release_metadata(rscript)
     if reported_version != version:
         die(f"rig resolved {spec} to R {version}, but ran R {reported_version}")
     print(name)

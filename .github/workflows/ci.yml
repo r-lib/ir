@@ -111,8 +111,9 @@ jobs:
       - name: Warm snapshot R package cache
         shell: bash
         run: |
+          cran="${RSPM:-https://packagemanager.posit.co/cran/latest}"
           "$IR_RSCRIPT" scripts/warm-renv-cache.R \
-            --repos https://packagemanager.posit.co/cran/2026-06-01 \
+            --repos "${cran%/latest}/2026-06-01" \
             dplyr tidyr glue jsonlite rmarkdown bookdown tinytex xfun
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
@@ -120,8 +121,9 @@ jobs:
       - name: Warm non-default R package cache
         shell: bash
         run: |
+          cran="${RSPM:-https://packagemanager.posit.co/cran/latest}"
           "$IR_TEST_RSCRIPT" scripts/warm-renv-cache.R \
-            --repos https://packagemanager.posit.co/cran/${IR_TEST_R_EXCLUDE_NEWER} \
+            --repos "${cran%/latest}/${IR_TEST_R_EXCLUDE_NEWER}" \
             jsonlite knitr rmarkdown
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R

@@ -46,7 +46,7 @@ ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
-# reproducibility date. PPM serves binaries for Windows and macOS.
+# reproducibility date.
 ir_tooling_repos <- function()
   c(CRAN = "https://packagemanager.posit.co/cran/latest")
 

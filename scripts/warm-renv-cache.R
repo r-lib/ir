@@ -10,16 +10,44 @@ if (length(args) >= 2L && identical(args[[1L]], "--repos")) {
 
 stopifnot(length(args) > 0L)
 
-tooling_repos <- c(CRAN = "https://packagemanager.posit.co/cran/latest")
-default_repos <- c(CRAN = "https://cran.r-project.org")
-if (is.null(repos)) {
-  repos <- default_repos
-} else {
-  repos <- c(CRAN = repos)
+startup_repos <- getOption("repos")
+
+resolver_tooling_repos <- function() {
+  c(CRAN = "https://packagemanager.posit.co/cran/latest")
 }
 
-Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
-options(repos = repos, renv.consent = TRUE)
+ppm_latest_repos <- function() {
+  c(CRAN = unname(pak::repo_resolve("PPM@latest")[[1L]]))
+}
+
+named_value <- function(values, name) {
+  if (is.null(values) || is.null(names(values)) || !(name %in% names(values)))
+    return(NULL)
+  unname(values[[name]])
+}
+
+public_ppm_latest_url <- function(repo)
+  identical(sub("/+$", "", repo), "https://packagemanager.posit.co/cran/latest")
+
+default_repos <- function(repos = startup_repos) {
+  if (is.null(repos) || !length(repos))
+    return(ppm_latest_repos())
+
+  if (is.null(names(repos))) {
+    if (length(repos) == 1L) names(repos) <- "CRAN"
+    else return(repos)
+  }
+
+  cran <- named_value(repos, "CRAN")
+  if (is.null(cran) || is.na(cran) || !nzchar(cran) ||
+      identical(cran, "@CRAN@") || public_ppm_latest_url(cran))
+    repos[["CRAN"]] <- ppm_latest_repos()[["CRAN"]]
+
+  repos
+}
+
+tooling_repos <- resolver_tooling_repos()
+options(repos = tooling_repos, renv.consent = TRUE)
 
 r_libs_user <- Sys.getenv("R_LIBS_USER", unset = "")
 if (nzchar(r_libs_user)) {
@@ -34,6 +62,16 @@ tooling <- c("pak", "renv", "secretbase")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))
   utils::install.packages(missing, repos = tooling_repos)
+
+if (is.null(repos)) {
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+  repos <- default_repos(startup_repos)
+} else {
+  Sys.setenv(RENV_CONFIG_REPOS_OVERRIDE = repos)
+  repos <- c(CRAN = repos)
+}
+
+options(repos = repos, renv.consent = TRUE)
 
 project <- tempfile("ir-renv-warm-project-")
 library <- tempfile("ir-renv-warm-library-")

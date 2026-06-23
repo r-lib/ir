@@ -1,3 +1,9 @@
+#[cfg(target_os = "linux")]
+mod support;
+
+#[cfg(target_os = "linux")]
+use support::{rscript, temp_cache, temp_dir, temp_path};
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -169,7 +175,8 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Warm default R package cache"));
     assert!(workflow.contains("Warm snapshot R package cache"));
     assert!(workflow.contains("Warm non-default R package cache"));
-    assert!(workflow.contains("--repos https://packagemanager.posit.co/cran/2026-06-01"));
+    assert!(workflow.contains("cran=\"${RSPM:-https://packagemanager.posit.co/cran/latest}\""));
+    assert!(workflow.contains("--repos \"${cran%/latest}/2026-06-01\""));
     assert!(workflow.contains("github::rstudio/reticulate fansi"));
     assert!(workflow.contains("rmarkdown xfun quarto"));
     assert!(workflow.contains("rmarkdown bookdown tinytex xfun"));
@@ -183,8 +190,9 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
         .nth(1)
         .and_then(|block| block.split("      - run: cargo nextest").next())
         .expect("workflow should warm the non-default R package cache before tests");
-    assert!(warm_non_default_cache
-        .contains("--repos https://packagemanager.posit.co/cran/${IR_TEST_R_EXCLUDE_NEWER}"));
+    assert!(
+        warm_non_default_cache.contains("--repos \"${cran%/latest}/${IR_TEST_R_EXCLUDE_NEWER}\"")
+    );
     assert!(!warm_non_default_cache.contains("2026-06-01"));
     assert!(warm_non_default_cache.contains("R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library"));
     let warm_default_cache = workflow
@@ -230,6 +238,64 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
+    assert!(warm_script.contains("pak::repo_resolve(\"PPM@latest\")"));
+    assert!(!warm_script.contains("https://cran.r-project.org"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_renv_cache_replaces_unnamed_at_cran_with_real_package() {
+    let renv_cache = temp_cache("ir-warm-real-renv-cache");
+    let user_library = temp_dir("ir-warm-real-user-library");
+    let profile = temp_path("ir-warm-real-profile", "R");
+    fs::write(&profile, "options(repos = \"@CRAN@\")\n").unwrap();
+
+    let out = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("CC", "false")
+        .env("CXX", "false")
+        .env("CXX11", "false")
+        .env("CXX14", "false")
+        .env("CXX17", "false")
+        .env("CXX20", "false")
+        .args(["scripts/warm-renv-cache.R", "zip"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_renv_cache_rewrites_plain_ppm_latest_with_real_binary_package() {
+    let renv_cache = temp_cache("ir-warm-real-ppm-latest-renv-cache");
+    let user_library = temp_dir("ir-warm-real-ppm-latest-user-library");
+    let profile = temp_path("ir-warm-real-ppm-latest-profile", "R");
+    fs::write(
+        &profile,
+        r#"options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))"#,
+    )
+    .unwrap();
+
+    let out = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("CC", "false")
+        .env("CXX", "false")
+        .env("CXX11", "false")
+        .env("CXX14", "false")
+        .env("CXX17", "false")
+        .env("CXX20", "false")
+        .args(["scripts/warm-renv-cache.R", "zip"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
 }
 
 #[test]
@@ -464,13 +530,14 @@ fn test_r_metadata_resolution_is_shared() {
     let helper_text = fs::read_to_string(&helper)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", helper.display()));
     assert!(
-        helper_text.contains(r#"if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript""#),
-        "test R metadata resolution should ask Windows R for Rscript.exe"
+        helper_text.contains(r#"binary_path.with_name("Rscript.exe")"#),
+        "test R metadata resolution should derive Rscript.exe from Windows R.exe"
     );
     assert!(helper_text.contains("stdin=\"\"\""));
     assert!(helper_text.contains("write.dcf"));
     assert!(helper_text.contains("from email.parser import Parser"));
-    assert!(helper_text.contains(r#"source(file("stdin"))"#));
+    assert!(!helper_text.contains("\"--vanilla\""));
+    assert!(!helper_text.contains("\"--slave\""));
     assert!(!helper_text.contains("cat(sprintf"));
     assert!(!helper_text.contains("def output_field"));
     assert!(!helper_text.contains("available\", \"--all\", \"--json"));
@@ -553,14 +620,22 @@ fi
     .unwrap();
     fs::write(
         &r,
+        r#"#!/usr/bin/env sh
+echo "metadata probe should invoke the resolved Rscript directly" >&2
+exit 99
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &rscript,
         format!(
             r#"#!/usr/bin/env sh
 set -eu
-if [ "$1" = "--vanilla" ] && [ "$2" = "--slave" ] && [ "$3" = "-e" ] && [ "$4" = 'source(file("stdin"))' ]; then
+if [ "$#" -eq 1 ] && [ "$1" = "-" ]; then
   script="$(cat)"
   printf '%s\n' "$script" | grep -q 'write[.]dcf' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
   printf '%s\n' "$script" | grep -q 'width *= *100000' || {{ echo "metadata script should disable DCF wrapping" >&2; exit 98; }}
-  printf '%s\n' "$script" | grep -q 'Rscript[.]exe' || {{ echo "metadata script was not passed on stdin" >&2; exit 98; }}
+  printf '%s\n' "$script" | grep -q 'IR_TEST_METADATA_RSCRIPT' || {{ echo "metadata script should normalize the resolved Rscript path" >&2; exit 98; }}
   cat <<'EOF'
 version: 4.4.3
 date: 2025-02-28
@@ -581,6 +656,9 @@ fi
     let mut permissions = fs::metadata(&r).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&r, permissions).unwrap();
+    let mut permissions = fs::metadata(&rscript).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&rscript, permissions).unwrap();
 
     let old_path = std::env::var_os("PATH").unwrap_or_default();
     let mut paths = vec![temp.clone()];
