@@ -91,6 +91,9 @@ def rscript_for_binary(binary: str) -> str:
 def release_metadata(rscript: str) -> tuple[str, str, str]:
     output = run_rscript(
         rscript,
+        # Do not use --vanilla here. The version-selection tests should
+        # observe the same site/user startup files as the resolved Rscript that
+        # CI will run, especially repository configuration from profiles.
         ["-"],
         # fmt: r
         stdin="""
