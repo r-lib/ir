@@ -4,7 +4,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use time::macros::format_description;
@@ -26,6 +26,8 @@ const RESOLVE_DRIVER: &str = concat!(
     "\n",
     include_str!("../driver/resolve.R")
 );
+const TOOLING_RESTART_STATUS: i32 = 86;
+const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
 
 /// Resolve dependencies for `source`, then run it against the resulting
 /// library. Exits the process with the program's own exit code.
@@ -367,83 +369,129 @@ fn resolve_library_inner(
     } else {
         None
     };
+    let restart_file = unique_path(&tmp, "ir-tooling-restart", "txt");
 
-    let mut cmd = Command::new(rscript);
-    cmd.arg(&driver)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .env("IR_CACHE_DIR", cache_dir)
-        // pak suppresses progress in noninteractive Rscript unless this is set.
-        // Resolution cache hits return before pak, so this adds no cache-hit pak output.
-        .env("R_PKG_SHOW_PROGRESS", "true")
-        // The RuntimeSpec owns snapshot selection. Do not let unsupported
-        // commands accidentally reach the resolver through ambient process env.
-        .env_remove("IR_RESOLVE_RESULT_FILE")
-        .env_remove("IR_RESOLVE_PACKAGE_RESULT_FILE")
-        .env_remove("IR_RESOLUTION_MARKER")
-        .env_remove("IR_PRIMARY_PACKAGE_MARKER")
-        .env_remove("IR_QUARTO_RENDER")
-        .env_remove("IR_EXCLUDE_NEWER")
-        .env_remove("IR_PYTHON_RESULT_FILE")
-        .env_remove("IR_PYTHON_PACKAGES_FILE")
-        .env_remove("IR_PYTHON_VERSION")
-        .env_remove("IR_PYTHON_EXCLUDE_NEWER");
-    if resolve_r {
+    let mut retried_tooling_restart = false;
+    let mut retried_safe_mode = false;
+    let mut safe_mode = false;
+    let status = loop {
         if let Some(result_file) = &result_file {
-            cmd.env("IR_RESOLVE_RESULT_FILE", result_file);
-        }
-        if let Some(paths) = &resolution_cache_paths {
-            cmd.env("IR_RESOLUTION_MARKER", &paths.marker);
+            let _ = fs::remove_file(result_file);
         }
         if let Some(package_result_file) = &package_result_file {
-            cmd.env("IR_RESOLVE_PACKAGE_RESULT_FILE", package_result_file);
-            if let Some(package_marker) = resolution_cache_paths
-                .as_ref()
-                .and_then(|paths| paths.package_marker.as_ref())
-            {
-                cmd.env("IR_PRIMARY_PACKAGE_MARKER", package_marker);
+            let _ = fs::remove_file(package_result_file);
+        }
+        if let Some(python_result_file) = &python_result_file {
+            let _ = fs::remove_file(python_result_file);
+        }
+        let _ = fs::remove_file(&restart_file);
+
+        let mut cmd = Command::new(rscript);
+        cmd.arg(&driver)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .env("IR_CACHE_DIR", cache_dir)
+            // pak suppresses progress in noninteractive Rscript unless this is set.
+            // Resolution cache hits return before pak, so this adds no cache-hit pak output.
+            .env("R_PKG_SHOW_PROGRESS", "true")
+            // The RuntimeSpec owns snapshot selection. Do not let unsupported
+            // commands accidentally reach the resolver through ambient process env.
+            .env_remove("IR_RESOLVE_RESULT_FILE")
+            .env_remove("IR_RESOLVE_PACKAGE_RESULT_FILE")
+            .env_remove("IR_RESOLUTION_MARKER")
+            .env_remove("IR_PRIMARY_PACKAGE_MARKER")
+            .env_remove("IR_QUARTO_RENDER")
+            .env_remove("IR_EXCLUDE_NEWER")
+            .env_remove("IR_PYTHON_RESULT_FILE")
+            .env_remove("IR_PYTHON_PACKAGES_FILE")
+            .env_remove("IR_PYTHON_VERSION")
+            .env_remove("IR_PYTHON_EXCLUDE_NEWER")
+            .env_remove("IR_TOOLING_RESTART_FILE")
+            .env_remove(TOOLING_SAFE_MODE_ENV)
+            .env("IR_TOOLING_RESTART_FILE", &restart_file);
+        if safe_mode {
+            cmd.env(TOOLING_SAFE_MODE_ENV, "1");
+        }
+        if resolve_r {
+            if let Some(result_file) = &result_file {
+                cmd.env("IR_RESOLVE_RESULT_FILE", result_file);
+            }
+            if let Some(paths) = &resolution_cache_paths {
+                cmd.env("IR_RESOLUTION_MARKER", &paths.marker);
+            }
+            if let Some(package_result_file) = &package_result_file {
+                cmd.env("IR_RESOLVE_PACKAGE_RESULT_FILE", package_result_file);
+                if let Some(package_marker) = resolution_cache_paths
+                    .as_ref()
+                    .and_then(|paths| paths.package_marker.as_ref())
+                {
+                    cmd.env("IR_PRIMARY_PACKAGE_MARKER", package_marker);
+                }
+            }
+            if let Some(exclude_newer) = &spec.exclude_newer {
+                cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
+            }
+            if spec.quarto_render {
+                // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
+                // this flag tells the resolver a Quarto render needs rmarkdown.
+                cmd.env("IR_QUARTO_RENDER", "1");
             }
         }
-        if let Some(exclude_newer) = &spec.exclude_newer {
-            cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
+        if let (Some(request), Some(result_file), Some(packages_file)) =
+            (python_request, &python_result_file, &python_packages_file)
+        {
+            cmd.env_remove("PYTHONHOME")
+                .env("IR_PYTHON_RESULT_FILE", result_file)
+                .env("IR_PYTHON_PACKAGES_FILE", packages_file.path());
+            if let Some(python_version) = &request.python_version {
+                cmd.env("IR_PYTHON_VERSION", python_version);
+            }
+            if let Some(exclude_newer) = &request.exclude_newer {
+                cmd.env("IR_PYTHON_EXCLUDE_NEWER", exclude_newer);
+            }
         }
-        if spec.quarto_render {
-            // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
-            // this flag tells the resolver a Quarto render needs rmarkdown.
-            cmd.env("IR_QUARTO_RENDER", "1");
-        }
-    }
-    if let (Some(request), Some(result_file), Some(packages_file)) =
-        (python_request, &python_result_file, &python_packages_file)
-    {
-        cmd.env_remove("PYTHONHOME")
-            .env("IR_PYTHON_RESULT_FILE", result_file)
-            .env("IR_PYTHON_PACKAGES_FILE", packages_file.path());
-        if let Some(python_version) = &request.python_version {
-            cmd.env("IR_PYTHON_VERSION", python_version);
-        }
-        if let Some(exclude_newer) = &request.exclude_newer {
-            cmd.env("IR_PYTHON_EXCLUDE_NEWER", exclude_newer);
-        }
-    }
 
-    let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
-    {
-        let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
-        for dependency in dependencies {
-            writeln!(stdin, "{dependency}")?;
+        let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
+        let stdin_result = (|| -> Result<(), Box<dyn Error>> {
+            let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
+            for dependency in &dependencies {
+                writeln!(stdin, "{dependency}")?;
+            }
+            Ok(())
+        })();
+        let current_status = child
+            .wait()
+            .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
+
+        if tooling_restart_requested(&current_status, &restart_file) {
+            if !retried_tooling_restart {
+                retried_tooling_restart = true;
+                continue;
+            }
+            return Err(
+                repeated_tooling_restart_error("dependency resolver", &restart_file).into(),
+            );
         }
-    }
-    let status = child
-        .wait()
-        .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
+
+        if resolver_process_crashed(&current_status) && !safe_mode && !retried_safe_mode {
+            retried_safe_mode = true;
+            safe_mode = true;
+            continue;
+        }
+
+        if current_status.success() {
+            stdin_result?;
+        }
+        break current_status;
+    };
 
     let result = result_file
         .as_ref()
         .map(|path| fs::read_to_string(path).unwrap_or_default())
         .unwrap_or_default();
     let _ = result_file.as_ref().map(fs::remove_file);
+    let _ = fs::remove_file(&restart_file);
     let package_result = package_result_file
         .as_ref()
         .map(|path| {
@@ -510,6 +558,46 @@ fn resolve_library_inner(
         primary_package,
         python,
     })
+}
+
+fn tooling_restart_requested(status: &ExitStatus, restart_file: &Path) -> bool {
+    status.code() == Some(TOOLING_RESTART_STATUS) && restart_file.exists()
+}
+
+fn resolver_process_crashed(status: &ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        if status.signal().is_some() {
+            return true;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(code) = status.code() {
+            let code = code as u32;
+            if matches!(
+                code,
+                0xC0000005 | 0xC00000FD | 0xC000001D | 0xC0000374 | 0xC0000409
+            ) {
+                return true;
+            }
+        }
+    }
+
+    status.code().is_none()
+}
+
+fn repeated_tooling_restart_error(context: &str, restart_file: &Path) -> String {
+    let packages = fs::read_to_string(restart_file).unwrap_or_default();
+    let packages = packages.trim();
+    if packages.is_empty() {
+        format!("{context} repeatedly requested a tooling restart")
+    } else {
+        format!("{context} repeatedly requested a tooling restart for {packages}")
+    }
 }
 
 fn normalized_dependencies(dependencies: &[String]) -> Vec<String> {

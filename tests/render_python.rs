@@ -336,6 +336,86 @@ exit 1\n",
 
 #[cfg(unix)]
 #[test]
+fn render_python_resolver_retries_after_tooling_restart_request() {
+    let cache_dir = temp_dir("ir-render-python-tooling-retry-cache");
+    let bin_dir = temp_dir("ir-render-python-tooling-retry-bin");
+    let doc = temp_path("ir-render-python-tooling-retry", "qmd");
+    let fake_python = bin_dir.join("python");
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+    let attempts = temp_path("ir-render-python-tooling-retry-attempts", "txt");
+    let first_attempt = temp_path("ir-render-python-tooling-retry-first", "txt");
+
+    fs::write(
+        &doc,
+        r#"---
+title: python tooling retry
+format: html
+jupyter: python3
+ir:
+  python-packages:
+    - pandas
+---
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_python, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+cat > /dev/null\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+fi\n\
+if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  printf 'attempt\\n' >> {}\n\
+  if [ ! -f {} ]; then\n\
+    printf 'seen\\n' > {}\n\
+    if [ -z \"${{IR_TOOLING_RESTART_FILE:-}}\" ]; then\n\
+      echo missing tooling restart file >&2\n\
+      exit 1\n\
+    fi\n\
+    printf 'restart\\n' > \"$IR_TOOLING_RESTART_FILE\"\n\
+    exit 86\n\
+  fi\n\
+  printf '%s\\n' {} > \"$IR_PYTHON_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+            attempts.display(),
+            first_attempt.display(),
+            first_attempt.display(),
+            fake_python.display()
+        ),
+    );
+    write_executable(
+        &quarto,
+        "#!/bin/sh\nprintf 'quarto_python=%s\\n' \"${QUARTO_PYTHON:-}\"\n",
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, &format!("quarto_python={}", fake_python.display()));
+    let attempts = fs::read_to_string(&attempts).unwrap();
+    assert_eq!(attempts.lines().count(), 2, "{attempts}");
+}
+
+#[cfg(unix)]
+#[test]
 fn render_quarto_ignores_legacy_top_level_uv_frontmatter() {
     let cache_dir = temp_dir("ir-render-legacy-uv-cache");
     let bin_dir = temp_dir("ir-render-legacy-uv-bin");

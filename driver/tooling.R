@@ -46,39 +46,42 @@ ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
-# reproducibility date.
+# reproducibility date. PPM serves binaries for Windows and macOS.
 ir_tooling_repos <- function()
   c(CRAN = "https://packagemanager.posit.co/cran/latest")
 
-# Path to the tooling library, keyed by R version and platform so compiled
-# packages match the running R, mirroring renv's cache layout.
-ir_tooling_lib <- function(cache_dir = ir_cache_dir())
+# Path to the tooling library, keyed by R version, platform, and the tooling
+# contract. A changed minimum version or package ref gets a fresh library, so
+# loaded packages are never upgraded in place.
+ir_tooling_key <- function(packages = ir_tooling_packages(),
+                           refs = character(),
+                           min_versions = character()) {
+  named_lines <- function(prefix, values) {
+    if (!length(values)) return(character())
+    ord <- order(names(values), unname(values))
+    paste0(prefix, ":", names(values)[ord], "=", unname(values)[ord])
+  }
+
+  lines <- c(
+    "ir-tooling-v2",
+    paste0("package:", sort(unique(packages))),
+    named_lines("ref", refs),
+    named_lines("min", min_versions)
+  )
+
+  file <- tempfile("ir-tooling-key-")
+  on.exit(unlink(file), add = TRUE)
+  writeBin(charToRaw(paste(lines, collapse = "\n")), file)
+  unname(tools::md5sum(file))
+}
+
+ir_tooling_lib <- function(cache_dir = ir_cache_dir(),
+                           packages = ir_tooling_packages(),
+                           refs = character(),
+                           min_versions = character())
   file.path(cache_dir, "tooling",
-            paste0(getRversion(), "-", R.version$platform))
-
-ir_tooling_version <- function(package, lib = ir_tooling_lib()) {
-  tryCatch(utils::packageVersion(package, lib.loc = lib),
-           error = function(e) NULL)
-}
-
-ir_tooling_version_ok <- function(package, lib = ir_tooling_lib(),
-                                  min_version = NULL) {
-  version <- ir_tooling_version(package, lib)
-  if (is.null(version)) return(FALSE)
-  if (!is.null(min_version) && version < min_version) return(FALSE)
-
-  path <- find.package(package, lib.loc = lib, quiet = TRUE)
-  if (!length(path)) return(FALSE)
-  if (!identical(package, "pak")) return(TRUE)
-
-  ok <- tryCatch(requireNamespace(package, lib.loc = lib, quietly = TRUE),
-                 error = function(e) FALSE)
-  ok <- ok && ir_pak_private_cli_ok()
-  if (!ok && isNamespaceLoaded(package))
-    try(unloadNamespace(package), silent = TRUE)
-
-  ok
-}
+            paste0(getRversion(), "-", R.version$platform),
+            ir_tooling_key(packages, refs, min_versions))
 
 ir_tooling_min_version <- function(package, min_versions = character()) {
   if (!(package %in% names(min_versions))) return(NULL)
@@ -109,6 +112,32 @@ ir_reset_tooling_namespace <- function(package) {
   invisible()
 }
 
+ir_tooling_namespace_path <- function(package) {
+  if (!isNamespaceLoaded(package)) return(NULL)
+
+  path <- getNamespaceInfo(package, "path")
+  if (is.null(path) || !nzchar(path)) return(NULL)
+  normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
+ir_reset_tooling_namespace_if_outside_lib <- function(package, lib) {
+  actual <- ir_tooling_namespace_path(package)
+  if (is.null(actual)) return(invisible())
+
+  expected <- normalizePath(file.path(lib, package),
+                            winslash = "/", mustWork = FALSE)
+  if (identical(actual, expected)) return(invisible())
+
+  if (identical(package, "pak")) ir_close_pak_remote()
+  ir_reset_tooling_namespace(package)
+}
+
+ir_reset_tooling_namespaces_outside_lib <- function(packages, lib) {
+  for (pkg in packages)
+    ir_reset_tooling_namespace_if_outside_lib(pkg, lib)
+  invisible()
+}
+
 ir_pak_private_cli_ok <- function() {
   if (!isNamespaceLoaded("pak")) return(FALSE)
 
@@ -120,135 +149,80 @@ ir_pak_private_cli_ok <- function() {
   }, error = function(e) FALSE)
 }
 
-# Tooling packages not already usable by the resolver. Prefer the private
-# tooling library, but accept ambient packages unless they come from R_LIBS_USER
-# and were built under a different R runtime.
-ir_missing_tooling <- function(packages = ir_tooling_packages(),
-                               lib = ir_tooling_lib(),
-                               min_versions = character()) {
-  r_libs_user <- Sys.getenv("R_LIBS_USER")
-  user_libs <- character()
-  if (nzchar(r_libs_user)) {
-    user_libs <- strsplit(r_libs_user, .Platform$path.sep, fixed = TRUE)[[1L]]
-    user_libs <- user_libs[nzchar(user_libs)]
-    user_libs <- normalizePath(user_libs, winslash = "/", mustWork = FALSE)
+# Tooling packages not already usable by the resolver. The check intentionally
+# tries to load the package: a package that is present but cannot load is not
+# useful to the resolver.
+ir_tooling_loaded_too_old <- function(package, min_version) {
+  if (is.null(min_version) || !isNamespaceLoaded(package)) return(FALSE)
+
+  version <- tryCatch(getNamespaceVersion(package), error = function(e) NULL)
+  is.null(version) || version < package_version(min_version)
+}
+
+ir_tooling_safe_mode <- function()
+  identical(Sys.getenv("IR_TOOLING_SAFE_MODE"), "1")
+
+ir_tooling_lib_paths <- function(lib) {
+  if (ir_tooling_safe_mode()) c(lib, .Library) else c(lib, .libPaths())
+}
+
+ir_configure_safe_tooling_env <- function(lib) {
+  if (!ir_tooling_safe_mode()) return(invisible())
+
+  no_user_file <- file.path(tempdir(), "ir-safe-mode-no-user-startup")
+  Sys.setenv(
+    R_LIBS = lib,
+    R_LIBS_USER = "NULL",
+    R_LIBS_SITE = "NULL",
+    R_PROFILE_USER = no_user_file,
+    R_ENVIRON_USER = no_user_file
+  )
+  invisible()
+}
+
+ir_tooling_available <- function(package, min_version = NULL) {
+  if (ir_tooling_loaded_too_old(package, min_version)) return(FALSE)
+
+  args <- list(package = package, quietly = TRUE)
+  if (!is.null(min_version)) {
+    args$versionCheck <- list(op = ">=",
+                              version = package_version(min_version))
   }
+  ok <- isTRUE(do.call(requireNamespace, args))
+  if (ok && identical(package, "pak"))
+    ok <- ir_pak_private_cli_ok()
+  if (!ok && identical(package, "pak") && isNamespaceLoaded(package))
+    try(unloadNamespace(package), silent = TRUE)
 
-  current_r <- strsplit(as.character(getRversion()), ".", fixed = TRUE)[[1L]][1:2]
-  current_platform <- R.version$platform
-  missing <- character()
-  bad_user_libs <- character()
+  ok
+}
 
-  prune_bad_user_libs <- function() {
-    if (!length(bad_user_libs)) return(invisible())
-
-    bad_user_libs <<- unique(bad_user_libs)
-    current_libs <- .libPaths()
-    current_libs_normalized <- normalizePath(current_libs, winslash = "/",
-                                             mustWork = FALSE)
-    .libPaths(current_libs[!current_libs_normalized %in% bad_user_libs])
-
-    user_libs <<- user_libs[!user_libs %in% bad_user_libs]
-    if (length(user_libs))
-      Sys.setenv(R_LIBS_USER = paste(user_libs, collapse = .Platform$path.sep))
-    else
-      Sys.setenv(R_LIBS_USER = "NULL")
-
-    invisible()
-  }
-
-  package_runtime_ok <- function(path) {
-    metadata <- file.path(path, "Meta", "package.rds")
-    info <- if (file.exists(metadata)) {
-      tryCatch(readRDS(metadata), error = function(e) NULL)
-    } else {
-      NULL
-    }
-
-    built_r <- if (is.null(info)) character() else as.character(info$Built$R)
-    if (!length(built_r)) return(FALSE)
-    built_r <- strsplit(built_r[[1L]], ".", fixed = TRUE)[[1L]][1:2]
-    if (!identical(built_r, current_r)) return(FALSE)
-
-    built_platform <- as.character(info$Built$Platform)
-    if (!length(built_platform) || is.na(built_platform[[1L]]) ||
-        !nzchar(built_platform[[1L]])) {
-      return(TRUE)
-    }
-
-    identical(built_platform[[1L]], current_platform)
-  }
-
-  if (length(user_libs)) {
-    user_secretbase <- find.package("secretbase", lib.loc = user_libs,
-                                    quiet = TRUE)
-    if (length(user_secretbase)) {
-      pkg_lib <- normalizePath(dirname(user_secretbase[[1L]]), winslash = "/",
-                               mustWork = FALSE)
-      if (!package_runtime_ok(user_secretbase[[1L]]))
-        bad_user_libs <- c(bad_user_libs, pkg_lib)
-    }
-  }
-  prune_bad_user_libs()
+ir_unavailable_tooling <- function(packages = ir_tooling_packages(),
+                                   min_versions = character()) {
+  unavailable <- character()
+  loaded_too_old <- character()
 
   for (pkg in packages) {
     min_version <- ir_tooling_min_version(pkg, min_versions)
-    private_path <- find.package(pkg, lib.loc = lib, quiet = TRUE)
-    if (length(private_path)) {
-      if (ir_tooling_version_ok(pkg, lib, min_version)) next
-      missing <- c(missing, pkg)
-      next
-    }
+    if (ir_tooling_available(pkg, min_version)) next
 
-    path <- find.package(pkg, quiet = TRUE)
-    if (!length(path)) {
-      missing <- c(missing, pkg)
-      next
-    }
-
-    pkg_lib <- normalizePath(dirname(path[[1L]]), winslash = "/",
-                             mustWork = FALSE)
-    if (pkg_lib %in% user_libs) {
-      if (pkg_lib %in% bad_user_libs) {
-        missing <- c(missing, pkg)
-        next
-      }
-
-      if (!package_runtime_ok(path[[1L]])) {
-        bad_user_libs <- c(bad_user_libs, pkg_lib)
-        missing <- c(missing, pkg)
-        prune_bad_user_libs()
-        next
-      }
-    }
-
-    version <- tryCatch(utils::packageVersion(pkg), error = function(e) NULL)
-    if (!is.null(min_version) &&
-        (is.null(version) || version < min_version)) {
-      missing <- c(missing, pkg)
-      next
-    }
-
-    if (identical(pkg, "pak")) {
-      ok <- tryCatch(requireNamespace(pkg, quietly = TRUE),
-                     error = function(e) FALSE)
-      ok <- ok && ir_pak_private_cli_ok()
-      if (!ok) {
-        if (isNamespaceLoaded(pkg))
-          try(unloadNamespace(pkg), silent = TRUE)
-        if (pkg_lib %in% user_libs) {
-          bad_user_libs <- c(bad_user_libs, pkg_lib)
-          prune_bad_user_libs()
-        }
-        missing <- c(missing, pkg)
-        next
-      }
-    }
+    unavailable <- c(unavailable, pkg)
+    if (ir_tooling_loaded_too_old(pkg, min_version))
+      loaded_too_old <- c(loaded_too_old, pkg)
   }
 
-  prune_bad_user_libs()
+  attr(unavailable, "loaded_too_old") <- loaded_too_old
+  unavailable
+}
 
-  missing
+ir_signal_tooling_restart <- function(packages) {
+  restart_file <- Sys.getenv("IR_TOOLING_RESTART_FILE", unset = NA_character_)
+  if (is.na(restart_file) || !nzchar(restart_file)) {
+    stop("resolver tooling was updated; rerun ir", call. = FALSE)
+  }
+
+  writeLines(packages, restart_file)
+  quit(save = "no", status = 86L, runLast = FALSE)
 }
 
 ir_install_tooling_with_pak <- function(missing, refs, lib) {
@@ -283,31 +257,39 @@ ir_ensure_tooling <- function(packages = ir_tooling_packages(),
                               min_versions = character(),
                               cache_dir = ir_cache_dir(),
                               repos = ir_tooling_repos()) {
-  lib <- ir_tooling_lib(cache_dir)
+  lib <- ir_tooling_lib(cache_dir, packages = packages, refs = refs,
+                        min_versions = min_versions)
   dir.create(lib, recursive = TRUE, showWarnings = FALSE)
-  .libPaths(c(lib, .libPaths()))
+  .libPaths(ir_tooling_lib_paths(lib))
+  ir_configure_safe_tooling_env(lib)
+  if (ir_tooling_safe_mode())
+    ir_reset_tooling_namespaces_outside_lib(packages, lib)
   old_repos <- options(repos = repos)
   on.exit(options(old_repos), add = TRUE)
 
-  missing <- ir_missing_tooling(packages = packages, lib = lib,
-                                min_versions = min_versions)
-  if (!length(missing)) return(invisible())
+  unavailable <- ir_unavailable_tooling(packages = packages,
+                                        min_versions = min_versions)
+  if (!length(unavailable)) return(invisible())
 
-  ir_bootstrap_pak(missing, lib, repos)
+  loaded_too_old <- attr(unavailable, "loaded_too_old")
+  ir_bootstrap_pak(unavailable, lib, repos)
+  if ("pak" %in% loaded_too_old)
+    ir_signal_tooling_restart("pak")
 
-  missing <- ir_missing_tooling(packages = packages, lib = lib,
-                                min_versions = min_versions)
-  ir_bootstrap_pak(missing, lib, repos)
+  unavailable <- ir_unavailable_tooling(packages = packages,
+                                        min_versions = min_versions)
+  if (!length(unavailable)) return(invisible())
 
-  missing <- ir_missing_tooling(packages = packages, lib = lib,
-                                min_versions = min_versions)
-  ir_install_tooling_with_pak(missing, refs, lib)
+  loaded_too_old <- attr(unavailable, "loaded_too_old")
+  ir_install_tooling_with_pak(unavailable, refs, lib)
+  if (length(loaded_too_old))
+    ir_signal_tooling_restart(loaded_too_old)
 
-  still_missing <- ir_missing_tooling(packages = packages, lib = lib,
-                                      min_versions = min_versions)
-  if (length(still_missing))
+  still_unavailable <- ir_unavailable_tooling(packages = packages,
+                                              min_versions = min_versions)
+  if (length(still_unavailable))
     stop("could not install resolver tooling into ", lib, ": ",
-         paste(still_missing, collapse = ", "), call. = FALSE)
+         paste(still_unavailable, collapse = ", "), call. = FALSE)
   invisible()
 }
 

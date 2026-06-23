@@ -2538,6 +2538,7 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
     let cache_dir = temp_dir("ir-latest-cache-refresh");
     let expr = "{ library(cli); cat('ir.fixture=latest-cache-refresh\\n') }";
 
+    let before_first_run = current_utc_seconds();
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .args([
@@ -2553,6 +2554,7 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
         .unwrap();
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=latest-cache-refresh");
+    let after_first_run = current_utc_seconds();
 
     let resolution_dir = cache_dir.join("resolutions");
     let markers = fs::read_dir(&resolution_dir)
@@ -2570,8 +2572,8 @@ fn run_latest_resolution_cache_refreshes_marker_value_in_place() {
         .and_then(|line| line.strip_prefix("latest: "))
         .and_then(|timestamp| timestamp.parse::<u64>().ok())
         .unwrap_or_else(|| panic!("{} should record a latest timestamp", marker.display()));
-    assert!(created_at <= current_utc_seconds());
-    assert!(current_utc_seconds() - created_at <= 1);
+    assert!(created_at >= before_first_run);
+    assert!(created_at <= after_first_run);
     let library = lines
         .next()
         .unwrap_or_else(|| panic!("{} should record a library path", marker.display()));
