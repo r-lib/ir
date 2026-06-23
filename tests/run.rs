@@ -1960,6 +1960,7 @@ if (nzchar(ir_test_download_method))
         "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
     );
     let binary_options = read_repos(&binary_options);
+    assert!(binary_options.contains("pkgType=binary"));
     assert!(!binary_options.contains("pkgType=both"));
     assert!(!binary_options.contains("pkgType=source"));
     assert!(!binary_options.contains("pkg.platforms=source"));

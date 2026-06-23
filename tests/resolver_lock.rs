@@ -381,3 +381,70 @@ fn concurrent_resolvers_serialize_different_ir_caches_with_shared_user_cache() {
         "different IR caches should both resolve, but not concurrently"
     );
 }
+
+#[test]
+fn concurrent_resolvers_serialize_different_roots_with_shared_renv_cache() {
+    let first_cache_dir = temp_dir("ir-shared-renv-cache-ir-one");
+    let second_cache_dir = temp_dir("ir-shared-renv-cache-ir-two");
+    let first_user_cache_dir = temp_dir("ir-shared-renv-cache-user-one");
+    let second_user_cache_dir = temp_dir("ir-shared-renv-cache-user-two");
+    let renv_cache_dir = temp_dir("ir-shared-renv-cache-renv");
+    let profile = temp_path("ir-shared-renv-cache-profile", "R");
+    let active = temp_path("ir-shared-renv-cache-active", "");
+    let entered = temp_path("ir-shared-renv-cache-entered", "txt");
+    let overlap = temp_path("ir-shared-renv-cache-overlap", "txt");
+    let first_probe = ResolverLockProbe {
+        user_cache_dir: &first_user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
+    let second_probe = ResolverLockProbe {
+        user_cache_dir: &second_user_cache_dir,
+        profile: &profile,
+        active: &active,
+        overlap: &overlap,
+        entered: &entered,
+    };
+
+    write_resolver_lock_profile(&profile);
+
+    let mut first = resolver_lock_command(
+        &first_cache_dir,
+        &first_probe,
+        None,
+        "shared-renv-cache-one",
+    );
+    first
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let first = first.spawn().unwrap();
+    let first = wait_for_resolver_probe(first, &active);
+
+    let second = resolver_lock_command(
+        &second_cache_dir,
+        &second_probe,
+        None,
+        "shared-renv-cache-two",
+    )
+    .env("RENV_PATHS_CACHE", &renv_cache_dir)
+    .output()
+    .unwrap();
+    let first = first.wait_with_output().unwrap();
+
+    assert_success(&first);
+    assert_success(&second);
+    assert_stdout_contains(&first, "ir.fixture=shared-renv-cache-one");
+    assert_stdout_contains(&second, "ir.fixture=shared-renv-cache-two");
+    assert!(
+        !overlap.exists(),
+        "resolve.R should not overlap for a shared renv package cache"
+    );
+    assert_eq!(
+        resolver_probe_count(&entered),
+        2,
+        "different IR caches should both resolve, but not concurrently"
+    );
+}
