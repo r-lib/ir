@@ -256,12 +256,8 @@ fn system_uv_config_file() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn system_uv_config_file() -> Option<PathBuf> {
-    env_os_nonempty("SYSTEMDRIVE").map(|drive| {
-        PathBuf::from(drive)
-            .join("ProgramData")
-            .join("uv")
-            .join("uv.toml")
-    })
+    env_os_nonempty("PROGRAMDATA")
+        .map(|program_data| PathBuf::from(program_data).join("uv").join("uv.toml"))
 }
 
 fn cache_key(

@@ -300,13 +300,36 @@ fn warm_renv_cache_rewrites_plain_ppm_latest_with_real_binary_package() {
 
 #[test]
 fn resolver_tooling_installs_do_not_force_source_packages() {
-    let path = repo_root().join("driver/tooling.R");
-    let tooling = fs::read_to_string(&path)
+    let paths = [
+        repo_root().join("driver/tooling.R"),
+        repo_root().join("scripts/warm-renv-cache.R"),
+    ];
+
+    for path in paths {
+        let tooling = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        assert!(
+            !tooling.contains("PKG_PLATFORMS = \"source\""),
+            "{}",
+            path.display()
+        );
+        assert!(
+            !tooling.contains("pkg.platforms = \"source\""),
+            "{}",
+            path.display()
+        );
+        assert!(!tooling.contains("type = \"source\""), "{}", path.display());
+    }
+}
+
+#[test]
+fn python_windows_uv_system_config_uses_programdata() {
+    let path = repo_root().join("src/python.rs");
+    let python = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
-    assert!(!tooling.contains("PKG_PLATFORMS = \"source\""));
-    assert!(!tooling.contains("pkg.platforms = \"source\""));
-    assert!(!tooling.contains("type = \"source\""));
+    assert!(python.contains("env_os_nonempty(\"PROGRAMDATA\")"));
+    assert!(!python.contains("env_os_nonempty(\"SYSTEMDRIVE\")"));
 }
 
 #[test]

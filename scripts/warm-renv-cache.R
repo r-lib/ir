@@ -16,22 +16,6 @@ resolver_tooling_repos <- function() {
   c(CRAN = "https://packagemanager.posit.co/cran/latest")
 }
 
-with_source_tooling <- function(expr) {
-  old_platforms_env <- Sys.getenv("PKG_PLATFORMS", unset = NA_character_)
-  old_platforms_opt <- getOption("pkg.platforms")
-  on.exit({
-    if (is.na(old_platforms_env))
-      Sys.unsetenv("PKG_PLATFORMS")
-    else
-      Sys.setenv(PKG_PLATFORMS = old_platforms_env)
-    options(pkg.platforms = old_platforms_opt)
-  }, add = TRUE)
-
-  Sys.setenv(PKG_PLATFORMS = "source")
-  options(pkg.platforms = "source")
-  force(expr)
-}
-
 ppm_latest_repos <- function() {
   c(CRAN = unname(pak::repo_resolve("PPM@latest")[[1L]]))
 }
@@ -77,9 +61,7 @@ if (nzchar(r_libs_user)) {
 tooling <- c("pak", "renv", "secretbase")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))
-  with_source_tooling(
-    utils::install.packages(missing, repos = tooling_repos, type = "source")
-  )
+  utils::install.packages(missing, repos = tooling_repos)
 
 if (is.null(repos)) {
   Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")

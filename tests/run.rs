@@ -727,7 +727,10 @@ if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
     echo expected Python packages file >&2\n\
     exit 1\n\
   fi\n\
-  mode=$(stat -f '%Lp' \"$IR_PYTHON_PACKAGES_FILE\" 2>/dev/null || stat -c '%a' \"$IR_PYTHON_PACKAGES_FILE\")\n\
+  case \"$(uname -s)\" in\n\
+    Darwin) mode=$(stat -f '%Lp' \"$IR_PYTHON_PACKAGES_FILE\") ;;\n\
+    *) mode=$(stat -c '%a' \"$IR_PYTHON_PACKAGES_FILE\") ;;\n\
+  esac\n\
   printf '%s\\n' \"$mode\" > {}\n\
   printf '%s\\n' \"$IR_PYTHON_PACKAGES_FILE\" > {}\n\
   mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
