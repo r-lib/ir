@@ -838,6 +838,96 @@ printf 'ir.fixture=python-local-cache\\n'\n",
 
 #[cfg(unix)]
 #[test]
+fn run_python_uv_resolver_env_bypasses_python_resolution_cache() {
+    let cache_dir = temp_dir("ir-run-python-uv-env-cache");
+    let bin_dir = temp_dir("ir-run-python-uv-env-bin");
+    let script = temp_path("ir-run-python-uv-env", "R");
+    let fake_python = bin_dir.join("python");
+    let rscript = bin_dir.join("Rscript");
+    let resolver_count = temp_path("ir-run-python-uv-env-count", "txt");
+    let indexes_seen = temp_path("ir-run-python-uv-env-indexes", "txt");
+
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| python-packages:
+#|   - pandas
+
+cat("ignored\n")
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_python, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  if [ -n \"${{IR_RESOLUTION_MARKER:-}}\" ]; then\n\
+    mkdir -p \"$(dirname \"$IR_RESOLUTION_MARKER\")\"\n\
+    printf 'latest: %s\\n%s\\n' \"$(date +%s)\" \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLUTION_MARKER\"\n\
+  fi\n\
+  if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+    printf 'python\\n' >> {}\n\
+    printf '%s\\n' \"${{UV_DEFAULT_INDEX:-}}\" >> {}\n\
+    printf '%s\\n' {} > \"$IR_PYTHON_RESULT_FILE\"\n\
+  fi\n\
+  exit 0\n\
+fi\n\
+if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  printf 'python\\n' >> {}\n\
+  printf '%s\\n' \"${{UV_DEFAULT_INDEX:-}}\" >> {}\n\
+  printf '%s\\n' {} > \"$IR_PYTHON_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+printf 'ir.fixture=python-uv-env-cache\\n'\n",
+            resolver_count.display(),
+            indexes_seen.display(),
+            fake_python.display(),
+            resolver_count.display(),
+            indexes_seen.display(),
+            fake_python.display()
+        ),
+    );
+
+    for index in [
+        "https://first.example/simple",
+        "https://second.example/simple",
+    ] {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("UV_DEFAULT_INDEX", index)
+            .args(["run", "--rscript"])
+            .arg(&rscript)
+            .arg(&script)
+            .output()
+            .unwrap();
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=python-uv-env-cache");
+    }
+
+    let count = fs::read_to_string(&resolver_count).unwrap();
+    assert_eq!(
+        count.lines().count(),
+        2,
+        "uv resolver env should bypass the Python marker\n{count}"
+    );
+    let indexes = fs::read_to_string(&indexes_seen).unwrap();
+    assert!(
+        indexes.contains("https://first.example/simple"),
+        "{indexes}"
+    );
+    assert!(
+        indexes.contains("https://second.example/simple"),
+        "{indexes}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn run_python_only_resolution_clears_inherited_r_resolver_env() {
     let cache_dir = temp_dir("ir-run-python-only-clears-r-resolver-env-cache");
     let bin_dir = temp_dir("ir-run-python-only-clears-r-resolver-env-bin");

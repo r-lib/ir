@@ -1,4 +1,6 @@
+use std::env;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,16 +38,17 @@ pub(crate) fn request(
         None
     };
     let source = cache_source(python.exclude_newer.as_deref())?;
-    let marker = packages
+    let marker = (packages
         .iter()
         .all(|package| python_package_spec_cacheable(package))
-        .then(|| {
-            cache_dir.join("python").join(cache_key(
-                &packages,
-                python.python_version.as_deref(),
-                python.exclude_newer.as_deref(),
-            ))
-        });
+        && python_resolver_env_cacheable())
+    .then(|| {
+        cache_dir.join("python").join(cache_key(
+            &packages,
+            python.python_version.as_deref(),
+            python.exclude_newer.as_deref(),
+        ))
+    });
 
     Ok(Some(EnvRequest {
         packages,
@@ -164,6 +167,16 @@ fn python_distribution_name(name: &str) -> bool {
             .chars()
             .last()
             .is_some_and(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn python_resolver_env_cacheable() -> bool {
+    env::vars_os()
+        .all(|(name, value)| value.is_empty() || !python_resolver_env_var(name.as_os_str()))
+}
+
+fn python_resolver_env_var(name: &OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
 }
 
 fn cache_key(
