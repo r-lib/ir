@@ -853,7 +853,6 @@ fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
     let doc = temp_path("ir-render-cli-exclude-newer-precedence", "qmd");
     let profile = temp_path("ir-render-cli-exclude-newer-precedence-profile", "R");
     let quarto = temp_path("ir-render-cli-exclude-newer-precedence-quarto", "");
-    let exclude_newer = temp_path("ir-render-cli-exclude-newer-precedence-value", "txt");
     fs::write(
         &doc,
         r#"---
@@ -874,7 +873,14 @@ cat("ir.fixture=render-cli-exclude-newer-precedence\n")
 if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
   library <- Sys.getenv("IR_TEST_LIBRARY")
   dir.create(library, recursive = TRUE, showWarnings = FALSE)
-  writeLines(Sys.getenv("IR_EXCLUDE_NEWER"), Sys.getenv("IR_TEST_EXCLUDE_NEWER_FILE"))
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (nzchar(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    writeLines(c(
+      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
+      library
+    ), marker)
+  }
   writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
   q(save = "no", status = 0)
 }
@@ -889,7 +895,6 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .env("IR_QUARTO", &quarto)
         .env("IR_RSCRIPT", rscript())
         .env("IR_TEST_LIBRARY", &library)
-        .env("IR_TEST_EXCLUDE_NEWER_FILE", &exclude_newer)
         .env("R_PROFILE_USER", &profile)
         .args(["render", "--exclude-newer", " 2024-03-01 "])
         .arg(&doc)
@@ -897,11 +902,11 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
 
     assert_success(&out);
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
     assert_eq!(
-        fs::read_to_string(&exclude_newer)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", exclude_newer.display()))
-            .trim_end(),
-        "2024-03-01"
+        marker_text.lines().next(),
+        Some("exclude-newer: 2024-03-01")
     );
 }
 
@@ -937,6 +942,85 @@ cat("ir.fixture=empty-env-exclude-newer\n")
             .next()
             .is_some_and(|line| line.starts_with("latest: ")),
         "{marker_text}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_defaults_unset_cran_to_pak_resolved_ppm_repo() {
+    let cache_dir = temp_dir("ir-pak-resolved-ppm-cache");
+    let profile = temp_path("ir-pak-resolved-ppm-profile", "R");
+    let repo_spec = temp_path("ir-pak-resolved-ppm-spec", "txt");
+    let repos_file = temp_path("ir-pak-resolved-ppm-repos", "txt");
+    let fixture_source =
+        serde_json::to_string(&renviron_path(&fixture("resolver-tooling.R"))).unwrap();
+    let profile_text = r#"
+source(__FIXTURE__)
+
+ir_test_private_lib <- file.path(
+  Sys.getenv("IR_CACHE_DIR"),
+  "tooling",
+  paste0(getRversion(), "-", R.version$platform)
+)
+dir.create(ir_test_private_lib, recursive = TRUE, showWarnings = FALSE)
+
+ir_test_write_secretbase(ir_test_private_lib)
+ir_test_write_renv(
+  ir_test_private_lib,
+  code = paste(
+    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
+    "  writeLines(paste(names(repos), unname(repos), sep = '='), Sys.getenv('IR_TEST_REPOS_FILE'))",
+    "  specs <- unlist(list(...), use.names = FALSE)",
+    "  for (spec in specs) {",
+    "    pkg <- sub('@.*$', '', spec)",
+    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "  }",
+    "  invisible(TRUE)",
+    "}",
+    sep = "\n"
+  )
+)
+ir_test_write_pak(
+  ir_test_private_lib,
+  namespace = "export(pkg_deps)\nexport(repo_resolve)",
+  code = paste(
+    ir_test_pak_deps_code(),
+    "repo_resolve <- function(spec) {",
+    "  writeLines(spec, Sys.getenv('IR_TEST_REPO_SPEC_FILE'))",
+    "  c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/noble/latest')",
+    "}",
+    sep = "\n"
+  )
+)
+
+options(repos = c(CRAN = "@CRAN@"))
+"#
+    .replace("__FIXTURE__", &fixture_source);
+    fs::write(&profile, profile_text).unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_REPO_SPEC_FILE", &repo_spec)
+        .env("IR_TEST_REPOS_FILE", &repos_file)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=pak-resolved-ppm\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=pak-resolved-ppm");
+    assert_eq!(fs::read_to_string(&repo_spec).unwrap(), "PPM@latest\n");
+    assert_eq!(
+        fs::read_to_string(&repos_file).unwrap(),
+        "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/latest\n"
     );
 }
 
@@ -1017,7 +1101,6 @@ fn render_future_frontmatter_exclude_newer_resolves_latest() {
     let doc = temp_path("ir-render-future-frontmatter-exclude-newer", "qmd");
     let profile = temp_path("ir-render-future-frontmatter-exclude-newer-profile", "R");
     let quarto = temp_path("ir-render-future-frontmatter-exclude-newer-quarto", "");
-    let exclude_newer = temp_path("ir-render-future-frontmatter-exclude-newer-value", "txt");
     fs::write(
         &doc,
         r#"---
@@ -1038,7 +1121,16 @@ cat("ir.fixture=render-future-frontmatter-exclude-newer\n")
 if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
   library <- Sys.getenv("IR_TEST_LIBRARY")
   dir.create(library, recursive = TRUE, showWarnings = FALSE)
-  writeLines(Sys.getenv("IR_EXCLUDE_NEWER"), Sys.getenv("IR_TEST_EXCLUDE_NEWER_FILE"))
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (nzchar(marker)) {
+    dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    source <- if (nzchar(Sys.getenv("IR_EXCLUDE_NEWER"))) {
+      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER"))
+    } else {
+      "latest: 0"
+    }
+    writeLines(c(source, library), marker)
+  }
   writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
   q(save = "no", status = 0)
 }
@@ -1052,7 +1144,6 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .env("IR_QUARTO", &quarto)
         .env("IR_RSCRIPT", rscript())
         .env("IR_TEST_LIBRARY", &library)
-        .env("IR_TEST_EXCLUDE_NEWER_FILE", &exclude_newer)
         .env("R_PROFILE_USER", &profile)
         .args(["render"])
         .arg(&doc)
@@ -1060,11 +1151,14 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .unwrap();
 
     assert_success(&out);
-    assert_eq!(
-        fs::read_to_string(&exclude_newer)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", exclude_newer.display()))
-            .trim_end(),
-        ""
+
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
     );
 }
 
@@ -1609,622 +1703,6 @@ fn run_passes_rust_owned_cache_dir_to_resolver() {
             .exists(),
         "R startup files should not redirect the resolver cache"
     );
-}
-
-#[test]
-fn run_uses_ppm_latest_for_default_repos_and_rewrites_ppm_snapshots() {
-    let default_cache_dir = temp_dir("ir-linux-binary-repos-default-cache");
-    let snapshot_cache_dir = temp_dir("ir-linux-binary-repos-snapshot-cache");
-    let profile = temp_path("ir-linux-binary-repos-profile", "R");
-    let default_repos = temp_path("ir-linux-binary-repos-default", "txt");
-    let existing_linux_repos = temp_path("ir-linux-binary-repos-existing-linux", "txt");
-    let alias_repos = temp_path("ir-linux-binary-repos-alias", "txt");
-    let alias_options = temp_path("ir-linux-binary-repos-alias-options", "txt");
-    let alias_prefix = temp_path("ir-linux-binary-repos-alias-prefix", "txt");
-    let snapshot_repos = temp_path("ir-linux-binary-repos-snapshot", "txt");
-    let source_repos = temp_path("ir-linux-binary-repos-source", "txt");
-    let source_options = temp_path("ir-linux-binary-repos-source-options", "txt");
-    let auto_source_repos = temp_path("ir-linux-binary-repos-auto-source", "txt");
-    let auto_source_options = temp_path("ir-linux-binary-repos-auto-source-options", "txt");
-    let binary_repos = temp_path("ir-linux-binary-repos-binary", "txt");
-    let binary_options = temp_path("ir-linux-binary-repos-binary-options", "txt");
-
-    fs::write(
-        &profile,
-        format!(
-            "source({})\n{}",
-            r_string(&fixture("resolver-tooling.R")),
-            r#"
-if (identical(Sys.getenv("IR_TEST_LINUX", unset = ""), "1"))
-  Sys.info <- function() c(sysname = "Linux")
-ir_test_glibc_version <- Sys.getenv("IR_TEST_GLIBC_VERSION", unset = "")
-if (nzchar(ir_test_glibc_version)) {
-  system2 <- function(command, args = character(), stdout = FALSE, stderr = FALSE, ...) {
-    if (identical(command, "ldd") && "--version" %in% args)
-      return(paste("ldd (GNU libc)", ir_test_glibc_version))
-    base::system2(command, args = args, stdout = stdout, stderr = stderr, ...)
-  }
-}
-ir_test_r_arch <- Sys.getenv("IR_TEST_R_ARCH", unset = "")
-if (nzchar(ir_test_r_arch))
-  R.version$arch <- ir_test_r_arch
-ir_test_r_version <- Sys.getenv("IR_TEST_R_VERSION", unset = "")
-if (nzchar(ir_test_r_version))
-  getRversion <- function() numeric_version(ir_test_r_version)
-
-ir_test_cache_platform <- function() {
-  distro <- Sys.getenv("IR_TEST_PPM_LINUX_DISTRIBUTION", unset = "")
-  if (nzchar(distro))
-    paste0(R.version$platform, ";ppm-linux=", distro)
-  else
-    R.version$platform
-}
-
-ir_test_private_libs <- unique(file.path(
-  Sys.getenv("IR_CACHE_DIR"),
-  "tooling",
-  paste0(getRversion(), "-", c(
-    R.version$platform,
-    ir_test_cache_platform(),
-    paste0(R.version$platform, ";package-type=source"),
-    paste0(ir_test_cache_platform(), ";package-type=source"),
-    paste0(ir_test_cache_platform(), ";package-type=binary")
-  ))
-))
-
-for (ir_test_private_lib in ir_test_private_libs) {
-  ir_test_write_secretbase(ir_test_private_lib)
-  ir_test_write_pak(ir_test_private_lib)
-  ir_test_write_renv(
-    ir_test_private_lib,
-    code = paste(
-      "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-      "  writeLines(paste(names(repos), unname(repos), sep = '='), Sys.getenv('IR_TEST_REPOS_FILE'))",
-      "  options_file <- Sys.getenv('IR_TEST_OPTIONS_FILE', unset = '')",
-      "  if (nzchar(options_file)) {",
-      "    writeLines(c(",
-      "      paste0('HTTPUserAgent=', getOption('HTTPUserAgent', '')),",
-      "      paste0('download.file.extra=', getOption('download.file.extra', '')),",
-      "      paste0('pkgType=', getOption('pkgType', '')),",
-      "      paste0('pkg.platforms=', paste(getOption('pkg.platforms', ''), collapse = ',')),",
-      "      paste0('PKG_PLATFORMS=', Sys.getenv('PKG_PLATFORMS', unset = ''))",
-      "    ), options_file)",
-      "  }",
-      "  prefix_file <- Sys.getenv('IR_TEST_PREFIX_FILE', unset = '')",
-      "  if (nzchar(prefix_file))",
-      "    writeLines(Sys.getenv('RENV_PATHS_PREFIX', unset = ''), prefix_file)",
-      "  specs <- unlist(list(...), use.names = FALSE)",
-      "  for (spec in specs) {",
-      "    pkg <- sub('@.*$', '', spec)",
-      "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
-      "  }",
-      "  invisible(TRUE)",
-      "}",
-      sep = "\n"
-    )
-  )
-}
-
-ir_test_profile_repos <- Sys.getenv(
-  "IR_TEST_PROFILE_REPOS",
-  unset = "https://packagemanager.posit.co/cran/latest"
-)
-ir_test_ppm_alias <- Sys.getenv("IR_TEST_PPM_ALIAS", unset = "")
-ir_test_repos <- if (nzchar(ir_test_ppm_alias)) {
-  c(stats::setNames(ir_test_profile_repos, ir_test_ppm_alias),
-    CRAN = "https://cran.r-project.org")
-} else {
-  c(CRAN = ir_test_profile_repos)
-}
-if (identical(Sys.getenv("IR_TEST_INCLUDE_INTERNAL_REPO", unset = ""), "1"))
-  ir_test_repos <- c(ir_test_repos, Internal = "https://internal.example.test/repo")
-options(repos = ir_test_repos)
-if (identical(Sys.getenv("IR_TEST_SOURCE_STARTUP", unset = ""), "1")) {
-  options(pkgType = "source", pkg.platforms = "source")
-  Sys.setenv(PKG_PLATFORMS = "source")
-}
-ir_test_download_method <- Sys.getenv("IR_TEST_DOWNLOAD_METHOD", unset = "")
-if (nzchar(ir_test_download_method))
-  options(download.file.method = ir_test_download_method,
-          download.file.extra = "--compressed")
-"#,
-        ),
-    )
-    .unwrap();
-    let read_repos = |path: &Path| {
-        fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
-            .replace("\r\n", "\n")
-            .trim()
-            .to_string()
-    };
-    let configure_manylinux = |cmd: &mut Command| {
-        cmd.env("IR_TEST_LINUX", "1")
-            .env("IR_TEST_GLIBC_VERSION", "2.36")
-            .env("IR_TEST_R_ARCH", "x86_64")
-            .env("IR_TEST_PPM_LINUX_DISTRIBUTION", "manylinux_2_28");
-    };
-
-    let mut default_cmd = ir();
-    configure_manylinux(&mut default_cmd);
-    let default = default_cmd
-        .env("IR_CACHE_DIR", &default_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_PROFILE_REPOS", "@CRAN@")
-        .env("IR_TEST_REPOS_FILE", &default_repos)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=ppm-default\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&default);
-    assert_stdout_contains(&default, "ir.fixture=ppm-default");
-    assert_eq!(
-        read_repos(&default_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
-    let existing_linux_cache_dir = temp_dir("ir-linux-binary-repos-existing-linux-cache");
-    let mut existing_linux_cmd = ir();
-    configure_manylinux(&mut existing_linux_cmd);
-    let existing_linux = existing_linux_cmd
-        .env("IR_CACHE_DIR", &existing_linux_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env(
-            "IR_TEST_PROFILE_REPOS",
-            "https://packagemanager.posit.co/cran/__linux__/noble/latest",
-        )
-        .env("IR_TEST_REPOS_FILE", &existing_linux_repos)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=existing-linux-ppm\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&existing_linux);
-    assert_stdout_contains(&existing_linux, "ir.fixture=existing-linux-ppm");
-    assert_eq!(
-        read_repos(&existing_linux_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-
-    let mut snapshot_cmd = ir();
-    configure_manylinux(&mut snapshot_cmd);
-    let snapshot = snapshot_cmd
-        .env("IR_CACHE_DIR", &snapshot_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &snapshot_repos)
-        .args([
-            "run",
-            "--exclude-newer",
-            "2024-03-15",
-            "--isolated",
-            "--with",
-            "glue",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=linux-binary-snapshot\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&snapshot);
-    assert_stdout_contains(&snapshot, "ir.fixture=linux-binary-snapshot");
-    assert_eq!(
-        read_repos(&snapshot_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/2024-03-15"
-    );
-
-    let alias_cache_dir = temp_dir("ir-linux-binary-repos-alias-cache");
-    let mut alias_cmd = ir();
-    configure_manylinux(&mut alias_cmd);
-    let alias = alias_cmd
-        .env("IR_CACHE_DIR", &alias_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &alias_repos)
-        .env("IR_TEST_OPTIONS_FILE", &alias_options)
-        .env("IR_TEST_PREFIX_FILE", &alias_prefix)
-        .env("IR_TEST_DOWNLOAD_METHOD", "curl")
-        .env("IR_TEST_PPM_ALIAS", "RSPM")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=alias-binary-latest\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&alias);
-    assert_stdout_contains(&alias, "ir.fixture=alias-binary-latest");
-    assert_eq!(
-        read_repos(&alias_repos),
-        "RSPM=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest\nCRAN=https://cran.r-project.org"
-    );
-    let options = read_repos(&alias_options);
-    assert!(options.contains("HTTPUserAgent=R/"));
-    assert!(options.contains(" R ("));
-    assert!(options.contains("download.file.extra=--compressed"));
-    assert!(options.contains("--header"));
-    assert!(options.contains("User-Agent: R ("));
-    assert!(options.contains("R ("));
-    assert_eq!(read_repos(&alias_prefix), "manylinux_2_28");
-
-    let source_cache_dir = temp_dir("ir-linux-binary-repos-source-cache");
-    let source = ir()
-        .env("IR_CACHE_DIR", &source_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_PACKAGE_TYPE", "source")
-        .env("IR_TEST_REPOS_FILE", &source_repos)
-        .env("IR_TEST_OPTIONS_FILE", &source_options)
-        .env("IR_TEST_PPM_ALIAS", "RSPM")
-        .env("IR_TEST_INCLUDE_INTERNAL_REPO", "1")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=source-package-type\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&source);
-    assert_stdout_contains(&source, "ir.fixture=source-package-type");
-    assert_eq!(
-        read_repos(&source_repos),
-        "RSPM=https://packagemanager.posit.co/cran/latest\nCRAN=https://cran.r-project.org\nInternal=https://internal.example.test/repo"
-    );
-    let source_options = read_repos(&source_options);
-    assert!(source_options.contains("pkgType=source"));
-    assert!(source_options.contains("pkg.platforms=source"));
-    assert!(source_options.contains("PKG_PLATFORMS=source"));
-
-    let auto_source_cache_dir = temp_dir("ir-linux-binary-repos-auto-source-cache");
-    let mut auto_source_cmd = ir();
-    configure_manylinux(&mut auto_source_cmd);
-    let auto_source = auto_source_cmd
-        .env("IR_CACHE_DIR", &auto_source_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_REPOS_FILE", &auto_source_repos)
-        .env("IR_TEST_OPTIONS_FILE", &auto_source_options)
-        .env("IR_TEST_SOURCE_STARTUP", "1")
-        .env("PKG_PLATFORMS", "source")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=auto-source-startup\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&auto_source);
-    assert_stdout_contains(&auto_source, "ir.fixture=auto-source-startup");
-    assert_eq!(
-        read_repos(&auto_source_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-    let auto_source_options = read_repos(&auto_source_options);
-    assert!(auto_source_options.contains("pkgType=source"));
-    assert!(auto_source_options.contains("pkg.platforms=source"));
-    assert!(auto_source_options.contains("PKG_PLATFORMS=source"));
-
-    let binary_cache_dir = temp_dir("ir-linux-binary-repos-binary-cache");
-    let mut binary_cmd = ir();
-    configure_manylinux(&mut binary_cmd);
-    let binary = binary_cmd
-        .env("IR_CACHE_DIR", &binary_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_PACKAGE_TYPE", "binary")
-        .env("IR_TEST_REPOS_FILE", &binary_repos)
-        .env("IR_TEST_OPTIONS_FILE", &binary_options)
-        .env("IR_TEST_SOURCE_STARTUP", "1")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=binary-package-type\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&binary);
-    assert_stdout_contains(&binary, "ir.fixture=binary-package-type");
-    assert_eq!(
-        read_repos(&binary_repos),
-        "CRAN=https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest"
-    );
-    let binary_options = read_repos(&binary_options);
-    assert!(binary_options.contains("pkgType=binary"));
-    assert!(!binary_options.contains("pkgType=both"));
-    assert!(!binary_options.contains("pkgType=source"));
-    assert!(!binary_options.contains("pkg.platforms=source"));
-    assert!(!binary_options.contains("PKG_PLATFORMS=source"));
-
-    let old_r_cache_dir = temp_dir("ir-linux-binary-repos-old-r-cache");
-    let mut old_r_cmd = ir();
-    configure_manylinux(&mut old_r_cmd);
-    let old_r = old_r_cmd
-        .env("IR_CACHE_DIR", &old_r_cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_PACKAGE_TYPE", "binary")
-        .env("IR_TEST_R_VERSION", "4.1.0")
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=old-r-binary-package-type\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert!(!old_r.status.success());
-    let old_r_stderr = String::from_utf8_lossy(&old_r.stderr);
-    assert!(
-        old_r_stderr.contains("IR_PACKAGE_TYPE=binary requires an R version supported by Posit Package Manager binaries"),
-        "{old_r_stderr}"
-    );
-}
-
-#[test]
-fn run_source_parameter_uses_source_install_policy_and_distinct_library() {
-    let cache_dir = temp_dir("ir-source-parameter-cache");
-    let profile = temp_path("ir-source-parameter-profile", "R");
-    let installs = temp_path("ir-source-parameter-installs", "txt");
-
-    fs::write(
-        &profile,
-        r#"
-ir_test_write_pkg <- function(lib, pkg, namespace, code) {
-  path <- file.path(lib, pkg)
-  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(
-    paste("Package:", pkg),
-    "Version: 0.0.1",
-    paste("Title:", pkg),
-    paste("Description:", pkg),
-    "License: MIT"
-  ), file.path(path, "DESCRIPTION"))
-  writeLines(namespace, file.path(path, "NAMESPACE"))
-  writeLines(code, file.path(path, "R", pkg))
-}
-
-ir_test_private_libs <- unique(file.path(
-  Sys.getenv("IR_CACHE_DIR"),
-  "tooling",
-  paste0(getRversion(), "-", c(
-    R.version$platform,
-    paste0(R.version$platform, ";ppm-linux=manylinux_2_28"),
-    paste0(R.version$platform, ";ppm-linux=manylinux_2_28;package-type=source")
-  ))
-))
-
-for (ir_test_private_lib in ir_test_private_libs) {
-  ir_test_write_pkg(
-    ir_test_private_lib,
-    "secretbase",
-    "export(sha256)",
-    "sha256 <- function(x) paste(c('hash', nchar(paste(x, collapse = '\n'))), collapse = '-')"
-  )
-  ir_test_write_pkg(
-    ir_test_private_lib,
-    "pak",
-    "export(pkg_deps)",
-    paste(
-      "pkg_deps <- function(refs, dependencies = NA, upgrade = TRUE) {",
-      "  refs <- as.character(refs)",
-      "  direct_refs <- refs",
-      "  packages <- sub('[?].*$', '', refs)",
-      "  packages <- sub('@.*$', '', packages)",
-      "  if ('dplyr' %in% packages && !('cli' %in% packages)) {",
-      "    refs <- c(refs, 'cli')",
-      "    packages <- c(packages, 'cli')",
-      "  }",
-      "  direct <- refs %in% direct_refs",
-      "  out <- data.frame(",
-      "    status = rep('OK', length(refs)),",
-      "    ref = refs,",
-      "    package = packages,",
-      "    version = rep('0.0.1', length(refs)),",
-      "    type = rep('standard', length(refs)),",
-      "    priority = NA_character_,",
-      "    direct = direct,",
-      "    stringsAsFactors = FALSE",
-      "  )",
-      "  out$deps <- I(lapply(out$package, function(package) {",
-      "    if (identical(package, 'dplyr'))",
-      "      data.frame(ref = 'cli', type = 'imports', package = 'cli', op = '', version = '')",
-      "    else",
-      "      data.frame(ref = character(), type = character(), package = character(), op = character(), version = character())",
-      "  }))",
-      "  out$dep_types <- I(rep(list(c('Depends', 'Imports', 'LinkingTo')), nrow(out)))",
-      "  out",
-      "}",
-      sep = "\n"
-    )
-  )
-  ir_test_write_pkg(
-    ir_test_private_lib,
-    "renv",
-    "export(use)\nexport(install)",
-    paste(
-      "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-      "  specs <- unlist(list(...), use.names = FALSE)",
-      "  ir_test_log('use', specs, library)",
-      "}",
-      "install <- function(packages, library, repos, type, rebuild, prompt, dependencies, ...) {",
-      "  ir_test_log('install', packages, library, type = type, dependencies = dependencies)",
-      "}",
-      "ir_test_log <- function(kind, specs, library, type = getOption('pkgType', ''), dependencies = NA) {",
-      "  cat(",
-      "    paste0('kind=', kind),",
-      "    paste0('library=', library),",
-      "    paste0('pkgType=', type),",
-      "    paste0('pkg.platforms=', paste(getOption('pkg.platforms', ''), collapse = ',')),",
-      "    paste0('PKG_PLATFORMS=', Sys.getenv('PKG_PLATFORMS', unset = '')),",
-      "    paste0('dependencies=', paste(dependencies, collapse = ',')),",
-      "    paste0('specs=', paste(specs, collapse = ',')),",
-      "    sep = '\n',",
-      "    file = Sys.getenv('IR_TEST_INSTALLS_FILE'),",
-      "    append = TRUE",
-      "  )",
-      "  cat('\n---\n', file = Sys.getenv('IR_TEST_INSTALLS_FILE'), append = TRUE)",
-      "  for (spec in specs) {",
-      "    pkg <- sub('@.*$', '', spec)",
-      "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
-      "  }",
-      "  invisible(TRUE)",
-      "}",
-      sep = "\n"
-    )
-  )
-}
-options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
-"#,
-    )
-    .unwrap();
-
-    let plain = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_INSTALLS_FILE", &installs)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli",
-            "--vanilla",
-            "-e",
-            "cat(.libPaths()[1], '\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&plain);
-
-    let source = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_INSTALLS_FILE", &installs)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "cli?source",
-            "--vanilla",
-            "-e",
-            "cat(.libPaths()[1], '\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&source);
-
-    let plain_stdout = stdout(&plain);
-    let source_stdout = stdout(&source);
-    let plain_library = plain_stdout.trim();
-    let source_library = source_stdout.trim();
-    assert_ne!(plain_library, source_library);
-
-    let install_log = fs::read_to_string(&installs).unwrap().replace("\r\n", "\n");
-    assert!(install_log.contains("pkgType=source\n"));
-    assert!(install_log.contains("pkg.platforms=source\n"));
-    assert!(install_log.contains("PKG_PLATFORMS=source\n"));
-    assert!(install_log.contains("specs=cli@0.0.1\n"));
-
-    let _ = fs::remove_file(&installs);
-    let combo = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_INSTALLS_FILE", &installs)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "dplyr",
-            "--with",
-            "cli?source",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=source-first\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&combo);
-
-    let combo_installs = fs::read_to_string(&installs).unwrap().replace("\r\n", "\n");
-    let source_install = combo_installs
-        .find("pkgType=source\n")
-        .expect("source install should be recorded");
-    let normal_install = combo_installs
-        .find("specs=dplyr@0.0.1\n")
-        .expect("normal install should be recorded");
-    assert!(source_install < normal_install, "{combo_installs}");
-
-    let _ = fs::remove_file(&installs);
-    let source_with_deps = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_INSTALLS_FILE", &installs)
-        .args([
-            "run",
-            "--isolated",
-            "--with",
-            "dplyr?source",
-            "--vanilla",
-            "-e",
-            "cat('ir.fixture=source-ref-deps\\n')",
-        ])
-        .output()
-        .unwrap();
-    assert_success(&source_with_deps);
-
-    let source_with_deps_installs = fs::read_to_string(&installs).unwrap().replace("\r\n", "\n");
-    let dependency_install = source_with_deps_installs
-        .find("kind=use\n")
-        .expect("source dependency install should be recorded");
-    let source_install = source_with_deps_installs
-        .find("kind=install\n")
-        .expect("source package install should be recorded");
-    assert!(
-        dependency_install < source_install,
-        "{source_with_deps_installs}"
-    );
-    assert!(source_with_deps_installs.contains("kind=use\n"));
-    assert!(source_with_deps_installs.contains("specs=cli@0.0.1\n"));
-    assert!(source_with_deps_installs.contains("kind=install\n"));
-    assert!(source_with_deps_installs.contains("dependencies=FALSE\n"));
-    assert!(source_with_deps_installs.contains("specs=dplyr@0.0.1\n"));
 }
 
 fn resolver_probe_count(entered: &Path) -> usize {

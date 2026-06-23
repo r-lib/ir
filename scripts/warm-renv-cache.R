@@ -17,25 +17,24 @@ public_repos <- function() {
 }
 
 named_value <- function(values, name) {
-  if (is.null(values) || !(name %in% names(values))) return(NULL)
+  if (is.null(values) || is.null(names(values)) || !(name %in% names(values)))
+    return(NULL)
   unname(values[[name]])
 }
 
 default_repos <- function() {
   repos <- getOption("repos")
-  if (is.null(names(repos)) && length(repos) == 1L)
-    names(repos) <- "CRAN"
+  if (is.null(repos) || !length(repos))
+    return(public_repos())
+
+  if (is.null(names(repos))) {
+    if (length(repos) == 1L) names(repos) <- "CRAN"
+    return(repos)
+  }
 
   cran <- named_value(repos, "CRAN")
-  rspm <- Sys.getenv("RSPM", unset = "")
-
-  if (nzchar(rspm) &&
-      (is.null(cran) || is.na(cran) || !nzchar(cran) ||
-       identical(cran, "@CRAN@"))) {
-    return(c(CRAN = rspm))
-  }
-  if (identical(cran, "@CRAN@"))
-    return(public_repos())
+  if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
+    repos[["CRAN"]] <- public_repos()[["CRAN"]]
 
   repos
 }

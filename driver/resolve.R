@@ -56,65 +56,58 @@ ir_resolve_refs <- function(refs) {
 
 ## --- repositories -----------------------------------------------------------
 
-ir_ppm_snapshot <- function(url) {
-  if (is.null(url) || is.na(url)) return(NULL)
-
-  url <- sub("/+$", "", url)
-  prefix <- "https://packagemanager.posit.co/cran/"
-  if (!startsWith(url, prefix)) return(NULL)
-
-  path <- substring(url, nchar(prefix) + 1L)
-  parts <- strsplit(path, "/", fixed = TRUE)[[1L]]
-  if (length(parts) == 1L && nzchar(parts[[1L]]))
-    return(parts[[1L]])
-  if (length(parts) == 3L &&
-      identical(parts[[1L]], "__linux__") &&
-      nzchar(parts[[2L]]) &&
-      nzchar(parts[[3L]]))
-    return(parts[[3L]])
-  NULL
+ir_named_value <- function(values, name) {
+  if (is.null(values) || is.null(names(values)) || !(name %in% names(values)))
+    return(NULL)
+  unname(values[[name]])
 }
 
-ir_normalize_repos <- function(repos) {
-  if (is.null(repos))
-    return(c(CRAN = ir_ppm_cran_url("latest")))
-
-  snapshots <- vapply(repos, function(repo) {
-    snapshot <- ir_ppm_snapshot(repo)
-    if (is.null(snapshot)) NA_character_ else snapshot
-  }, character(1))
-  ppm <- !is.na(snapshots)
-  if (any(ppm)) {
-    repos[ppm] <- vapply(snapshots[ppm], ir_ppm_cran_url, character(1))
-  }
-
-  cran <- ir_named_value(repos, "CRAN")
-  if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
-    repos[["CRAN"]] <- ir_ppm_cran_url("latest")
-
-  repos
+ir_repo_resolve <- function(spec) {
+  pak::repo_resolve(spec)
 }
+
+ir_linux_host <- function()
+  identical(unname(Sys.info()[["sysname"]]), "Linux")
 
 ir_ppm_snapshot_url <- function(exclude_newer) {
-  ir_ppm_cran_url(exclude_newer)
+  if (!ir_linux_host())
+    return(sprintf("https://packagemanager.posit.co/cran/%s", exclude_newer))
+
+  unname(ir_repo_resolve(sprintf("PPM@%s", exclude_newer))[[1L]])
+}
+
+ir_ppm_latest_repos <- function() {
+  c(CRAN = ir_ppm_snapshot_url("latest"))
 }
 
 ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
   if (!is.null(exclude_newer))
     return(c(CRAN = ir_ppm_snapshot_url(exclude_newer)))
 
-  ir_normalize_repos(repos)
+  if (is.null(repos) || !length(repos))
+    return(ir_ppm_latest_repos())
+
+  if (is.null(names(repos))) {
+    if (length(repos) == 1L) names(repos) <- "CRAN"
+    return(repos)
+  }
+
+  cran <- ir_named_value(repos, "CRAN")
+  if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
+    repos[["CRAN"]] <- ir_ppm_snapshot_url("latest")
+
+  repos
 }
 
 ## --- resolution cache -------------------------------------------------------
 
-# Fallback key identifying a resolution request when Rust does not pass
-# IR_RESOLUTION_MARKER. It includes the Linux PPM binary target in the platform
-# string for direct driver runs. Latest resolution keeps a stable key and
-# stores the creation time in the marker value.
+# Legacy fallback key identifying a resolution request when Rust does not pass
+# IR_RESOLUTION_MARKER. Normal CLI runs compute the marker path in Rust so warm
+# caches can return before this R resolver is launched. Latest resolution keeps
+# a stable key and stores the creation time in the marker value.
 ir_input_key <- function(deps,
                          rversion      = getRversion(),
-                         platform      = ir_cache_platform(),
+                         platform      = R.version$platform,
                          exclude_newer = NULL,
                          quarto        = FALSE) {
   source_key <- if (is.null(exclude_newer))
@@ -188,25 +181,6 @@ ir_is_standard_resolved_ref <- function(res) {
   tolower(res$type) == "standard"
 }
 
-ir_ref_parameters <- function(ref) {
-  question <- regexpr("?", ref, fixed = TRUE)[[1L]]
-  if (question < 0L) return(NULL)
-
-  params <- substring(ref, question + 1L)
-  if (!nzchar(params)) NULL else params
-}
-
-ir_ref_has_source_parameter <- function(ref) {
-  params <- ir_ref_parameters(ref)
-  if (is.null(params)) return(FALSE)
-
-  params <- strsplit(params, "&", fixed = TRUE)[[1L]]
-  params <- tolower(params)
-  any(params == "source" |
-        params == "source=true" |
-        startsWith(params, "source=") & !(params %in% c("source=false", "source=0")))
-}
-
 ir_install_spec <- function(res, i) {
   if (ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
     return(sprintf("%s@%s", res$package[[i]], res$version[[i]]))
@@ -214,125 +188,9 @@ ir_install_spec <- function(res, i) {
   res$ref[[i]]
 }
 
-ir_install_key_spec <- function(res, i) {
-  spec <- ir_install_spec(res, i)
-  if (!ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
-    return(spec)
-
-  params <- ir_ref_parameters(res$ref[[i]])
-  if (is.null(params)) spec else paste0(spec, "?", params)
-}
-
-ir_install_specs <- function(res, key = FALSE) {
-  spec <- if (key) ir_install_key_spec else ir_install_spec
-  sort(unique(vapply(seq_len(nrow(res)), function(i) spec(res, i),
+ir_install_specs <- function(res) {
+  sort(unique(vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
                      character(1))))
-}
-
-ir_source_install_specs <- function(res) {
-  specs <- vapply(seq_len(nrow(res)), function(i) {
-    if (ir_is_standard_resolved_ref(res[i, , drop = FALSE]) &&
-        ir_ref_has_source_parameter(res$ref[[i]]))
-      ir_install_spec(res, i)
-    else
-      NA_character_
-  }, character(1))
-  sort(unique(stats::na.omit(specs)))
-}
-
-ir_dependency_packages <- function(res, roots) {
-  if (!length(roots) || !("deps" %in% names(res))) return(character())
-
-  packages <- res$package
-  selected <- character()
-  visited <- character()
-  queue <- roots
-  while (length(queue)) {
-    package <- queue[[1L]]
-    queue <- queue[-1L]
-    if (package %in% visited) next
-    visited <- c(visited, package)
-
-    i <- match(package, packages)
-    if (is.na(i)) next
-
-    deps <- res$deps[[i]]
-    if (is.null(deps) || !NROW(deps)) next
-
-    dep_types <- c("depends", "imports", "linkingto")
-    if ("dep_types" %in% names(res) && length(res$dep_types[[i]]))
-      dep_types <- tolower(res$dep_types[[i]])
-
-    dep_packages <- deps$package[tolower(deps$type) %in% dep_types]
-    dep_packages <- intersect(dep_packages, packages)
-    selected <- union(selected, dep_packages)
-    queue <- c(queue, setdiff(dep_packages, c(visited, queue)))
-  }
-
-  setdiff(selected, roots)
-}
-
-ir_install_specs_for_packages <- function(res, packages) {
-  if (!length(packages)) return(character())
-  ir_install_specs(res[res$package %in% packages, , drop = FALSE])
-}
-
-ir_source_dependency_install_specs <- function(res) {
-  source_packages <- res$package[
-    ir_is_standard_resolved_ref(res) &
-      vapply(res$ref, ir_ref_has_source_parameter, logical(1))
-  ]
-  dependency_packages <- ir_dependency_packages(res, source_packages)
-  setdiff(ir_install_specs_for_packages(res, dependency_packages),
-          ir_source_install_specs(res))
-}
-
-ir_renv_use <- function(specs, library_path, repos) {
-  if (!length(specs)) return(invisible())
-
-  do.call(renv::use, c(
-    as.list(specs),
-    list(
-      library = library_path,
-      repos   = repos,
-      attach  = FALSE,
-      sandbox = FALSE,
-      isolate = TRUE,
-      verbose = TRUE
-    )
-  ))
-}
-
-ir_renv_install_source <- function(specs, library_path, repos) {
-  if (!length(specs)) return(invisible())
-
-  do.call(renv::install, list(
-    packages      = specs,
-    library       = library_path,
-    repos         = repos,
-    type          = "source",
-    rebuild       = TRUE,
-    prompt        = FALSE,
-    dependencies  = FALSE
-  ))
-}
-
-ir_renv_use_source <- function(specs, library_path, repos) {
-  if (!length(specs)) return(invisible())
-
-  old_options <- options(pkgType = "source", pkg.platforms = "source",
-                         renv.config.pak.enabled = FALSE)
-  old_platforms <- Sys.getenv("PKG_PLATFORMS", unset = NA_character_)
-  Sys.setenv(PKG_PLATFORMS = "source")
-  on.exit({
-    options(old_options)
-    if (is.na(old_platforms))
-      Sys.unsetenv("PKG_PLATFORMS")
-    else
-      Sys.setenv(PKG_PLATFORMS = old_platforms)
-  }, add = TRUE)
-
-  ir_renv_install_source(specs, library_path, repos)
 }
 
 ## --- pipeline ---------------------------------------------------------------
@@ -344,8 +202,6 @@ ir_resolve_main <- function() {
 
   ## 0. Ensure the resolver's own tooling (pak/renv/secretbase) is available
   ## before any secretbase/pak/renv use below.
-  ir_configure_package_type()
-  ir_configure_renv_cache_prefix()
   ir_ensure_tooling(cache_dir = cache_dir)
 
   deps        <- readLines(file("stdin"), warn = FALSE)
@@ -357,7 +213,6 @@ ir_resolve_main <- function() {
   exclude_newer <- ir_exclude_newer(ir_env_optional("IR_EXCLUDE_NEWER"))
   repos <- ir_repos(exclude_newer)
   options(repos = repos)
-  ir_configure_ppm_user_agent(repos)
 
   # A Quarto render needs rmarkdown for the knitr engine; Rust sets
   # IR_QUARTO_RENDER so the resolver can inject it when the resolved set does not
@@ -441,9 +296,6 @@ ir_resolve_main <- function() {
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
-    install_key_specs <- character()
-    source_install_specs <- character()
-    source_dependency_install_specs <- character()
     has_source_ref <- FALSE
   } else {
     # Drop base / recommended packages: those are supplied by R itself.
@@ -451,19 +303,15 @@ ir_resolve_main <- function() {
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
     install_specs <- ir_install_specs(res)
-    install_key_specs <- ir_install_specs(res, key = TRUE)
-    source_install_specs <- ir_source_install_specs(res)
-    source_dependency_install_specs <- ir_source_dependency_install_specs(res)
-    has_source_ref <- any(!ir_is_standard_resolved_ref(res)) ||
-      length(source_install_specs) > 0L
+    has_source_ref <- any(!ir_is_standard_resolved_ref(res))
   }
 
   ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(install_key_specs,
+  key <- paste(c(install_specs,
                  as.character(getRversion()),
-                 ir_cache_platform()),
+                 R.version$platform),
                collapse = "\n")
   library_path <- file.path(cache_dir, "libraries", secretbase::sha256(key))
 
@@ -473,13 +321,20 @@ ir_resolve_main <- function() {
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
   have <- list.files(library_path)
   if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
-    # renv materializes packages into `library`. Because `library` lives in our
-    # cache (not the R temp dir), renv leaves it in place when the session ends.
-    ir_renv_use(source_dependency_install_specs, library_path, repos)
-    ir_renv_use_source(source_install_specs, library_path, repos)
-    ir_renv_use(setdiff(install_specs,
-                        c(source_install_specs, source_dependency_install_specs)),
-                library_path, repos)
+    # renv::use() installs into the renv cache and links the packages into
+    # `library` as symlinks. Because `library` lives in our cache (not the R
+    # temp dir), renv leaves it in place when the session ends.
+    do.call(renv::use, c(
+      as.list(install_specs),
+      list(
+        library = library_path,
+        repos   = repos,
+        attach  = FALSE,
+        sandbox = FALSE,
+        isolate = TRUE,
+        verbose = TRUE
+      )
+    ))
   }
 
   ## 4b. Record the resolution so an identical request skips pak.

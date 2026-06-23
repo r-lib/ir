@@ -109,77 +109,7 @@ pub(crate) fn renviron_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn linux_distribution() -> Option<String> {
-    manylinux_distribution(linux_arch().as_deref())
-}
-
-#[cfg(target_os = "linux")]
-fn linux_arch() -> Option<String> {
-    let arch = Command::new(rscript())
-        .args(["-e", "cat(R.version$arch)"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
-    match arch.as_str() {
-        "x86_64" | "amd64" => Some("x86_64".to_string()),
-        "aarch64" | "arm64" => Some("aarch64".to_string()),
-        _ => None,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn manylinux_distribution(arch: Option<&str>) -> Option<String> {
-    if !matches!(arch, Some("x86_64" | "aarch64")) {
-        return None;
-    }
-    let output = Command::new("ldd").arg("--version").output().ok()?;
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let version = text
-        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-        .find(|part| {
-            let mut pieces = part.split('.');
-            pieces.next().is_some_and(|major| !major.is_empty())
-                && pieces.next().is_some_and(|minor| !minor.is_empty())
-        })?;
-    let (major, minor) = version.split_once('.')?;
-    let major = major.parse::<u64>().ok()?;
-    let minor = minor.parse::<u64>().ok()?;
-    if (major, minor) >= (2, 28) {
-        Some("manylinux_2_28".to_string())
-    } else {
-        None
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn linux_distribution() -> Option<String> {
-    None
-}
-
-pub(crate) fn set_ppm_linux_distribution_env(command: &mut Command) {
-    if let Some(distribution) = linux_distribution() {
-        command.env("IR_TEST_PPM_LINUX_DISTRIBUTION", distribution);
-    }
-}
-
-pub(crate) fn expected_ppm_cran_url(snapshot: &str) -> String {
-    if let Some(distribution) = linux_distribution() {
-        format!("https://packagemanager.posit.co/cran/__linux__/{distribution}/{snapshot}")
-    } else {
-        format!("https://packagemanager.posit.co/cran/{snapshot}")
-    }
-}
-
-pub(crate) fn expected_ppm_latest_url() -> String {
-    expected_ppm_cran_url("latest")
-}
-
+#[cfg(unix)]
 pub(crate) fn r_string(path: &Path) -> String {
     serde_json::to_string(&renviron_path(path)).unwrap()
 }

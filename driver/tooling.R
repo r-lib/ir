@@ -8,156 +8,6 @@ ir_cache_dir <- function() {
   if (nzchar(env)) env else tools::R_user_dir("ir", "cache")
 }
 
-ir_named_value <- function(values, name) {
-  if (is.null(values) || !(name %in% names(values))) return(NULL)
-  unname(values[[name]])
-}
-
-ir_package_type <- function() {
-  package_type <- Sys.getenv("IR_PACKAGE_TYPE", unset = "auto")
-  package_type <- tolower(trimws(package_type[[1L]]))
-  if (!nzchar(package_type)) package_type <- "auto"
-  if (!(package_type %in% c("auto", "source", "binary")))
-    stop("IR_PACKAGE_TYPE must be one of: auto, source, binary",
-         call. = FALSE)
-  package_type
-}
-
-ir_configure_package_type <- function(package_type = ir_package_type()) {
-  if (identical(package_type, "source")) {
-    options(pkgType = "source", pkg.platforms = "source")
-    Sys.setenv(PKG_PLATFORMS = "source")
-  } else if (identical(package_type, "binary")) {
-    options(pkgType = "binary", pkg.platforms = NULL)
-    Sys.unsetenv("PKG_PLATFORMS")
-  }
-  invisible(package_type)
-}
-
-ir_linux_host <- function()
-  identical(unname(Sys.info()[["sysname"]]), "Linux")
-
-ir_linux_arch <- function() {
-  arch <- R.version[["arch"]]
-  if (arch %in% c("x86_64", "amd64")) return("x86_64")
-  if (arch %in% c("aarch64", "arm64")) return("aarch64")
-  NULL
-}
-
-ir_glibc_version <- function() {
-  output <- tryCatch(
-    suppressWarnings(system2("ldd", "--version", stdout = TRUE,
-                             stderr = TRUE)),
-    error = function(e) character()
-  )
-  versions <- unlist(regmatches(output, gregexpr("[0-9]+\\.[0-9]+", output)),
-                     use.names = FALSE)
-  if (!length(versions)) return(NULL)
-  numeric_version(versions[[1L]])
-}
-
-ir_manylinux_binary_distribution <- function(arch = ir_linux_arch()) {
-  if (!(arch %in% c("x86_64", "aarch64"))) return(NULL)
-
-  glibc <- ir_glibc_version()
-  if (!is.null(glibc) && glibc >= numeric_version("2.28"))
-    return("manylinux_2_28")
-
-  NULL
-}
-
-ir_ppm_r_version_supported <- function(version = getRversion()) {
-  version >= numeric_version("4.2")
-}
-
-ir_linux_binary_distribution <- function(package_type = ir_package_type()) {
-  if (identical(package_type, "source")) return(NULL)
-  if (!ir_linux_host()) return(NULL)
-  if (!ir_ppm_r_version_supported()) return(NULL)
-
-  ir_manylinux_binary_distribution()
-}
-
-ir_effective_package_type <- function(package_type = ir_package_type()) {
-  if (!identical(package_type, "auto"))
-    return(package_type)
-
-  values <- c(
-    getOption("pkgType"),
-    getOption("pkg.platforms"),
-    Sys.getenv("PKG_PLATFORMS", unset = NA_character_)
-  )
-  values <- tolower(trimws(as.character(stats::na.omit(values))))
-  if ("source" %in% values) "source" else NULL
-}
-
-ir_cache_platform <- function(platform = R.version$platform) {
-  package_type <- ir_package_type()
-  distro <- ir_linux_binary_distribution(package_type)
-  effective_package_type <- ir_effective_package_type(package_type)
-  platform <- if (is.null(distro)) platform else paste0(platform, ";ppm-linux=", distro)
-  if (!is.null(effective_package_type))
-    platform <- paste0(platform, ";package-type=", effective_package_type)
-  platform
-}
-
-ir_ppm_cran_url <- function(snapshot) {
-  package_type <- ir_package_type()
-  distro <- ir_linux_binary_distribution(package_type)
-  if (!is.null(distro))
-    return(sprintf("https://packagemanager.posit.co/cran/__linux__/%s/%s",
-                   distro, snapshot))
-
-  if (identical(package_type, "binary") && ir_linux_host()) {
-    if (!ir_ppm_r_version_supported())
-      stop("IR_PACKAGE_TYPE=binary requires an R version supported by ",
-           "Posit Package Manager binaries", call. = FALSE)
-    stop("IR_PACKAGE_TYPE=binary requires x86_64 or ARM64 Linux with ",
-         "glibc 2.28 or newer", call. = FALSE)
-  }
-
-  sprintf("https://packagemanager.posit.co/cran/%s", snapshot)
-}
-
-ir_configure_ppm_user_agent <- function(repos) {
-  linux_ppm <- !is.null(repos) &&
-    any(grepl("/__linux__/", unname(repos), fixed = TRUE), na.rm = TRUE)
-  if (!linux_ppm)
-    return(invisible())
-
-  default_user_agent <- sprintf(
-    "R (%s %s %s %s)",
-    getRversion(),
-    R.version[["platform"]],
-    R.version[["arch"]],
-    R.version[["os"]]
-  )
-  libcurl_user_agent <- sprintf("R/%s %s", getRversion(), default_user_agent)
-  options(HTTPUserAgent = libcurl_user_agent)
-
-  method <- getOption("download.file.method")
-  if (identical(method, "curl") || identical(method, "wget")) {
-    extra <- getOption("download.file.extra", "")
-    if (is.null(extra)) extra <- ""
-    header <- sprintf("User-Agent: %s", default_user_agent)
-    if (!grepl(header, extra, fixed = TRUE)) {
-      extra <- trimws(paste(extra, "--header", shQuote(header)))
-      options(download.file.extra = extra)
-    }
-  }
-
-  invisible()
-}
-
-ir_configure_renv_cache_prefix <- function() {
-  distro <- ir_linux_binary_distribution()
-  if (is.null(distro) || nzchar(Sys.getenv("RENV_PATHS_PREFIX", unset = "")))
-    return(invisible())
-
-  Sys.setenv(RENV_PATHS_PREFIX = distro)
-  invisible()
-}
-
 ir_configure_child_tempdir <- function(tmp = tempdir()) {
   stopifnot(length(tmp) == 1L, nzchar(tmp), dir.exists(tmp))
   tmp <- normalizePath(tmp, winslash = "/", mustWork = TRUE)
@@ -196,16 +46,19 @@ ir_tooling_packages <- function() c("pak", "renv", "secretbase")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's
-# reproducibility date. PPM serves binaries for Windows and macOS, and
-# manylinux binaries for modern Linux hosts.
-ir_tooling_repos <- function()
-  c(CRAN = ir_ppm_cran_url("latest"))
+# reproducibility date. Prefer setup-r's RSPM URL when present so CI can use
+# platform binaries while bootstrapping pak itself.
+ir_tooling_repos <- function() {
+  rspm <- Sys.getenv("RSPM", unset = "")
+  if (nzchar(rspm)) c(CRAN = rspm)
+  else c(CRAN = "https://packagemanager.posit.co/cran/latest")
+}
 
 # Path to the tooling library, keyed by R version and platform so compiled
 # packages match the running R, mirroring renv's cache layout.
 ir_tooling_lib <- function(cache_dir = ir_cache_dir())
   file.path(cache_dir, "tooling",
-            paste0(getRversion(), "-", ir_cache_platform()))
+            paste0(getRversion(), "-", R.version$platform))
 
 ir_tooling_version <- function(package, lib = ir_tooling_lib()) {
   tryCatch(utils::packageVersion(package, lib.loc = lib),
@@ -370,8 +223,6 @@ ir_ensure_tooling <- function(packages = ir_tooling_packages(),
                               min_versions = character(),
                               cache_dir = ir_cache_dir(),
                               repos = ir_tooling_repos()) {
-  ir_configure_package_type()
-  ir_configure_ppm_user_agent(repos)
   lib <- ir_tooling_lib(cache_dir)
   dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   .libPaths(c(lib, .libPaths()))

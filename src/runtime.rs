@@ -11,7 +11,7 @@ use time::macros::format_description;
 use time::{Date, OffsetDateTime};
 
 use crate::driver;
-use crate::lock::{package_cache_lock_path, resolver_lock_path, FileLock};
+use crate::lock::{resolver_lock_path, FileLock};
 use crate::python;
 use crate::quarto::{self, RenderSource};
 use crate::resolve_cache;
@@ -303,10 +303,6 @@ fn resolve_library_inner(
         });
     }
 
-    let _package_cache_lock = renv_package_cache_root()
-        .ok()
-        .map(|root| FileLock::acquire(&package_cache_lock_path(&root)))
-        .transpose()?;
     let _resolver_lock = FileLock::acquire(&resolver_lock_path(&cache_dir))?;
     if let Some(resolved) = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)? {
         return Ok(ResolvedLibrary {
@@ -786,21 +782,6 @@ fn r_user_cache_dir() -> Result<PathBuf, Box<dyn Error>> {
     {
         Ok(home_dir()?.join(".cache"))
     }
-}
-
-fn first_env_path(name: &str) -> Option<PathBuf> {
-    let value = nonempty_env(name)?;
-    env::split_paths(&value).find(|path| !path.as_os_str().is_empty())
-}
-
-fn renv_package_cache_root() -> Result<PathBuf, Box<dyn Error>> {
-    if let Some(path) = first_env_path("RENV_PATHS_CACHE") {
-        return Ok(path);
-    }
-    if let Some(path) = first_env_path("RENV_PATHS_ROOT") {
-        return Ok(path.join("cache"));
-    }
-    r_user_cache_dir()
 }
 
 #[cfg(unix)]

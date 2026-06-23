@@ -49,7 +49,6 @@ Future snapshot dates also resolve latest packages.
 
 Supported version specs include `pkg`, `pkg>=1.0`, and `pkg==1.2`.
 Source refs are resolved with pak and then passed through to renv, including GitHub, GitLab, Bitbucket, git, URL, and local package refs in forms both tools accept.
-To force a single registry package ref to build from source, use pak's `?source` suffix, such as `tibble?source`.
 GitHub packages should use package refs such as `github::owner/repo@ref` or `github::owner/repo/subdir@ref`, not browser URLs copied from GitHub.
 Local packages may be written as `local::path`, as a bare file-system path in pak-supported forms such as `./path`, or with a package prefix such as `mypkg=local::C:/path` for Windows absolute paths.
 `packages` must be a YAML sequence; each sequence entry is one package ref.

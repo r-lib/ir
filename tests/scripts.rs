@@ -237,8 +237,6 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
     assert!(warm_script.contains("Sys.getenv(\"RSPM\", unset = \"\")"));
-    assert!(!warm_script.contains("__linux__"));
-    assert!(!warm_script.contains("VERSION_CODENAME"));
     assert!(!warm_script.contains("https://cran.r-project.org"));
 }
 
@@ -246,12 +244,10 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
 fn warm_renv_cache_uses_session_repos_rspm_and_explicit_repos() {
     let user_library = temp_dir("ir-warm-repos-library");
     let profile = temp_path("ir-warm-repos-profile", "R");
-    let profile_repos = temp_path("ir-warm-repos-profile-output", "txt");
-    let rspm_repos = temp_path("ir-warm-repos-rspm-output", "txt");
-    let cran_fallback_repos = temp_path("ir-warm-repos-cran-fallback-output", "txt");
-    let unnamed_repos = temp_path("ir-warm-repos-unnamed-output", "txt");
-    let explicit_repos = temp_path("ir-warm-repos-explicit-output", "txt");
-    let profile_override = temp_path("ir-warm-repos-profile-override", "txt");
+    let session_repos = temp_path("ir-warm-repos-session", "txt");
+    let rspm_repos = temp_path("ir-warm-repos-rspm", "txt");
+    let explicit_repos = temp_path("ir-warm-repos-explicit", "txt");
+    let session_override = temp_path("ir-warm-repos-session-override", "txt");
     let explicit_override = temp_path("ir-warm-repos-explicit-override", "txt");
 
     fs::write(
@@ -299,9 +295,7 @@ ir_test_write_pkg(
   )
 )
 
-if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
-  options(repos = "https://cran.r-project.org")
-} else if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
+if (identical(Sys.getenv("IR_TEST_AT_CRAN", unset = ""), "1")) {
   options(repos = c(CRAN = "@CRAN@"))
 } else {
   options(repos = c(CRAN = "https://profile.example.test/repo",
@@ -311,7 +305,7 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
     )
     .unwrap();
 
-    let read_repos = |path: &Path| {
+    let read = |path: &Path| {
         fs::read_to_string(path)
             .unwrap()
             .replace("\r\n", "\n")
@@ -319,24 +313,24 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
             .to_string()
     };
 
-    let profile_default = Command::new(rscript())
+    let session = Command::new(rscript())
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_REPOS_FILE", &profile_repos)
-        .env("IR_TEST_OVERRIDE_FILE", &profile_override)
+        .env("IR_TEST_REPOS_FILE", &session_repos)
+        .env("IR_TEST_OVERRIDE_FILE", &session_override)
         .env("RENV_CONFIG_REPOS_OVERRIDE", "https://stale.example.test")
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
-    assert_success(&profile_default);
+    assert_success(&session);
     assert_eq!(
-        read_repos(&profile_repos),
+        read(&session_repos),
         "CRAN=https://profile.example.test/repo\nInternal=https://internal.example.test/repo"
     );
-    assert_eq!(read_repos(&profile_override), "");
+    assert_eq!(read(&session_override), "");
 
-    let rspm_default = Command::new(rscript())
+    let rspm = Command::new(rscript())
         .current_dir(repo_root())
         .env("R_PROFILE_USER", &profile)
         .env("R_LIBS_USER", &user_library)
@@ -349,41 +343,10 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
         .args(["scripts/warm-renv-cache.R", "cli"])
         .output()
         .unwrap();
-    assert_success(&rspm_default);
+    assert_success(&rspm);
     assert_eq!(
-        read_repos(&rspm_repos),
+        read(&rspm_repos),
         "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/latest"
-    );
-
-    let cran_fallback = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env_remove("RSPM")
-        .env("IR_TEST_AT_CRAN", "1")
-        .env("IR_TEST_REPOS_FILE", &cran_fallback_repos)
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&cran_fallback);
-    assert_eq!(
-        read_repos(&cran_fallback_repos),
-        "CRAN=https://packagemanager.posit.co/cran/latest"
-    );
-
-    let unnamed_default = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env("IR_TEST_UNNAMED_REPO", "1")
-        .env("IR_TEST_REPOS_FILE", &unnamed_repos)
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&unnamed_default);
-    assert_eq!(
-        read_repos(&unnamed_repos),
-        "CRAN=https://cran.r-project.org"
     );
 
     let explicit = Command::new(rscript())
@@ -403,97 +366,12 @@ if (identical(Sys.getenv("IR_TEST_UNNAMED_REPO", unset = ""), "1")) {
         .unwrap();
     assert_success(&explicit);
     assert_eq!(
-        read_repos(&explicit_repos),
+        read(&explicit_repos),
         "CRAN=https://packagemanager.posit.co/cran/__linux__/noble/2026-06-01"
     );
     assert_eq!(
-        read_repos(&explicit_override),
+        read(&explicit_override),
         "https://packagemanager.posit.co/cran/__linux__/noble/2026-06-01"
-    );
-}
-
-#[test]
-fn warm_renv_cache_bootstraps_tooling_from_public_ppm() {
-    let user_library = temp_dir("ir-warm-tooling-library");
-    let profile = temp_path("ir-warm-tooling-profile", "R");
-    let package_repos = temp_path("ir-warm-tooling-package-repos", "txt");
-    let tooling_repos = temp_path("ir-warm-tooling-bootstrap-repos", "txt");
-
-    fs::write(
-        &profile,
-        r#"
-ir_test_write_pkg <- function(lib, pkg, namespace, code) {
-  path <- file.path(lib, pkg)
-  dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(
-    paste("Package:", pkg),
-    "Version: 0.0.1",
-    paste("Title:", pkg),
-    paste("Description:", pkg),
-    "License: MIT"
-  ), file.path(path, "DESCRIPTION"))
-  writeLines(namespace, file.path(path, "NAMESPACE"))
-  writeLines(code, file.path(path, "R", pkg))
-}
-
-unlockBinding("install.packages", asNamespace("utils"))
-assign(
-  "install.packages",
-  function(pkgs, repos, ...) {
-    writeLines(paste(names(repos), unname(repos), sep = "="),
-               Sys.getenv("IR_TEST_TOOLING_REPOS_FILE"))
-    for (pkg in pkgs) {
-      namespace <- if (identical(pkg, "renv")) "export(use)" else
-        paste0("export(", pkg, "_ok)")
-      code <- if (identical(pkg, "renv")) {
-        paste(
-          "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-          "  writeLines(paste(names(repos), unname(repos), sep = '='), Sys.getenv('IR_TEST_REPOS_FILE'))",
-          "  invisible(TRUE)",
-          "}",
-          sep = "\n"
-        )
-      } else {
-        paste0(pkg, "_ok <- function() TRUE")
-      }
-      ir_test_write_pkg(.libPaths()[[1L]], pkg, namespace, code)
-    }
-  },
-  envir = asNamespace("utils")
-)
-lockBinding("install.packages", asNamespace("utils"))
-
-options(repos = c(CRAN = "https://internal.example.test/repo"))
-"#,
-    )
-    .unwrap();
-
-    let read_repos = |path: &Path| {
-        fs::read_to_string(path)
-            .unwrap()
-            .replace("\r\n", "\n")
-            .trim()
-            .to_string()
-    };
-
-    let output = Command::new(rscript())
-        .current_dir(repo_root())
-        .env("R_PROFILE_USER", &profile)
-        .env("R_LIBS_USER", &user_library)
-        .env_remove("RSPM")
-        .env("IR_TEST_REPOS_FILE", &package_repos)
-        .env("IR_TEST_TOOLING_REPOS_FILE", &tooling_repos)
-        .args(["scripts/warm-renv-cache.R", "cli"])
-        .output()
-        .unwrap();
-    assert_success(&output);
-    assert_eq!(
-        read_repos(&package_repos),
-        "CRAN=https://internal.example.test/repo"
-    );
-    assert_eq!(
-        read_repos(&tooling_repos),
-        "CRAN=https://packagemanager.posit.co/cran/latest"
     );
 }
 

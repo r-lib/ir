@@ -39,7 +39,6 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
 | `IR_EXCLUDE_NEWER` | `ir run` and `ir render` package snapshot date; also selects R when no explicit R selector is set | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
-| `IR_PACKAGE_TYPE` | package repository policy: `auto`, `source`, or `binary` | `auto` |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
@@ -60,9 +59,6 @@ Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newe
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
-On modern x86_64 and ARM64 Linux hosts with glibc 2.28 or newer, `ir` resolves public PPM repositories through Posit Package Manager's manylinux binary URL, such as `https://packagemanager.posit.co/cran/__linux__/manylinux_2_28/latest`.
-Set `IR_PACKAGE_TYPE=source` to leave public PPM repositories on their source-style URLs and set the resolver session's package type to source.
-Set `IR_PACKAGE_TYPE=binary` to require a supported Linux PPM binary repository when `ir` selects public PPM for Linux.
 R selection precedence is command line, then environment, then frontmatter.
 Use `--rscript`, `IR_RSCRIPT`, or frontmatter `rscript` to select a specific Rscript executable.
 Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.

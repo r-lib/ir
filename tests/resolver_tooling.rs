@@ -21,9 +21,7 @@ fn run_tooling_probe(
     package: &str,
     label: &str,
 ) -> Output {
-    let mut cmd = ir();
-    set_ppm_linux_distribution_env(&mut cmd);
-    cmd.env("IR_CACHE_DIR", cache_dir)
+    ir().env("IR_CACHE_DIR", cache_dir)
         .env("R_LIBS_USER", r_libs_user)
         .env("R_PROFILE_USER", profile)
         .args(["run", "--isolated", "--with", package, "--vanilla", "-e"])
@@ -323,19 +321,11 @@ fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
         format!(
             r#"
 {}
-ir_test_cache_platform <- function() {{
-  distro <- Sys.getenv("IR_TEST_PPM_LINUX_DISTRIBUTION", unset = "")
-  if (nzchar(distro))
-    paste0(R.version$platform, ";ppm-linux=", distro)
-  else
-    R.version$platform
-}}
-
-ir_test_private_libs <- unique(file.path(
+ir_test_private_lib <- file.path(
   Sys.getenv("IR_CACHE_DIR"),
   "tooling",
-  paste0(getRversion(), "-", c(R.version$platform, ir_test_cache_platform()))
-))
+  paste0(getRversion(), "-", R.version$platform)
+)
 ir_test_wrong_r <- ir_test_wrong_minor_version()
 
 ir_test_write_secretbase(
@@ -349,17 +339,15 @@ ir_test_write_pillar(
   marker = {},
   built = ir_test_wrong_r
 )
-for (ir_test_private_lib in ir_test_private_libs) {{
-  ir_test_write_pak(
-    ir_test_private_lib,
-    namespace = "export(pkg_deps)\nexport(pkg_install)",
-    code = ir_test_fake_pak_code(
-      allowed_installs = "secretbase",
-      require_pillar = TRUE
-    )
+ir_test_write_pak(
+  ir_test_private_lib,
+  namespace = "export(pkg_deps)\nexport(pkg_install)",
+  code = ir_test_fake_pak_code(
+    allowed_installs = "secretbase",
+    require_pillar = TRUE
   )
-  ir_test_write_renv(ir_test_private_lib)
-}}
+)
+ir_test_write_renv(ir_test_private_lib)
 
 utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
   stop("install.packages should not install resolver tooling when pak exists",
@@ -373,9 +361,7 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
     )
     .unwrap();
 
-    let mut first_cmd = ir();
-    set_ppm_linux_distribution_env(&mut first_cmd);
-    let first = first_cmd
+    let first = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_LIBS_USER", &ambient_library)
         .env("R_PROFILE_USER", &profile)
