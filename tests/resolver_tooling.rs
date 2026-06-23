@@ -7,28 +7,34 @@ mod support;
 use support::*;
 
 use std::fs;
-use std::path::Path;
+use std::os::unix::fs::symlink;
+use std::path::PathBuf;
+use std::process::Command;
 
 fn resolver_tooling_fixture_source() -> String {
     format!("source({})", r_string(&fixture("resolver-tooling.R")))
 }
 
-fn assert_pak_installed_resolver_tooling(install_marker: &Path, pak_marker: &Path) {
-    let install_packages = fs::read_to_string(install_marker).unwrap();
-    assert_eq!(install_packages.trim(), "pak");
+fn real_pak_library(prefix: &str) -> TempPath {
+    let out = Command::new(rscript())
+        .args([
+            "-e",
+            "cat(normalizePath(find.package('pak'), winslash = '/', mustWork = TRUE))",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
 
-    let pak_refs = fs::read_to_string(pak_marker).unwrap();
-    assert!(pak_refs.lines().any(|line| line == "renv"), "{pak_refs}");
-    assert!(
-        pak_refs.lines().any(|line| line == "secretbase"),
-        "{pak_refs}"
-    );
-    assert!(!pak_refs.lines().any(|line| line == "pak"), "{pak_refs}");
+    let pak_path = PathBuf::from(stdout(&out));
+    let pak_library = temp_dir(prefix);
+    symlink(pak_path, pak_library.join("pak")).unwrap();
+    pak_library
 }
 
 #[test]
 fn resolver_tooling_uses_compatible_user_library_packages() {
     let cache_dir = temp_dir("ir-compatible-tooling-cache");
+    let pak_library = real_pak_library("ir-compatible-tooling-pak-library");
     let user_library = temp_dir("ir-compatible-tooling-user-library");
     let fake_load_marker = temp_path("ir-compatible-secretbase-loaded", "txt");
     let profile = temp_path("ir-compatible-tooling-profile", "R");
@@ -38,8 +44,9 @@ fn resolver_tooling_uses_compatible_user_library_packages() {
         format!(
             r#"
 {}
+.libPaths(c(Sys.getenv("IR_TEST_PAK_LIB"), Sys.getenv("R_LIBS_USER")))
+
 ir_test_write_secretbase(Sys.getenv("R_LIBS_USER"), marker = {})
-ir_test_write_pak(Sys.getenv("R_LIBS_USER"))
 ir_test_write_renv(Sys.getenv("R_LIBS_USER"))
 
 utils::assignInNamespace("install.packages", function(...) {{
@@ -54,6 +61,7 @@ utils::assignInNamespace("install.packages", function(...) {{
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_PAK_LIB", &pak_library)
         .env("R_LIBS_USER", &user_library)
         .env("R_PROFILE_USER", &profile)
         .args([
@@ -77,41 +85,32 @@ utils::assignInNamespace("install.packages", function(...) {{
 }
 
 #[test]
-fn resolver_tooling_bootstraps_only_pak_with_install_packages() {
-    let cache_dir = temp_dir("ir-pak-tooling-cache");
-    let empty_library = temp_dir("ir-pak-tooling-empty-library");
-    let install_marker = temp_path("ir-pak-tooling-install", "txt");
-    let pak_marker = temp_path("ir-pak-tooling-pak", "txt");
-    let profile = temp_path("ir-pak-tooling-profile", "R");
+fn resolver_tooling_installs_missing_packages_with_real_pak() {
+    let cache_dir = temp_dir("ir-real-pak-tooling-cache");
+    let pak_library = real_pak_library("ir-real-pak-tooling-pak-library");
+    let empty_library = temp_dir("ir-real-pak-tooling-empty-library");
+    let profile = temp_path("ir-real-pak-tooling-profile", "R");
 
     fs::write(
         &profile,
         format!(
             r#"
 {}
-.libPaths(Sys.getenv("IR_TEST_EMPTY_LIB"))
+.libPaths(c(Sys.getenv("IR_TEST_PAK_LIB"), Sys.getenv("IR_TEST_EMPTY_LIB")))
 
-utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
-  writeLines(as.character(pkgs), {})
-  if (!identical(as.character(pkgs), "pak"))
-    stop("resolver should bootstrap only pak with install.packages",
-         call. = FALSE)
-  ir_test_write_pak(
-    lib,
-    namespace = "export(pkg_deps)\nexport(pkg_install)\nexport(repo_resolve)",
-    code = ir_test_fake_pak_code(install_marker = {})
-  )
+utils::assignInNamespace("install.packages", function(...) {{
+  stop("resolver should use real pak that is already available",
+       call. = FALSE)
 }}, ns = "utils")
 "#,
-            resolver_tooling_fixture_source(),
-            r_string(&install_marker),
-            r_string(&pak_marker)
+            resolver_tooling_fixture_source()
         ),
     )
     .unwrap();
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_PAK_LIB", &pak_library)
         .env("IR_TEST_EMPTY_LIB", &empty_library)
         .env("R_LIBS_SITE", &empty_library)
         .env("R_LIBS_USER", &empty_library)
@@ -123,25 +122,22 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
             "cli",
             "--vanilla",
             "-e",
-            "cat('ir.fixture=pak-tooling\\n')",
+            "cat('ir.fixture=real-pak-tooling\\n')",
         ])
         .output()
         .unwrap();
 
     assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=pak-tooling");
-    assert_pak_installed_resolver_tooling(&install_marker, &pak_marker);
+    assert_stdout_contains(&out, "ir.fixture=real-pak-tooling");
 }
 
 #[test]
 fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
     let cache_dir = temp_dir("ir-stale-tooling-cache");
+    let pak_library = real_pak_library("ir-stale-tooling-pak-library");
     let user_library = temp_dir("ir-stale-tooling-user-library");
     let empty_library = temp_dir("ir-stale-tooling-empty-library");
-    let install_marker = temp_path("ir-stale-tooling-install", "txt");
-    let pak_marker = temp_path("ir-stale-tooling-pak", "txt");
     let secretbase_load_marker = temp_path("ir-stale-secretbase-loaded", "txt");
-    let pillar_load_marker = temp_path("ir-stale-pillar-loaded", "txt");
     let profile = temp_path("ir-stale-tooling-profile", "R");
 
     fs::write(
@@ -149,7 +145,9 @@ fn resolver_tooling_ignores_wrong_r_minor_user_library_package() {
         format!(
             r#"
 {}
-.libPaths(c(Sys.getenv("R_LIBS_USER"), Sys.getenv("IR_TEST_EMPTY_LIB")))
+.libPaths(c(Sys.getenv("R_LIBS_USER"),
+            Sys.getenv("IR_TEST_PAK_LIB"),
+            Sys.getenv("IR_TEST_EMPTY_LIB")))
 
 ir_test_wrong_r <- ir_test_wrong_minor_version()
 ir_test_write_secretbase(
@@ -158,38 +156,25 @@ ir_test_write_secretbase(
   hash = "ambienthash",
   built = ir_test_wrong_r
 )
-ir_test_write_pillar(
+ir_test_write_renv(
   Sys.getenv("R_LIBS_USER"),
-  marker = {},
   built = ir_test_wrong_r
 )
 
-utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
-  writeLines(as.character(pkgs), {})
-  if (!identical(as.character(pkgs), "pak"))
-    stop("resolver should bootstrap only pak with install.packages",
-         call. = FALSE)
-  ir_test_write_pak(
-    lib,
-    namespace = "export(pkg_deps)\nexport(pkg_install)\nexport(repo_resolve)",
-    code = ir_test_fake_pak_code(
-      install_marker = {},
-      require_pillar = TRUE
-    )
-  )
+utils::assignInNamespace("install.packages", function(...) {{
+  stop("resolver should use real pak after pruning stale user tooling",
+       call. = FALSE)
 }}, ns = "utils")
 "#,
             resolver_tooling_fixture_source(),
-            r_string(&secretbase_load_marker),
-            r_string(&pillar_load_marker),
-            r_string(&install_marker),
-            r_string(&pak_marker)
+            r_string(&secretbase_load_marker)
         ),
     )
     .unwrap();
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_PAK_LIB", &pak_library)
         .env("IR_TEST_EMPTY_LIB", &empty_library)
         .env("R_LIBS_SITE", &empty_library)
         .env("R_LIBS_USER", &user_library)
@@ -208,14 +193,9 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=stale-tooling");
-    assert_pak_installed_resolver_tooling(&install_marker, &pak_marker);
     assert!(
         !secretbase_load_marker.exists(),
         "resolver should not load stale secretbase from R_LIBS_USER"
-    );
-    assert!(
-        !pillar_load_marker.exists(),
-        "resolver should prune stale R_LIBS_USER before pak loads auxiliary packages"
     );
 }
 
