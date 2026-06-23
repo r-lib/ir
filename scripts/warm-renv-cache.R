@@ -10,6 +10,8 @@ if (length(args) >= 2L && identical(args[[1L]], "--repos")) {
 
 stopifnot(length(args) > 0L)
 
+startup_repos <- getOption("repos")
+
 resolver_tooling_repos <- function() {
   c(CRAN = "https://packagemanager.posit.co/cran/latest")
 }
@@ -27,8 +29,7 @@ named_value <- function(values, name) {
 public_ppm_latest_url <- function(repo)
   identical(sub("/+$", "", repo), "https://packagemanager.posit.co/cran/latest")
 
-default_repos <- function() {
-  repos <- getOption("repos")
+default_repos <- function(repos = startup_repos) {
   if (is.null(repos) || !length(repos))
     return(ppm_latest_repos())
 
@@ -64,7 +65,7 @@ if (length(missing))
 
 if (is.null(repos)) {
   Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
-  repos <- default_repos()
+  repos <- default_repos(startup_repos)
 } else {
   Sys.setenv(RENV_CONFIG_REPOS_OVERRIDE = repos)
   repos <- c(CRAN = repos)
