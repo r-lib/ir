@@ -970,6 +970,43 @@ fn run_defaults_unset_cran_resolves_with_real_pak_ppm_repo() {
     assert_stdout_contains(&out, "ir.fixture=real-pak-ppm");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn run_plain_ppm_latest_profile_resolves_with_real_pak_binary_repo() {
+    let cache_dir = temp_dir("ir-real-pak-ppm-latest-cache");
+    let renv_cache = temp_cache("ir-real-pak-ppm-latest-renv-cache");
+    let profile = temp_path("ir-real-pak-ppm-latest-profile", "R");
+    fs::write(
+        &profile,
+        r#"options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("CC", "false")
+        .env("CXX", "false")
+        .env("CXX11", "false")
+        .env("CXX14", "false")
+        .env("CXX17", "false")
+        .env("CXX20", "false")
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "zip",
+            "-e",
+            "library(zip); cat('ir.fixture=real-pak-ppm-latest\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=real-pak-ppm-latest");
+}
+
 #[test]
 fn run_future_env_exclude_newer_overrides_frontmatter_with_latest() {
     let cache_dir = temp_dir("ir-future-env-exclude-newer-cache");

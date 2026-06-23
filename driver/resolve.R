@@ -69,6 +69,9 @@ ir_repo_resolve <- function(spec) {
 ir_linux_host <- function()
   identical(unname(Sys.info()[["sysname"]]), "Linux")
 
+ir_public_ppm_latest_url <- function(repo)
+  identical(sub("/+$", "", repo), "https://packagemanager.posit.co/cran/latest")
+
 ir_ppm_snapshot_url <- function(exclude_newer) {
   if (!ir_linux_host())
     return(sprintf("https://packagemanager.posit.co/cran/%s", exclude_newer))
@@ -93,7 +96,8 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
   }
 
   cran <- ir_named_value(repos, "CRAN")
-  if (is.null(cran) || is.na(cran) || !nzchar(cran) || identical(cran, "@CRAN@"))
+  if (is.null(cran) || is.na(cran) || !nzchar(cran) ||
+      identical(cran, "@CRAN@") || ir_public_ppm_latest_url(cran))
     repos[["CRAN"]] <- ir_ppm_snapshot_url("latest")
 
   repos
