@@ -12,6 +12,8 @@ pub(crate) struct InstalledR {
     pub(crate) is_default: bool,
     #[serde(default)]
     pub(crate) aliases: Vec<String>,
+    #[serde(default)]
+    pub(crate) path: Option<PathBuf>,
     binary: PathBuf,
 }
 

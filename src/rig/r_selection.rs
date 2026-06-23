@@ -59,9 +59,7 @@ pub(crate) fn select_installed_r<'a>(
     installed
         .iter()
         .filter(|version| requirement.matches_installed(version))
-        .max_by(|a, b| {
-            compare_versions(&a.version, &b.version).then_with(|| a.is_default.cmp(&b.is_default))
-        })
+        .max_by(|a, b| compare_installed_r(a, b))
 }
 
 pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str> {
@@ -154,6 +152,34 @@ fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
         (Some(a), Some(b)) => compare_version_parts(&a, &b),
         _ => a.cmp(b),
     }
+}
+
+fn compare_installed_r(a: &InstalledR, b: &InstalledR) -> std::cmp::Ordering {
+    compare_versions(&a.version, &b.version)
+        .then_with(|| a.is_default.cmp(&b.is_default))
+        .then_with(|| native_macos_r_preference(a).cmp(&native_macos_r_preference(b)))
+}
+
+fn native_macos_r_preference(installed: &InstalledR) -> u8 {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return 0;
+    }
+    if rig_metadata_contains(installed, "-arm64") {
+        return 2;
+    }
+    if rig_metadata_contains(installed, "-x86_64") {
+        return 0;
+    }
+    1
+}
+
+fn rig_metadata_contains(installed: &InstalledR, needle: &str) -> bool {
+    installed.name.contains(needle)
+        || installed
+            .path
+            .as_deref()
+            .map(|path| path.to_string_lossy().contains(needle))
+            .unwrap_or(false)
 }
 
 fn compare_version_parts(a: &[u64], b: &[u64]) -> std::cmp::Ordering {

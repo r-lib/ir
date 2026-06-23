@@ -285,8 +285,8 @@ fn run_with_exclude_newer_prefers_rig_default_for_equal_versions() {
                 "  list)\n",
                 "    cat <<'JSON'\n",
                 r#"[
-{{"name":"4.6","default":true,"version":"4.6.0","aliases":["release"],"binary":"{}"}},
-{{"name":"4.6-arm64","default":false,"version":"4.6.0","aliases":["devel"],"binary":"{}"}}
+{{"name":"4.6","version":"4.6.0","default":true,"aliases":["release"],"binary":"{}"}},
+{{"name":"4.6-arm64","version":"4.6.0","default":false,"aliases":["devel"],"binary":"{}"}}
 ]"#,
                 "\nJSON\n",
                 "    ;;\n",
@@ -315,6 +315,120 @@ fn run_with_exclude_newer_prefers_rig_default_for_equal_versions() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "selected=default");
+    assert_stderr_lacks(&out, "unexpected available");
+}
+
+#[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn run_with_exclude_newer_prefers_arm64_rig_install_for_equal_versions_without_default() {
+    let cache_dir = temp_dir("ir-exclude-newer-r-native-tie-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r-native-tie-bin");
+    let arm64_dir = temp_dir("ir-exclude-newer-r-native-tie-arm");
+    let alternate_dir = temp_dir("ir-exclude-newer-r-native-tie-alternate");
+
+    let arm64_binary = selected_r_binary(&arm64_dir, "arm64");
+    let alternate_binary = selected_r_binary(&alternate_dir, "alternate");
+    let arm64_path = arm64_dir.join("R-4.6-arm64");
+    let alternate_path = alternate_dir.join("R-4.6");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1\" in\n",
+                "  list)\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6-arm64","version":"4.6.0","default":false,"aliases":["devel"],"path":"{}","binary":"{}"}},
+{{"name":"4.6","version":"4.6.0","default":false,"aliases":["release"],"path":"{}","binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  available) echo unexpected available >&2; exit 65 ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            arm64_path.display(),
+            arm64_binary.display(),
+            alternate_path.display(),
+            alternate_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            "2026-06-01",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=arm64");
+    assert_stderr_lacks(&out, "unexpected available");
+}
+
+#[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn run_with_exclude_newer_prefers_unsuffixed_rig_install_over_x86_64_on_arm_macos() {
+    let cache_dir = temp_dir("ir-exclude-newer-r-unsuffixed-tie-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-r-unsuffixed-tie-bin");
+    let native_dir = temp_dir("ir-exclude-newer-r-unsuffixed-tie-native");
+    let x86_dir = temp_dir("ir-exclude-newer-r-unsuffixed-tie-x86");
+
+    let native_binary = selected_r_binary(&native_dir, "native");
+    let x86_binary = selected_r_binary(&x86_dir, "x86_64");
+    let native_path = native_dir.join("R-4.6");
+    let x86_path = x86_dir.join("R-4.6-x86_64");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1\" in\n",
+                "  list)\n",
+                "    cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6","version":"4.6.0","default":false,"aliases":["release"],"path":"{}","binary":"{}"}},
+{{"name":"4.6-x86_64","version":"4.6.0","default":false,"aliases":["oldrel"],"path":"{}","binary":"{}"}}
+]"#,
+                "\nJSON\n",
+                "    ;;\n",
+                "  available) echo unexpected available >&2; exit 65 ;;\n",
+                "  *) exit 64 ;;\n",
+                "esac\n",
+            ),
+            native_path.display(),
+            native_binary.display(),
+            x86_path.display(),
+            x86_binary.display()
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
+            "run",
+            "--exclude-newer",
+            "2026-06-01",
+            "-e",
+            "cat('ignored')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=native");
     assert_stderr_lacks(&out, "unexpected available");
 }
 

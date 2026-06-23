@@ -71,7 +71,7 @@ ir_tooling_version_ok <- function(package, lib = ir_tooling_lib(),
   if (!length(path)) return(FALSE)
   if (!identical(package, "pak")) return(TRUE)
 
-  ok <- tryCatch(requireNamespace(package, quietly = TRUE),
+  ok <- tryCatch(requireNamespace(package, lib.loc = lib, quietly = TRUE),
                  error = function(e) FALSE)
   if (!ok && isNamespaceLoaded(package))
     try(unloadNamespace(package), silent = TRUE)
@@ -126,6 +126,25 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
   current_platform <- R.version$platform
   missing <- character()
   bad_user_libs <- character()
+
+  prune_bad_user_libs <- function() {
+    if (!length(bad_user_libs)) return(invisible())
+
+    bad_user_libs <<- unique(bad_user_libs)
+    current_libs <- .libPaths()
+    current_libs_normalized <- normalizePath(current_libs, winslash = "/",
+                                             mustWork = FALSE)
+    .libPaths(current_libs[!current_libs_normalized %in% bad_user_libs])
+
+    user_libs <<- user_libs[!user_libs %in% bad_user_libs]
+    if (length(user_libs))
+      Sys.setenv(R_LIBS_USER = paste(user_libs, collapse = .Platform$path.sep))
+    else
+      Sys.setenv(R_LIBS_USER = "NULL")
+
+    invisible()
+  }
+
   package_runtime_ok <- function(path) {
     metadata <- file.path(path, "Meta", "package.rds")
     info <- if (file.exists(metadata)) {
@@ -158,6 +177,7 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
         bad_user_libs <- c(bad_user_libs, pkg_lib)
     }
   }
+  prune_bad_user_libs()
 
   for (pkg in packages) {
     min_version <- ir_tooling_min_version(pkg, min_versions)
@@ -185,6 +205,7 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
       if (!package_runtime_ok(path[[1L]])) {
         bad_user_libs <- c(bad_user_libs, pkg_lib)
         missing <- c(missing, pkg)
+        prune_bad_user_libs()
         next
       }
     }
@@ -197,19 +218,7 @@ ir_missing_tooling <- function(packages = ir_tooling_packages(),
     }
   }
 
-  if (length(bad_user_libs)) {
-    bad_user_libs <- unique(bad_user_libs)
-    current_libs <- .libPaths()
-    current_libs_normalized <- normalizePath(current_libs, winslash = "/",
-                                             mustWork = FALSE)
-    .libPaths(current_libs[!current_libs_normalized %in% bad_user_libs])
-
-    user_libs <- user_libs[!user_libs %in% bad_user_libs]
-    if (length(user_libs))
-      Sys.setenv(R_LIBS_USER = paste(user_libs, collapse = .Platform$path.sep))
-    else
-      Sys.setenv(R_LIBS_USER = "NULL")
-  }
+  prune_bad_user_libs()
 
   missing
 }

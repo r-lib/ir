@@ -314,6 +314,7 @@ fn resolver_tooling_reinstalls_unloadable_private_pak() {
     let empty_library = temp_dir("ir-unloadable-pak-tooling-empty-library");
     let install_marker = temp_path("ir-unloadable-pak-tooling-install", "txt");
     let pak_marker = temp_path("ir-unloadable-pak-tooling-pak", "txt");
+    let private_lib_marker = temp_path("ir-unloadable-pak-tooling-private-lib", "txt");
     let profile = temp_path("ir-unloadable-pak-tooling-profile", "R");
 
     fs::write(
@@ -327,11 +328,13 @@ ir_test_private_lib <- file.path(
   "tooling",
   paste0(getRversion(), "-", R.version$platform)
 )
+writeLines(ir_test_private_lib, {})
 ir_test_write_pak(
   ir_test_private_lib,
   namespace = "export(pkg_deps)\nexport(pkg_install)",
   code = ".onLoad <- function(...) stop('bad private pak', call. = FALSE)\npkg_deps <- function(...) stop('bad private pak', call. = FALSE)\npkg_install <- function(...) stop('bad private pak', call. = FALSE)"
 )
+writeLines("stale", file.path(ir_test_private_lib, "pak", "stale.txt"))
 
 utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
   writeLines(as.character(pkgs), {})
@@ -346,6 +349,7 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
 }}, ns = "utils")
 "#,
             resolver_tooling_fixture_source(),
+            r_string(&private_lib_marker),
             r_string(&install_marker),
             r_string(&pak_marker)
         ),
@@ -373,6 +377,12 @@ utils::assignInNamespace("install.packages", function(pkgs, lib, repos, ...) {{
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=unloadable-pak-tooling");
     assert_pak_installed_resolver_tooling(&install_marker, &pak_marker);
+
+    let private_lib = Path::new(fs::read_to_string(private_lib_marker).unwrap().trim()).to_owned();
+    assert!(
+        !private_lib.join("pak").join("stale.txt").exists(),
+        "resolver should remove an unloadable private pak before reinstalling it"
+    );
 }
 
 #[test]
@@ -409,9 +419,13 @@ ir_test_write_pillar(
 ir_test_write_pak(
   ir_test_private_lib,
   namespace = "export(pkg_deps)\nexport(pkg_install)",
-  code = ir_test_fake_pak_code(
-    allowed_installs = "secretbase",
-    require_pillar = TRUE
+  code = paste(
+    ".onLoad <- function(...) invisible(requireNamespace('pillar', quietly = TRUE))",
+    ir_test_fake_pak_code(
+      allowed_installs = "secretbase",
+      require_pillar = TRUE
+    ),
+    sep = "\n"
   )
 )
 ir_test_write_renv(ir_test_private_lib)
