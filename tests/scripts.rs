@@ -238,7 +238,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
-    assert!(warm_script.contains("Sys.getenv(\"RSPM\", unset = \"\")"));
+    assert!(warm_script.contains("pak::repo_resolve(\"PPM@latest\")"));
     assert!(!warm_script.contains("https://cran.r-project.org"));
 }
 
@@ -257,6 +257,36 @@ fn warm_renv_cache_replaces_unnamed_at_cran_with_real_package() {
         .env("R_PROFILE_USER", &profile)
         .env("RSPM", "https://packagemanager.posit.co/cran/latest")
         .args(["scripts/warm-renv-cache.R", "cli"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_renv_cache_rewrites_plain_ppm_latest_with_real_binary_package() {
+    let renv_cache = temp_cache("ir-warm-real-ppm-latest-renv-cache");
+    let user_library = temp_dir("ir-warm-real-ppm-latest-user-library");
+    let profile = temp_path("ir-warm-real-ppm-latest-profile", "R");
+    fs::write(
+        &profile,
+        r#"options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))"#,
+    )
+    .unwrap();
+
+    let out = Command::new(rscript())
+        .current_dir(repo_root())
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("CC", "false")
+        .env("CXX", "false")
+        .env("CXX11", "false")
+        .env("CXX14", "false")
+        .env("CXX17", "false")
+        .env("CXX20", "false")
+        .args(["scripts/warm-renv-cache.R", "zip"])
         .output()
         .unwrap();
 
