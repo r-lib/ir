@@ -39,7 +39,9 @@ fn assert_stdout_contains(output: &Output, expected: &str) {
 
 #[test]
 fn readme_install_commands_are_copyable() {
-    let readme = fs::read_to_string(repo_root().join("README.md")).unwrap();
+    let readme = fs::read_to_string(repo_root().join("README.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let install = readme
         .split_once("## Install\n")
         .and_then(|(_, rest)| rest.split_once("\n## Development setup"))
