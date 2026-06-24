@@ -11,7 +11,7 @@
     "href": "reference.html#ir",
     "title": "Reference",
     "section": "ir",
-    "text": "ir\n\n\nRun self-describing R scripts\n\nUsage: ir [COMMAND]\n\nCommands:\n  run     Run a script or inline R expression\n  render  Render a Quarto document or script\n  tool    Run package executables\n  cache   Manage ir's cache\n  help    Print this message or the help of the given subcommand(s)\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version\n\nExamples:\n  ir run script.R\n  ir render report.qmd\n  ir tool run btw\n  ir cache dir"
+    "text": "ir\n\n\nRun self-describing R scripts\n\nUsage: ir [COMMAND]\n\nCommands:\n  run         Run a script or inline R expression\n  render      Render a Quarto document or script\n  tool        Run package executables\n  quickstart  Show a concise usage guide for AI agents\n  cache       Manage ir's cache\n  help        Print this message or the help of the given subcommand(s)\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version\n\nExamples:\n  ir run script.R\n  ir render report.qmd\n  ir tool run btw\n  ir cache dir"
   },
   {
     "objectID": "reference.html#ir-run",
@@ -68,6 +68,13 @@
     "title": "Reference",
     "section": "ir cache clean",
     "text": "ir cache clean\n\n\nClear the cache, removing all entries\n\nUsage: ir cache clean [OPTIONS]\n\nOptions:\n      --force  Accepted for compatibility; same as `ir cache clean`\n  -h, --help   Print help"
+  },
+  {
+    "objectID": "reference.html#ir-quickstart",
+    "href": "reference.html#ir-quickstart",
+    "title": "Reference",
+    "section": "ir quickstart",
+    "text": "ir quickstart\n\n\nShow a concise usage guide for AI agents\n\nUsage: ir quickstart\n\nOptions:\n  -h, --help  Print help"
   },
   {
     "objectID": "cache.html",
@@ -200,7 +207,7 @@
     "href": "config.html#install",
     "title": "Install and Configuration",
     "section": "Install",
-    "text": "Install\nInstall a pre-built binary on Linux or macOS:\n$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh\nInstall on Windows PowerShell:\n&gt; irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex\nThe installers download the latest release archive and install ir and rx into ~/.local/bin on Unix or $HOME\\bin on Windows. On macOS, the default ~/.local/bin directory is added to ~/.zprofile when needed. On Windows, the install directory is added to the user PATH. On Linux, the installer tells you if the install directory is not on PATH. Set IR_NO_MODIFY_PATH=1 to skip PATH changes. Set IR_INSTALL_DIR to choose another directory."
+    "text": "Install\nInstall a pre-built binary on Linux or macOS:\n$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh\nInstall on Windows PowerShell:\n&gt; irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex\nThe installers download the latest release archive and install ir and rx into ~/.local/bin on Unix or $HOME\\bin on Windows. On macOS, the default ~/.local/bin directory is added to ~/.zprofile when needed. On Windows, the install directory is added to the user PATH. On Linux, the installer tells you if the install directory is not on PATH. If rig is not on PATH, the installers print platform-specific rig install guidance. Set IR_NO_MODIFY_PATH=1 to skip PATH changes. Set IR_INSTALL_DIR to choose another directory."
   },
   {
     "objectID": "config.html#environment",
