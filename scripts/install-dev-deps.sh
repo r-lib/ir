@@ -18,6 +18,7 @@ SKIP_PYTHON=0
 SKIP_QUARTO=0
 SKIP_R_RELEASE=0
 SKIP_TEST_R=0
+RIG_LATEST_RELEASE_URL="https://github.com/r-lib/rig/releases/latest"
 
 usage() {
   cat <<EOF
@@ -137,6 +138,75 @@ linux_quarto_arch() {
   esac
 }
 
+macos_rig_arch() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "<macos-arch>"
+    return 0
+  fi
+
+  case "$(uname -m)" in
+    arm64 | aarch64)
+      echo "arm64"
+      ;;
+    x86_64 | amd64)
+      echo "x86_64"
+      ;;
+    *)
+      die "unsupported architecture for rig: $(uname -m)"
+      ;;
+  esac
+}
+
+latest_rig_release_tag() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "<latest-rig-tag>"
+    return 0
+  fi
+
+  require_command curl
+  latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$RIG_LATEST_RELEASE_URL")"
+  rig_tag="${latest_url##*/}"
+  [ -n "$rig_tag" ] || die "could not resolve latest rig release tag"
+  [ "$rig_tag" != "latest" ] || die "could not resolve latest rig release tag"
+  echo "$rig_tag"
+}
+
+rig_version_from_tag() {
+  case "$1" in
+    "<latest-rig-tag>")
+      echo "<latest-rig-version>"
+      ;;
+    v*)
+      echo "${1#v}"
+      ;;
+    *)
+      echo "$1"
+      ;;
+  esac
+}
+
+install_macos_rig() {
+  require_command curl
+  require_command installer
+
+  rig_tag="$(latest_rig_release_tag)"
+  rig_version="$(rig_version_from_tag "$rig_tag")"
+  rig_arch="$(macos_rig_arch)"
+  rig_asset="rig-${rig_version}-macOS-${rig_arch}.pkg"
+  rig_url="https://github.com/r-lib/rig/releases/download/${rig_tag}/${rig_asset}"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    rig_pkg="/tmp/ir-rig.pkg"
+  else
+    rig_pkg="${TMPDIR:-/tmp}/ir-rig.$$.pkg"
+  fi
+
+  run curl -fsSL "$rig_url" -o "$rig_pkg"
+  run_root installer -pkg "$rig_pkg" -target /
+  if [ "$DRY_RUN" -eq 0 ]; then
+    rm -f "$rig_pkg"
+  fi
+}
+
 install_rust() {
   if have_command cargo; then
     echo "cargo already installed"
@@ -183,9 +253,7 @@ install_macos() {
   fi
 
   if ! have_command rig; then
-    require_command brew
-    run brew tap r-lib/rig
-    run brew install --cask rig
+    install_macos_rig
   fi
 
   if [ "$SKIP_QUARTO" -eq 0 ] && ! have_command quarto; then

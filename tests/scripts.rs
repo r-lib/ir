@@ -115,19 +115,25 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "xcode-select --install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(&out, "brew tap r-lib/rig");
-    assert_stdout_contains(&out, "brew install --cask rig");
+    assert_stdout_contains(
+        &out,
+        "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-<latest-rig-version>-macOS-<macos-arch>.pkg",
+    );
+    assert_stdout_contains(&out, "installer -pkg /tmp/ir-rig.pkg -target /");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
     assert_stdout_contains(&out, "rig list --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("brew tap r-lib/rig"), "{stdout}");
+    assert!(!stdout.contains("brew install --cask rig"), "{stdout}");
     assert!(
-        !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
+        !stdout.contains("rig default release"),
         "{}",
         output_text(&out)
     );
     assert!(
-        !String::from_utf8_lossy(&out.stdout).contains("rig run -r 4.4.3"),
+        !stdout.contains("rig run -r 4.4.3"),
         "{}",
         output_text(&out)
     );
@@ -408,6 +414,33 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
 }
 
 #[test]
+fn install_dev_deps_scripts_install_rig_from_upstream_release_without_pinned_version() {
+    let sh_path = repo_root().join("scripts/install-dev-deps.sh");
+    let sh = fs::read_to_string(&sh_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
+    assert!(sh.contains("https://github.com/r-lib/rig/releases/latest"));
+    assert!(sh.contains("rig-${rig_version}-macOS-${rig_arch}.pkg"));
+    assert!(sh.contains("releases/download/${rig_tag}/${rig_asset}"));
+    assert!(sh.contains("installer -pkg"));
+    assert!(!sh.contains("brew tap r-lib/rig"));
+    assert!(!sh.contains("brew install --cask rig"));
+    assert!(!sh.contains("0.8.1"));
+
+    let ps1_path = repo_root().join("scripts/install-dev-deps.ps1");
+    let ps1 = fs::read_to_string(&ps1_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
+    assert!(ps1.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(ps1.contains("rig-windows-$version.exe"));
+    assert!(ps1.contains("rig-windows-arm64-$version.exe"));
+    assert!(ps1.contains("Start-Process"));
+    assert!(ps1.contains("-Wait"));
+    assert!(ps1.contains("-PassThru"));
+    assert!(ps1.contains("Install-WingetPackage \"posit.rig\""));
+    assert!(!ps1.contains("choco install rig"));
+    assert!(!ps1.contains("0.8.1"));
+}
+
+#[test]
 fn cli_tests_do_not_use_global_e2e_lock() {
     let tests = [
         "tests/run.rs",
@@ -505,7 +538,7 @@ fn install_dev_deps_ps1_prints_windows_plan() {
 
 #[cfg(windows)]
 #[test]
-fn install_dev_deps_ps1_uses_choco_for_rig_on_github_actions() {
+fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
     let out = Command::new("powershell")
         .current_dir(repo_root())
         .env("GITHUB_ACTIONS", "true")
@@ -520,9 +553,21 @@ fn install_dev_deps_ps1_uses_choco_for_rig_on_github_actions() {
         .unwrap();
 
     assert_success(&out);
-    assert_stdout_contains(&out, "choco install rig -y --no-progress");
+    assert_stdout_contains(
+        &out,
+        "Invoke-RestMethod -Uri https://api.github.com/repos/r-lib/rig/releases/latest",
+    );
+    assert_stdout_contains(
+        &out,
+        "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-windows-<latest-rig-version>.exe",
+    );
+    assert_stdout_contains(
+        &out,
+        "ir-rig-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+    );
     assert_stdout_contains(&out, "rig add oldrel/2");
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("choco install rig"), "{stdout}");
     assert!(
         !stdout.contains("winget install --id posit.rig"),
         "{stdout}"
@@ -565,7 +610,9 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("https://win.rustup.rs"));
     assert!(!script.contains("Rustlang.Rustup"));
     assert!(script.contains("posit.rig"));
-    assert!(script.contains("choco"));
+    assert!(!script.contains("choco"));
+    assert!(script.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(script.contains("https://github.com/r-lib/rig/releases/download/$tag/$asset"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains("ProgramFiles \"rig\""));
     assert!(script.contains("ProgramFiles \"rig\\bin\""));

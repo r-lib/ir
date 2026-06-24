@@ -16,6 +16,7 @@ $TestRVersion = $null
 $TestRExcludeNewer = $null
 $TestRscript = $null
 $RustupInitUrl = "https://win.rustup.rs"
+$RigLatestReleaseApi = "https://api.github.com/repos/r-lib/rig/releases/latest"
 $SkipRust = $false
 $SkipPython = $false
 $SkipQuarto = $false
@@ -189,10 +190,97 @@ function Install-WingetPackage {
     )
 }
 
+function Get-RigWindowsArch {
+    $arch = $env:PROCESSOR_ARCHITEW6432
+    if (-not $arch) {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+    }
+
+    switch ($arch) {
+        "ARM64" { return "arm64" }
+        "AMD64" { return "x86_64" }
+        "x86_64" { return "x86_64" }
+        default { throw "unsupported architecture for rig: $arch" }
+    }
+}
+
+function Get-LatestRigReleaseTag {
+    if ($DryRun) {
+        Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi"
+        return "<latest-rig-tag>"
+    }
+
+    $release = Invoke-RestMethod -Uri $RigLatestReleaseApi
+    $tag = [string]$release.tag_name
+    if (-not $tag) {
+        throw "could not resolve latest rig release tag"
+    }
+    return $tag
+}
+
+function Get-RigVersionFromTag {
+    param([Parameter(Mandatory = $true)][string]$Tag)
+
+    if ($Tag -eq "<latest-rig-tag>") {
+        return "<latest-rig-version>"
+    }
+    if ($Tag.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Tag.Substring(1)
+    }
+    return $Tag
+}
+
+function Invoke-InstallerStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    Write-Step $File $Arguments
+    if (-not $DryRun) {
+        $process = Start-Process -FilePath $File -ArgumentList $Arguments -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            throw "$File exited with code $($process.ExitCode)"
+        }
+    }
+}
+
+function Install-RigFromGitHubRelease {
+    $tag = Get-LatestRigReleaseTag
+    $version = Get-RigVersionFromTag $tag
+    $arch = Get-RigWindowsArch
+    if ($arch -eq "arm64") {
+        $asset = "rig-windows-arm64-$version.exe"
+    }
+    else {
+        $asset = "rig-windows-$version.exe"
+    }
+    $url = "https://github.com/r-lib/rig/releases/download/$tag/$asset"
+    if ($DryRun) {
+        $installer = Join-Path ([System.IO.Path]::GetTempPath()) "ir-rig-installer.exe"
+    }
+    else {
+        $installer = Join-Path ([System.IO.Path]::GetTempPath()) "ir-rig-installer-$([System.Guid]::NewGuid().ToString('N')).exe"
+    }
+
+    Write-Host "+ Invoke-WebRequest -Uri $url -OutFile $installer"
+    if (-not $DryRun) {
+        Invoke-WebRequest -Uri $url -OutFile $installer
+    }
+
+    try {
+        Invoke-InstallerStep $installer @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+    }
+    finally {
+        if (-not $DryRun) {
+            Remove-Item $installer -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Install-Rig {
     if ($env:GITHUB_ACTIONS -eq "true") {
-        Require-Tool "choco"
-        Invoke-Step "choco" @("install", "rig", "-y", "--no-progress")
+        Install-RigFromGitHubRelease
     }
     else {
         Install-WingetPackage "posit.rig"
