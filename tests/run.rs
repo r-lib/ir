@@ -1685,6 +1685,31 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
 }
 
 #[test]
+fn cache_clean_all_preserves_ir_cache_when_r_selection_is_invalid() {
+    let cache_dir = temp_dir("ir-cache-clean-all-invalid-r-selection");
+    let library = cache_dir.join("libraries").join("library");
+    fs::create_dir_all(&library).unwrap();
+    fs::write(library.join("pkg"), "cached").unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", "Rscript")
+        .env("IR_R_VERSION", "4.4")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(cache_dir.exists());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("cannot set both `IR_R_VERSION` and `IR_RSCRIPT`"),
+        "{}",
+        output_text(&out)
+    );
+}
+
+#[test]
 fn cache_clean_all_uses_r_profile_cache_locations() {
     let home = temp_dir("ir-cache-clean-all-r-profile-home");
     let cache_dir = temp_dir("ir-cache-clean-all-r-profile-ir");

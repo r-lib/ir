@@ -43,8 +43,8 @@ pub(crate) fn cmd_cache_clean(_force: bool, all: bool) -> Result<(), Box<dyn Err
 }
 
 fn cmd_cache_clean_all(cache_dir: PathBuf) -> Result<(), Box<dyn Error>> {
-    clear_labeled_cache("ir cache", &cache_dir)?;
-    clean_tool_caches_with_r()
+    clean_tool_caches_with_r()?;
+    clear_labeled_cache("ir cache", &cache_dir)
 }
 
 fn clear_labeled_cache(label: &str, path: &Path) -> Result<(), Box<dyn Error>> {
