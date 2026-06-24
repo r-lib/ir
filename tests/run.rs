@@ -858,13 +858,13 @@ printf 'ir.fixture=python-exclude-newer-latest\\n'\n",
             ),
         );
 
-        let out = ir()
-            .env("IR_CACHE_DIR", &cache_dir)
+        let mut cmd = ir();
+        cmd.env("IR_CACHE_DIR", &cache_dir)
             .args(["run", "--exclude-newer", exclude_newer, "--rscript"])
             .arg(&rscript)
-            .arg(&script)
-            .output()
-            .unwrap();
+            .arg(&script);
+        remove_uv_resolver_env(&mut cmd);
+        let out = cmd.output().unwrap();
 
         assert_success(&out);
         assert_stdout_contains(&out, "ir.fixture=python-exclude-newer-latest");
@@ -1341,19 +1341,19 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
         ),
     );
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
+    let mut warm = ir();
+    warm.env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--rscript"])
         .arg(&rscript)
-        .arg(&script)
-        .output()
-        .unwrap();
+        .arg(&script);
+    remove_uv_resolver_env(&mut warm);
+    let out = warm.output().unwrap();
     assert_success(&out);
 
     fs::remove_dir_all(cache_dir.join("python")).unwrap();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
+    let mut cmd = ir();
+    cmd.env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RESOLVE_RESULT_FILE", "/tmp/stale-r-result")
         .env("IR_RESOLVE_PACKAGE_RESULT_FILE", "/tmp/stale-r-package")
         .env("IR_RESOLUTION_MARKER", "/tmp/stale-r-marker")
@@ -1361,9 +1361,9 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
         .env("IR_QUARTO_RENDER", "1")
         .args(["run", "--rscript"])
         .arg(&rscript)
-        .arg(&script)
-        .output()
-        .unwrap();
+        .arg(&script);
+    remove_uv_resolver_env(&mut cmd);
+    let out = cmd.output().unwrap();
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=cleared-r-resolver-env");
