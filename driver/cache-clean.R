@@ -52,6 +52,25 @@ ir_split_paths <- function(paths) {
   parts[nzchar(parts)]
 }
 
+ir_env <- function(name, default = "") {
+  value <- Sys.getenv(name, "")
+  if (nzchar(value)) value else default
+}
+
+ir_windows_local_app_data <- function() {
+  local_app_data <- Sys.getenv("LOCALAPPDATA", "")
+  if (nzchar(local_app_data)) {
+    return(local_app_data)
+  }
+
+  user_profile <- Sys.getenv("USERPROFILE", "")
+  if (nzchar(user_profile)) {
+    return(file.path(user_profile, "AppData", "Local"))
+  }
+
+  file.path(tempdir(), "r-pkg-cache")
+}
+
 ir_r_user_cache_dir <- function(package) {
   tools <- asNamespace("tools")
   r_user_dir <- tools$R_user_dir
@@ -70,7 +89,7 @@ ir_r_user_cache_dir <- function(package) {
   }
 
   if (.Platform$OS.type == "windows") {
-    return(file.path(Sys.getenv("LOCALAPPDATA"), "R", "cache", "R", package))
+    return(file.path(ir_windows_local_app_data(), "R", "cache", "R", package))
   }
 
   if (identical(Sys.info()[["sysname"]], "Darwin")) {
@@ -83,7 +102,26 @@ ir_r_user_cache_dir <- function(package) {
   path.expand(file.path("~/.cache/R", package))
 }
 
+ir_pkg_configured_dir <- function(name) {
+  option_name <- paste0("pkg.", name)
+  value <- getOption(option_name, NULL)
+  if (!is.null(value) && length(value) > 0L) {
+    value <- as.character(value[[1L]])
+    if (nzchar(value)) {
+      return(value)
+    }
+  }
+
+  env_name <- paste0("PKG_", toupper(name))
+  Sys.getenv(env_name, "")
+}
+
 ir_pkgcache_cache_dir <- function() {
+  package_cache_dir <- ir_pkg_configured_dir("package_cache_dir")
+  if (nzchar(package_cache_dir)) {
+    return(package_cache_dir)
+  }
+
   r_pkg_cache_dir <- Sys.getenv("R_PKG_CACHE_DIR", "")
   if (nzchar(r_pkg_cache_dir)) {
     return(file.path(r_pkg_cache_dir, "R", "pkgcache"))
@@ -93,6 +131,11 @@ ir_pkgcache_cache_dir <- function() {
 }
 
 ir_pak_cache_dir <- function() {
+  download_cache_dir <- ir_pkg_configured_dir("cache_dir")
+  if (nzchar(download_cache_dir)) {
+    return(download_cache_dir)
+  }
+
   r_pkg_cache_dir <- Sys.getenv("R_PKG_CACHE_DIR", "")
   if (nzchar(r_pkg_cache_dir)) {
     return(file.path(r_pkg_cache_dir, "lib"))
@@ -104,17 +147,7 @@ ir_pak_cache_dir <- function() {
   }
 
   if (.Platform$OS.type == "windows") {
-    local_app_data <- Sys.getenv("LOCALAPPDATA", "")
-    if (nzchar(local_app_data)) {
-      return(file.path(local_app_data, "R", "Cache", "pak"))
-    }
-
-    user_profile <- Sys.getenv("USERPROFILE", "")
-    if (nzchar(user_profile)) {
-      return(file.path(user_profile, "AppData", "Local", "R", "Cache", "pak"))
-    }
-
-    return(file.path(tempdir(), "r-pkg-cache", "R", "Cache", "pak"))
+    return(file.path(ir_windows_local_app_data(), "R", "Cache", "pak"))
   }
 
   ir_r_user_cache_dir("pak")
@@ -156,9 +189,12 @@ ir_renv_default_root_dir <- function() {
 ir_renv_legacy_root_dir <- function() {
   base <- switch(
     Sys.info()[["sysname"]],
-    Darwin = Sys.getenv("XDG_DATA_HOME", "~/Library/Application Support"),
-    Windows = Sys.getenv("LOCALAPPDATA", Sys.getenv("APPDATA")),
-    Sys.getenv("XDG_DATA_HOME", "~/.local/share")
+    Darwin = ir_env("XDG_DATA_HOME", "~/Library/Application Support"),
+    Windows = ir_env(
+      "LOCALAPPDATA",
+      ir_env("APPDATA", ir_windows_local_app_data())
+    ),
+    ir_env("XDG_DATA_HOME", "~/.local/share")
   )
 
   path.expand(file.path(base, "renv"))
@@ -175,25 +211,14 @@ ir_reticulate_legacy_cache_dir <- function() {
   }
 
   if (.Platform$OS.type == "windows") {
-    local_app_data <- Sys.getenv("LOCALAPPDATA", "")
-    if (nzchar(local_app_data)) {
-      return(file.path(local_app_data, "r-reticulate", "Cache"))
-    }
-
-    return(file.path(
-      Sys.getenv("USERPROFILE"),
-      "Local Settings",
-      "Application Data",
-      "r-reticulate",
-      "Cache"
-    ))
+    return(file.path(ir_windows_local_app_data(), "r-reticulate", "Cache"))
   }
 
   if (identical(Sys.info()[["sysname"]], "Darwin")) {
     return(path.expand("~/Library/Caches/r-reticulate"))
   }
 
-  file.path(Sys.getenv("XDG_CACHE_HOME", path.expand("~/.cache")), "r-reticulate")
+  file.path(ir_env("XDG_CACHE_HOME", path.expand("~/.cache")), "r-reticulate")
 }
 
 ir_is_usable_uv <- function(uv) {
@@ -276,19 +301,6 @@ ir_uv_dir <- function(uv, args) {
   out[[1L]]
 }
 
-ir_reticulate_managed_uv_tool_dir <- function(external_uv) {
-  if (nzchar(external_uv)) {
-    return("")
-  }
-
-  uv <- ir_reticulate_managed_uv_binary()
-  if (!ir_is_usable_uv(uv)) {
-    return("")
-  }
-
-  ir_uv_dir(uv, c("tool", "dir"))
-}
-
 ir_clean_uv_cache <- function(uv, path) {
   if (!nzchar(uv) || !nzchar(path)) {
     return(invisible(FALSE))
@@ -305,11 +317,6 @@ ir_clean_uv_cache <- function(uv, path) {
 
 uv <- ir_external_uv_binary()
 uv_cache <- ir_uv_dir(uv, c("cache", "dir"))
-uv_python_cache <- ir_uv_dir(uv, c("python", "dir"))
-uv_tool_cache <- c(
-  ir_uv_dir(uv, c("tool", "dir")),
-  ir_reticulate_managed_uv_tool_dir(uv)
-)
 
 ir_clear_cache("pak package cache", ir_pkgcache_cache_dir())
 ir_clear_cache("pak cache", ir_pak_cache_dir())
@@ -317,6 +324,3 @@ ir_clear_cache("renv cache", ir_renv_cache_dirs())
 ir_clean_uv_cache(uv, uv_cache)
 ir_clear_cache("reticulate cache", ir_reticulate_cache_dir())
 ir_clear_cache("reticulate legacy cache", ir_reticulate_legacy_cache_dir())
-
-ir_clear_cache("uv Python cache", uv_python_cache)
-ir_clear_cache("uv tool cache", uv_tool_cache)

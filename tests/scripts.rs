@@ -88,7 +88,9 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "apt-get install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "r-rig_");
+    assert_stdout_contains(&out, ".deb");
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -115,8 +117,9 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "xcode-select --install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(&out, "brew tap r-lib/rig");
-    assert_stdout_contains(&out, "brew install --cask rig");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "macOS-");
+    assert_stdout_contains(&out, "installer -pkg");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -151,7 +154,8 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     ]);
 
     assert_success(&out);
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "r-rig_");
     assert_stdout_contains(&out, "rig add oldrel/2");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
