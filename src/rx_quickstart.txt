@@ -1,0 +1,49 @@
+rx quickstart for AI agents
+
+Goal:
+  Run executables shipped by R packages in isolated, reproducible tool
+  environments. Use `ir quickstart` for self-describing scripts and Quarto
+  documents.
+
+Mental model:
+  `rx` is an alias for `ir tool run`.
+  It resolves the provider package plus any `--with` dependencies into an
+  isolated cached R library, then launches the selected executable.
+  You do not need to install the package, create a project library, or install
+  a launcher first. `rx` handles dependency resolution and reuse.
+
+Isolation:
+  `rx` does not use ambient user R libraries. The tool sees the resolved
+  package library plus base, site, and system libraries.
+  Use `ir run` or `ir render` when you want a script or document that may opt
+  into non-isolated user libraries.
+
+Commands:
+  rx btw --help
+      # shorthand for: rx --from btw btw --help
+
+  rx --from pkg command --help
+      # resolve package `pkg`, run executable `command`.
+
+  rx --from pkg --with cli command --flag value
+      # `--from` and `--with` are for rx; `--flag value` is passed to command.
+
+Workflow:
+  Use `rx` for ad hoc package tools and executable frontends.
+  Use `rx --from pkg command ...` when the package name and executable differ.
+  Use `--with PKG` for extra runtime dependencies required by the executable.
+  For repeated shell use, install launchers with `ir tool install`.
+  For durable analytical artifacts, write an `ir run` script or `ir render`
+  document with frontmatter instead of building around `rx`.
+
+System requirements:
+  R/Rscript must be available, either on PATH or selected with `--rscript`.
+  Use rig for `--r-version` selection. OS libraries and compilers required by
+  packages remain system dependencies.
+
+Inspection commands:
+  rx --help
+  rx quickstart --help
+  ir tool run --help
+  ir tool install --help
+  ir quickstart

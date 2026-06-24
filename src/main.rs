@@ -39,6 +39,7 @@ mod driver;
 mod lock;
 mod python;
 mod quarto;
+mod quickstart;
 mod resolve_cache;
 mod rig;
 mod runtime;
@@ -98,6 +99,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 render.vanilla,
             )
         }
+        Some(("quickstart", _)) => quickstart::cmd_quickstart(),
         Some(("tool", matches)) => match matches.subcommand() {
             Some(("run", _)) => {
                 let run =

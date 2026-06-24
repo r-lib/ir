@@ -32,6 +32,7 @@ pub(crate) fn root() -> ClapCommand {
         .subcommand(run_command())
         .subcommand(render_command())
         .subcommand(tool_command())
+        .subcommand(quickstart_command())
         .subcommand(cache_command())
 }
 
@@ -207,6 +208,10 @@ fn render_command() -> ClapCommand {
         )
 }
 
+fn quickstart_command() -> ClapCommand {
+    ClapCommand::new("quickstart").about("Show a concise usage guide for AI agents")
+}
+
 fn tool_command() -> ClapCommand {
     ClapCommand::new("tool")
         .about("Run package executables")
@@ -251,7 +256,10 @@ fn tool_rx_command() -> ClapCommand {
             .override_usage("rx [OPTIONS] [ARGS]...")
             .about("Run a package executable")
             .version(env!("CARGO_PKG_VERSION"))
-            .after_help("Use `ir tool run` for more details."),
+            .after_help(concat!(
+                "Use `ir tool run --help` for command details.\n",
+                "Use `rx quickstart` for an agent-oriented guide to ir and rx.",
+            )),
     )
 }
 

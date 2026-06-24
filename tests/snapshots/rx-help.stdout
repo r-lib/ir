@@ -13,4 +13,5 @@ Options:
   -h, --help               Print help
   -V, --version            Print version
 
-Use `ir tool run` for more details.
+Use `ir tool run --help` for command details.
+Use `rx quickstart` for an agent-oriented guide to ir and rx.

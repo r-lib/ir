@@ -1,0 +1,82 @@
+ir quickstart for AI agents
+
+Goal:
+  Produce portable, self-describing R scripts and Quarto documents.
+  Put runtime metadata in frontmatter; keep the body plain R or Quarto code.
+
+Mental model:
+  `ir` reads frontmatter, resolves dependencies, materializes an ephemeral
+  cached environment, then launches Rscript or Quarto with that environment.
+  Do not call install.packages(), renv::restore(), groundhog, checkpoint, or
+  custom CRAN snapshot setup from the artifact. Declare metadata; `ir` handles
+  package installation and reuse.
+
+R script frontmatter:
+  #| packages:
+  #|   - dplyr
+  #|   - ggplot2
+  #| r-version: ">= 4.3"
+  #| isolated: true
+  #| exclude-newer: "2025-01-15"
+
+Quarto frontmatter:
+  ---
+  title: Report
+  ir:
+    packages:
+      - dplyr
+      - ggplot2
+    r-version: ">= 4.3"
+    isolated: true
+    exclude-newer: "2025-01-15"
+  ---
+
+Python:
+  Add `python-packages` and optional `python-version` to frontmatter.
+  In Quarto, put those keys under `ir:` with the R runtime metadata.
+  `ir` resolves a Python environment with reticulate's uv helper before launch,
+  activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` also
+  sets QUARTO_PYTHON and injects jupyter.
+  Add `reticulate` under `packages` only when R code loads reticulate.
+  `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
+
+Isolation:
+  By default, the resolved R library is first on `.libPaths()` and ambient user
+  libraries remain available. With `isolated: true` or `--isolated`, ambient
+  user libraries are not available. Base, site, and system libraries remain.
+  `rx` and `ir tool run` are isolated package-executable runs.
+
+Workflow:
+  Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
+  Use `exclude-newer` for reproducible CRAN state.
+  Write ordinary R after the metadata. Do not embed package-manager ceremony.
+
+System requirements:
+  R/Rscript must be available, either on PATH or selected with `rscript`.
+  Use rig for `r-version` selection and date-only `exclude-newer` R selection.
+  Quarto must be available for `ir render`. OS libraries and compilers required
+  by packages remain system dependencies.
+
+Commands:
+  ir run script.R
+  ir render report.qmd
+  ir run --with cli -e 'cli::cli_alert_success("ok")'
+  rx btw --help
+  rx --from btw btw --help
+
+Argument boundaries:
+  ir run --with cli script.R --input data.csv
+      # `--with cli` is for ir; `--input data.csv` is passed to script.R.
+
+  ir render --with ggplot2 report.qmd --to html
+      # `--with ggplot2` is for ir; `--to html` is passed to Quarto.
+
+  rx --from btw --with cli btw --help
+      # `--from` and `--with` are for rx; `--help` is passed to the btw executable.
+
+Inspection commands:
+  ir --help
+  ir run --help
+  ir render --help
+  ir tool run --help
+  rx --help
