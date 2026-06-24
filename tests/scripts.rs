@@ -234,6 +234,16 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
     assert!(workflow.contains("scripts/warm-renv-cache.R"));
+    let install_unix = workflow
+        .split("      - name: Install rig and non-default R (Unix)")
+        .nth(1)
+        .and_then(|block| {
+            block
+                .split("      - name: Install rig and non-default R (Windows)")
+                .next()
+        })
+        .expect("workflow should install rig and non-default R on Unix");
+    assert!(install_unix.contains("GITHUB_TOKEN: ${{ github.token }}"));
     let warm_non_default_cache = workflow
         .split("      - name: Warm non-default R package cache")
         .nth(1)
@@ -409,6 +419,17 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
         !ps1.contains("rig default release"),
         "setup should not mutate a user's configured rig default"
     );
+}
+
+#[test]
+fn install_dev_deps_sh_uses_github_token_for_release_lookup() {
+    let sh_path = repo_root().join("scripts/install-dev-deps.sh");
+    let sh = fs::read_to_string(&sh_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
+
+    assert!(sh.contains("GITHUB_TOKEN"));
+    assert!(sh.contains("Authorization"));
+    assert!(sh.contains("Bearer"));
 }
 
 #[test]

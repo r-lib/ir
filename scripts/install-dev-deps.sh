@@ -176,12 +176,24 @@ rig_release_asset_url() {
   require_command python3
   python3 - "$pattern" <<'PY'
 import json
+import os
 import re
 import sys
 import urllib.request
 
 pattern = re.compile(sys.argv[1])
-with urllib.request.urlopen("https://api.github.com/repos/r-lib/rig/releases/latest") as response:
+request = urllib.request.Request(
+    "https://api.github.com/repos/r-lib/rig/releases/latest",
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ir-install-dev-deps",
+    },
+)
+token = os.environ.get("GITHUB_TOKEN", "")
+if token:
+    request.add_header("Authorization", f"Bearer {token}")
+
+with urllib.request.urlopen(request) as response:
     release = json.load(response)
 
 matches = [
