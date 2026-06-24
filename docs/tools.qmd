@@ -14,8 +14,8 @@ $ ir tool run --from btw btw --help
 
 For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executable, and launches it.
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
-Here, a package executable means a supported file in the installed package's `exec/` directory: Rscript and Rapp entries use the selected Rscript, while direct executable scripts such as shell or Python entries run as package scripts.
-On Unix, direct executable scripts must be executable; on Windows, direct executables are `.bat` or `.cmd` files.
+Here, a package executable means a supported file in the installed package's `exec/`, `bin/`, or architecture-specific `bin/<arch>/` directory: Rscript and Rapp entries use the selected Rscript, while direct executable scripts and native binaries run as package executables.
+On Unix, direct executables must be executable; on Windows, direct script executables are `.bat` or `.cmd` files, and native binaries under `bin/` may be `.exe` files.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
 
 An `Rscript` executable is an ordinary R script.
@@ -45,7 +45,7 @@ A plain Rscript package executable can be as small as this:
 cat("hello\n")
 ```
 
-If that file is `exec/hello.R`, then `rx --from mypkg hello` runs it, and `ir tool install mypkg` installs a `hello` launcher.
+If that file is `exec/hello.R` or `bin/hello.R`, then `rx --from mypkg hello` runs it, and `ir tool install mypkg` installs a `hello` launcher.
 
 Use nested launcher metadata when the installed command name or Rscript startup options should differ from the file name or Rscript defaults:
 

@@ -194,6 +194,63 @@ fn tool_install_installs_real_package_entrypoint() {
     assert_stdout_contains(&out, "cransearch.R [-h | --help]");
 }
 
+#[test]
+fn tool_run_rx_and_install_support_package_bin_executables() {
+    let cache_dir = temp_dir("ir-tool-bin-executable-cache");
+    let bin_dir = temp_dir("ir-tool-bin-executable-bin");
+    let package_dir = temp_dir("ir-tool-bin-executable-package");
+    let package = package_dir.join("rustbinpkg");
+    copy_dir_tree(&fixture("tool/rustbinpkg"), &package);
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["tool", "run", "--from", &package_ref, "irrustbin"])
+        .args(["run", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.location=bin");
+    assert_stdout_contains(&out, "tool.args=run arg");
+
+    let out = rx()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["--from", &package_ref, "irrustbin-arch"])
+        .args(["rx", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.location=bin/");
+    assert_stdout_contains(&out, "tool.args=rx arg");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg(&package_ref)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "irrustbin");
+    assert_stdout_contains(&out, "irrustbin-arch");
+
+    let out = Command::new(launcher_path(&bin_dir, "irrustbin"))
+        .args(["install", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.location=bin");
+    assert_stdout_contains(&out, "tool.args=install arg");
+
+    let out = Command::new(launcher_path(&bin_dir, "irrustbin-arch"))
+        .args(["arch", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.location=bin/");
+    assert_stdout_contains(&out, "tool.args=arch arg");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_adds_default_macos_bin_dir_to_zprofile_once() {

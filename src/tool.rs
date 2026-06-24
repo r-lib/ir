@@ -60,9 +60,9 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
     let executables = discover_package_executables(&library, &package_name)?;
     if executables.is_empty() {
         return Err(format!(
-            "package `{}` does not expose supported executables in `{}`",
+            "package `{}` does not expose supported executables under `{}`",
             package_name,
-            library.join(&package_name).join("exec").display()
+            library.join(&package_name).display()
         )
         .into());
     }
@@ -120,47 +120,56 @@ fn find_package_executable(
     package: &str,
     executable: &str,
 ) -> Result<PackageExecutable, Box<dyn Error>> {
-    let exec_dir = library.join(package).join("exec");
-    find_package_executable_in_dir(&exec_dir, executable)?.ok_or_else(|| {
-        if !exec_dir.is_dir() {
-            format!(
-                "package `{package}` does not have an exec directory in `{}`",
-                library.display()
-            )
-            .into()
-        } else {
-            format!(
-                "could not find executable `{executable}` or `{executable}.R` in `{}`",
-                exec_dir.display()
-            )
-            .into()
-        }
-    })
-}
-
-fn find_package_executable_in_dir(
-    exec_dir: &Path,
-    executable: &str,
-) -> Result<Option<PackageExecutable>, Box<dyn Error>> {
-    if !exec_dir.is_dir() {
-        return Ok(None);
+    let dirs = package_executable_dirs(library, package)?;
+    let mut matches = Vec::new();
+    for dir in &dirs {
+        matches.extend(find_package_executables_in_dir(dir, executable)?);
     }
-
-    let mut matches: Vec<_> = package_executables_in_dir(exec_dir)?
-        .into_iter()
-        .filter(|candidate| candidate.name == executable)
-        .collect();
 
     matches.sort_by(|a, b| a.path.cmp(&b.path));
     match matches.len() {
-        0 => Ok(None),
-        1 => Ok(Some(matches.remove(0))),
+        0 => Err(package_executable_not_found_error(
+            library, package, executable, &dirs,
+        )),
+        1 => Ok(matches.remove(0)),
         _ => Err(format!(
-            "multiple package executables map to launcher `{executable}` in `{}`",
-            exec_dir.display()
+            "multiple package executables map to launcher `{executable}` in package `{package}`"
         )
         .into()),
     }
+}
+
+fn find_package_executables_in_dir(
+    dir: &PackageExecutableDir,
+    executable: &str,
+) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
+    let matches = package_executables_in_dir(dir)?
+        .into_iter()
+        .filter(|candidate| candidate.name == executable)
+        .collect();
+    Ok(matches)
+}
+
+fn package_executable_not_found_error(
+    library: &Path,
+    package: &str,
+    executable: &str,
+    dirs: &[PackageExecutableDir],
+) -> Box<dyn Error> {
+    if dirs.is_empty() {
+        return format!(
+            "package `{package}` does not expose supported executable directories in `{}`",
+            library.join(package).display()
+        )
+        .into();
+    }
+
+    let dirs = dirs
+        .iter()
+        .map(|dir| dir.path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("`, `");
+    format!("could not find executable `{executable}` or `{executable}.R` in `{dirs}`").into()
 }
 
 struct PackageExecutable {
@@ -174,31 +183,85 @@ fn discover_package_executables(
     library: &Path,
     package: &str,
 ) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
-    let exec_dir = library.join(package).join("exec");
-    if !exec_dir.is_dir() {
-        return Err(format!(
-            "package `{package}` does not have an exec directory in `{}`",
-            library.display()
-        )
-        .into());
+    let dirs = package_executable_dirs(library, package)?;
+    let mut executables = Vec::new();
+    for dir in &dirs {
+        executables.extend(package_executables_in_dir(dir)?);
     }
-
-    let mut executables = package_executables_in_dir(&exec_dir)?;
-    reject_duplicate_launcher_names(&executables, &exec_dir)?;
+    reject_duplicate_launcher_names(&executables, package)?;
 
     executables.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(executables)
 }
 
-fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PackageExecutableDirKind {
+    Exec,
+    Bin,
+    BinArch,
+}
+
+impl PackageExecutableDirKind {
+    fn is_bin(self) -> bool {
+        matches!(self, Self::Bin | Self::BinArch)
+    }
+}
+
+struct PackageExecutableDir {
+    package: String,
+    path: PathBuf,
+    kind: PackageExecutableDirKind,
+}
+
+fn package_executable_dirs(
+    library: &Path,
+    package: &str,
+) -> Result<Vec<PackageExecutableDir>, Box<dyn Error>> {
+    let package_dir = library.join(package);
+    let mut dirs = Vec::new();
+
+    let exec_dir = package_dir.join("exec");
+    if exec_dir.is_dir() {
+        dirs.push(PackageExecutableDir {
+            package: package.to_string(),
+            path: exec_dir,
+            kind: PackageExecutableDirKind::Exec,
+        });
+    }
+
+    let bin_dir = package_dir.join("bin");
+    if bin_dir.is_dir() {
+        dirs.push(PackageExecutableDir {
+            package: package.to_string(),
+            path: bin_dir.clone(),
+            kind: PackageExecutableDirKind::Bin,
+        });
+
+        let mut arch_dirs = fs::read_dir(&bin_dir)
+            .map_err(|e| format!("cannot read bin directory `{}`: {e}", bin_dir.display()))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        arch_dirs.sort();
+        for path in arch_dirs {
+            if path.is_dir() {
+                dirs.push(PackageExecutableDir {
+                    package: package.to_string(),
+                    path,
+                    kind: PackageExecutableDirKind::BinArch,
+                });
+            }
+        }
+    }
+
+    Ok(dirs)
+}
+
+fn package_executables_in_dir(
+    dir: &PackageExecutableDir,
+) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
     let mut executables = Vec::new();
-    let rapp_frontend = if exec_dir
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        == Some("Rapp")
-    {
-        let path = exec_dir.join("Rapp");
+    let rapp_frontend = if dir.kind == PackageExecutableDirKind::Exec && dir.package == "Rapp" {
+        let path = dir.path.join("Rapp");
         path.is_file().then_some(path)
     } else {
         None
@@ -207,9 +270,12 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         executables.push(rapp_frontend_executable(path.to_path_buf()));
     }
 
-    for entry in fs::read_dir(exec_dir)
-        .map_err(|e| format!("cannot read exec directory `{}`: {e}", exec_dir.display()))?
-    {
+    for entry in fs::read_dir(&dir.path).map_err(|e| {
+        format!(
+            "cannot read package executable directory `{}`: {e}",
+            dir.path.display()
+        )
+    })? {
         let path = entry?.path();
         if !path.is_file() {
             continue;
@@ -217,7 +283,9 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         if rapp_frontend.is_some() && is_rapp_frontend_alias(&path) {
             continue;
         }
-        let Some(executable) = package_executable_from_discovered_path(&path)? else {
+        let Some(executable) =
+            package_executable_from_discovered_path(&path, &dir.package, dir.kind)?
+        else {
             continue;
         };
         executables.push(executable);
@@ -249,7 +317,7 @@ fn rapp_frontend_executable(path: PathBuf) -> PackageExecutable {
 
 fn reject_duplicate_launcher_names(
     executables: &[PackageExecutable],
-    exec_dir: &Path,
+    package: &str,
 ) -> Result<(), Box<dyn Error>> {
     for (index, executable) in executables.iter().enumerate() {
         if executables[..index]
@@ -257,9 +325,8 @@ fn reject_duplicate_launcher_names(
             .any(|known| known.name == executable.name)
         {
             return Err(format!(
-                "multiple package executables map to launcher `{}` in `{}`",
-                executable.name,
-                exec_dir.display()
+                "multiple package executables map to launcher `{}` in package `{}`",
+                executable.name, package
             )
             .into());
         }
@@ -269,19 +336,21 @@ fn reject_duplicate_launcher_names(
 
 fn package_executable_from_discovered_path(
     path: &Path,
+    package: &str,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<Option<PackageExecutable>, Box<dyn Error>> {
-    let Some(launcher) = package_executable_launcher_kind(path)? else {
+    let Some(launcher) = package_executable_launcher_kind(path, dir_kind)? else {
         return Ok(None);
     };
-    package_executable_from_path_and_launcher(path, launcher).map(Some)
+    package_executable_from_path_and_launcher(path, package, launcher).map(Some)
 }
 
 fn package_executable_from_path_and_launcher(
     path: &Path,
+    package: &str,
     launcher: PackageLauncher,
 ) -> Result<PackageExecutable, Box<dyn Error>> {
-    let package = package_executable_package(path)?;
-    let metadata = package_launcher_metadata(path, &package, launcher)?;
+    let metadata = package_launcher_metadata(path, package, launcher)?;
     let name = package_executable_launcher_name(path, metadata.name)?;
     Ok(PackageExecutable {
         name,
@@ -289,21 +358,6 @@ fn package_executable_from_path_and_launcher(
         launcher,
         rscript_args: metadata.rscript_args,
     })
-}
-
-fn package_executable_package(path: &Path) -> Result<String, Box<dyn Error>> {
-    let package = path
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        .ok_or_else(|| {
-            format!(
-                "package executable `{}` is not under a package exec directory",
-                path.display()
-            )
-        })?;
-    Ok(package.to_string())
 }
 
 fn package_executable_launcher_name(
@@ -833,14 +887,38 @@ fn resolved_runtime_path_prefix(
         entries.push(parent.to_path_buf());
     }
 
-    for entry in fs::read_dir(library)
+    let mut packages = fs::read_dir(library)
         .map_err(|e| format!("cannot read resolved library `{}`: {e}", library.display()))?
-    {
-        let exec = entry?.path().join("exec");
-        if exec.is_dir() {
-            entries.push(exec);
-        }
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    packages.sort();
+    for package in packages {
+        entries.extend(package_runtime_path_dirs(&package)?);
     }
+
+    Ok(entries)
+}
+
+fn package_runtime_path_dirs(package_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut entries = Vec::new();
+
+    let exec = package_dir.join("exec");
+    if exec.is_dir() {
+        entries.push(exec);
+    }
+
+    let bin = package_dir.join("bin");
+    if !bin.is_dir() {
+        return Ok(entries);
+    }
+    entries.push(bin.clone());
+
+    let mut arch_dirs = fs::read_dir(&bin)
+        .map_err(|e| format!("cannot read bin directory `{}`: {e}", bin.display()))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    arch_dirs.sort();
+    entries.extend(arch_dirs.into_iter().filter(|path| path.is_dir()));
 
     Ok(entries)
 }
@@ -935,6 +1013,7 @@ enum PackageLauncher {
 
 fn package_executable_launcher_kind(
     executable: &Path,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<Option<PackageLauncher>, Box<dyn Error>> {
     let file = File::open(executable)
         .map_err(|e| format!("cannot read executable `{}`: {e}", executable.display()))?;
@@ -943,7 +1022,7 @@ fn package_executable_launcher_kind(
     reader.read_until(b'\n', &mut shebang)?;
 
     if !shebang.starts_with(b"#!") {
-        return if is_direct_package_script_without_shebang(executable)? {
+        return if is_direct_package_script_without_shebang(executable, dir_kind)? {
             Ok(Some(PackageLauncher::Direct))
         } else {
             Ok(None)
@@ -954,7 +1033,7 @@ fn package_executable_launcher_kind(
         Ok(Some(PackageLauncher::Rapp))
     } else if shebang_mentions(&shebang, b"Rscript") {
         Ok(Some(PackageLauncher::Rscript))
-    } else if is_direct_package_script(executable)? {
+    } else if is_direct_package_script(executable, dir_kind)? {
         Ok(Some(PackageLauncher::Direct))
     } else {
         Ok(None)
@@ -962,28 +1041,42 @@ fn package_executable_launcher_kind(
 }
 
 #[cfg(unix)]
-fn is_direct_package_script_without_shebang(_path: &Path) -> Result<bool, Box<dyn Error>> {
-    Ok(false)
+fn is_direct_package_script_without_shebang(
+    path: &Path,
+    dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
+    Ok(dir_kind.is_bin() && is_direct_package_script(path, dir_kind)?)
 }
 
 #[cfg(not(unix))]
-fn is_direct_package_script_without_shebang(path: &Path) -> Result<bool, Box<dyn Error>> {
-    is_direct_package_script(path)
+fn is_direct_package_script_without_shebang(
+    path: &Path,
+    dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
+    is_direct_package_script(path, dir_kind)
 }
 
 #[cfg(unix)]
-fn is_direct_package_script(path: &Path) -> Result<bool, Box<dyn Error>> {
+fn is_direct_package_script(
+    path: &Path,
+    _dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 
     Ok(fs::metadata(path)?.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
-fn is_direct_package_script(path: &Path) -> Result<bool, Box<dyn Error>> {
+fn is_direct_package_script(
+    path: &Path,
+    dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
     let Some(ext) = path.extension().and_then(OsStr::to_str) else {
         return Ok(false);
     };
-    Ok(ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd"))
+    Ok(ext.eq_ignore_ascii_case("bat")
+        || ext.eq_ignore_ascii_case("cmd")
+        || (dir_kind.is_bin() && ext.eq_ignore_ascii_case("exe")))
 }
 
 fn shebang_mentions(shebang: &[u8], name: &[u8]) -> bool {

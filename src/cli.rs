@@ -219,9 +219,10 @@ fn tool_command() -> ClapCommand {
         .after_help(section_help(
             "Tools",
             concat!(
-                "  A tool is a supported executable in an R package's exec/ directory.\n",
-                "  Rscript and Rapp entries use the selected Rscript; direct executable scripts\n",
-                "  run as package scripts.\n",
+                "  A tool is a supported executable in an R package's exec/, bin/, or\n",
+                "  architecture-specific bin/<arch>/ directory. Rscript and Rapp entries use\n",
+                "  the selected Rscript; direct executable scripts and binaries run as package\n",
+                "  executables.\n",
                 "  `ir tool run` resolves the package plus any --with dependencies into an\n",
                 "  isolated library, then runs the selected executable. The user R library is not\n",
                 "  used.\n",
@@ -698,7 +699,7 @@ impl ToolRunInvocation {
 }
 
 /// Parse `ir tool run`, which resolves a provider package and runs a command
-/// from that package's `exec/` directory. This is intentionally separate from
+/// from that package's executable directories. This is intentionally separate from
 /// `ir run`: script and expression runs are source-oriented, tool runs are
 /// package-oriented and isolated by default.
 pub(crate) fn parse_tool_run_args(

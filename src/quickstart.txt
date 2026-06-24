@@ -47,7 +47,7 @@ Isolation:
   `rx` and `ir tool run` are isolated package-executable runs.
 
 Package tools:
-  Some R packages ship executables in exec/. Use `rx` or `ir tool run` to run
+  Some R packages ship executables in exec/ or bin/. Use `rx` or `ir tool run` to run
   those tools without installing the package, creating a project library, or
   installing a launcher first.
   Tool runs resolve the provider package plus any `--with` dependencies into an

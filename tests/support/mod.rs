@@ -212,6 +212,35 @@ pub(crate) fn copy_dir_files(source: &Path, destination: &Path) {
     }
 }
 
+pub(crate) fn copy_dir_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap_or_else(|e| {
+        panic!(
+            "failed to create fixture copy {}: {e}",
+            destination.display()
+        )
+    });
+    for entry in fs::read_dir(source)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", source.display()))
+    {
+        let entry = entry.unwrap_or_else(|e| {
+            panic!("failed to read fixture entry in {}: {e}", source.display())
+        });
+        let path = entry.path();
+        let target = destination.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_tree(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap_or_else(|e| {
+                panic!(
+                    "failed to copy fixture {} to {}: {e}",
+                    path.display(),
+                    target.display()
+                )
+            });
+        }
+    }
+}
+
 pub(crate) fn fixture_copy(name: &str, prefix: &str) -> TempPath {
     let source = fixture(name);
     let destination = temp_dir(prefix);
