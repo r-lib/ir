@@ -251,6 +251,127 @@ fn tool_run_rx_and_install_support_package_bin_executables() {
     assert_stdout_contains(&out, "tool.args=arch arg");
 }
 
+#[cfg(unix)]
+#[test]
+fn tool_run_and_install_strip_exe_suffix_from_bin_executables() {
+    let cache_dir = temp_dir("ir-tool-bin-exe-cache");
+    let bin_dir = temp_dir("ir-tool-bin-exe-install-bin");
+    let library = temp_dir("ir-tool-bin-exe-library");
+    let rscript_dir = temp_dir("ir-tool-bin-exe-rscript");
+    let package = library.join("irexetool");
+    let package_bin_dir = package.join("bin");
+    fs::create_dir_all(&package_bin_dir).unwrap();
+    write_executable(
+        &package_bin_dir.join("native.exe"),
+        "#!/bin/sh\nprintf 'tool.fixture=exe\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
+    );
+    let rscript = write_fake_tool_resolver(&rscript_dir, "irexetool", "x64");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--from", "irexetool", "native", "run", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.fixture=exe");
+    assert_stdout_contains(&out, "tool.args=run arg");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--rscript"])
+        .arg(&rscript)
+        .args(["--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irexetool")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "native");
+    assert!(
+        !launcher_path(&bin_dir, "native.exe").exists(),
+        "launcher should strip .exe"
+    );
+
+    let out = Command::new(launcher_path(&bin_dir, "native"))
+        .args(["install", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.fixture=exe");
+    assert_stdout_contains(&out, "tool.args=install arg");
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_and_install_use_selected_bin_architecture() {
+    let cache_dir = temp_dir("ir-tool-bin-arch-cache");
+    let bin_dir = temp_dir("ir-tool-bin-arch-install-bin");
+    let library = temp_dir("ir-tool-bin-arch-library");
+    let rscript_dir = temp_dir("ir-tool-bin-arch-rscript");
+    let package = library.join("irarchtool");
+    let exec_dir = package.join("exec");
+    let x64_bin_dir = package.join("bin").join("x64");
+    let i386_bin_dir = package.join("bin").join("i386");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::create_dir_all(&x64_bin_dir).unwrap();
+    fs::create_dir_all(&i386_bin_dir).unwrap();
+    write_executable(
+        &x64_bin_dir.join("archtool"),
+        "#!/bin/sh\nprintf 'tool.arch=x64\\n'\n",
+    );
+    write_executable(
+        &i386_bin_dir.join("archtool"),
+        "#!/bin/sh\nprintf 'tool.arch=i386\\n'\n",
+    );
+    write_executable(&x64_bin_dir.join("helper"), "#!/bin/sh\nprintf 'x64\\n'\n");
+    write_executable(
+        &i386_bin_dir.join("helper"),
+        "#!/bin/sh\nprintf 'i386\\n'\n",
+    );
+    write_executable(
+        &exec_dir.join("path-probe"),
+        "#!/bin/sh\nprintf 'helper.arch='\nhelper\n",
+    );
+    let rscript = write_fake_tool_resolver(&rscript_dir, "irarchtool", "x64");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--from", "irarchtool", "archtool"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.arch=x64");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--rscript"])
+        .arg(&rscript)
+        .args(["--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irarchtool")
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let out = Command::new(launcher_path(&bin_dir, "path-probe"))
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "helper.arch=x64");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_adds_default_macos_bin_dir_to_zprofile_once() {
@@ -1335,6 +1456,28 @@ fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {
     {
         bin_dir.join(format!("{name}.cmd"))
     }
+}
+
+#[cfg(unix)]
+fn write_fake_tool_resolver(rscript_dir: &Path, package: &str, arch: &str) -> PathBuf {
+    let rscript = rscript_dir.join("Rscript");
+    write_executable(
+        &rscript,
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
+                "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  printf '%s\\n' {} > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "printf '%s\\n' {}\n",
+            ),
+            package, arch
+        ),
+    );
+    rscript
 }
 
 #[cfg(unix)]
