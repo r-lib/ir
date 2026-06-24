@@ -13,6 +13,7 @@ $Owner = "t-kalinowski"
 $Repo = "ir"
 $App = "ir"
 $Target = "x86_64-pc-windows-msvc"
+$RigInstallUrl = "https://github.com/r-lib/rig#id-windows"
 
 $url = "https://github.com/$Owner/$Repo/releases/latest/download/$App-$Target.zip"
 $installDir = if ($env:IR_INSTALL_DIR) { $env:IR_INSTALL_DIR } else { Join-Path $HOME "bin" }
@@ -129,6 +130,20 @@ function Ensure-InstallDirOnPath([string]$InstallDir, [string]$Commands) {
     }
 }
 
+function Show-RigHint {
+    if (Get-Command rig -ErrorAction SilentlyContinue) {
+        return
+    }
+
+    Write-Host ""
+    Write-Host "rig was not found on PATH."
+    Write-Host "rig is optional, but install it to use r-version, --r-version, IR_R_VERSION, or date-only exclude-newer."
+    Write-Host "Install rig on Windows:"
+    Write-Host "  winget install --id posit.rig"
+    Write-Host "Other options: $RigInstallUrl"
+    Write-Host "Restart PowerShell after installing if rig is still not found."
+}
+
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "$App-install-$([System.Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
@@ -163,6 +178,7 @@ try {
         $commands = "$App and rx"
     }
     Ensure-InstallDirOnPath $installDir $commands
+    Show-RigHint
 }
 finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

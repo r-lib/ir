@@ -70,6 +70,7 @@ The installers download the latest release and install `ir` and `rx` into `~/.lo
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
+If `rig` is not on `PATH`, the installers print platform-specific rig install guidance.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 

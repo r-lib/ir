@@ -56,6 +56,30 @@ fn readme_install_commands_are_copyable() {
     );
 }
 
+#[test]
+fn public_installers_recommend_rig_when_missing() {
+    let sh_path = repo_root().join("scripts/install.sh");
+    let sh = fs::read_to_string(&sh_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
+    assert!(sh.contains("command -v rig"), "{sh}");
+    assert!(sh.contains("rig was not found on PATH."), "{sh}");
+    assert!(sh.contains("brew install --cask rig"), "{sh}");
+    assert!(sh.contains("sudo apt install r-rig"), "{sh}");
+    assert!(sh.contains("https://github.com/r-lib/rig#id-macos"), "{sh}");
+    assert!(sh.contains("https://github.com/r-lib/rig#id-linux"), "{sh}");
+
+    let ps1_path = repo_root().join("scripts/install.ps1");
+    let ps1 = fs::read_to_string(&ps1_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
+    assert!(ps1.contains("Get-Command rig"), "{ps1}");
+    assert!(ps1.contains("rig was not found on PATH."), "{ps1}");
+    assert!(ps1.contains("winget install --id posit.rig"), "{ps1}");
+    assert!(
+        ps1.contains("https://github.com/r-lib/rig#id-windows"),
+        "{ps1}"
+    );
+}
+
 #[cfg(unix)]
 fn dev_deps_sh_plan(platform: &str) -> Output {
     Command::new("sh")
