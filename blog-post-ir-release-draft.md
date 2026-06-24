@@ -34,7 +34,7 @@ a colleague. Over time, the script can become important, but the setup
 still lives somewhere else: in a README, in a shell history, in a
 project library, or in the author's current R installation.
 
-`ir` makes the runtime part of the source file. That means a script can
+`ir` makes the runtime specification part of the source file. That means a script can
 say, directly:
 
 - which packages it needs
@@ -42,6 +42,7 @@ say, directly:
 - whether user libraries should be visible
 - whether CRAN packages should be resolved as of a specific date
 
+This should help you to re-run the script reliably at a later date. As the metadata is part of the file, you don't need to worry about it being lost or accidentally overwritten.
 ## How `ir` fits with existing tools
 
 `ir` sits alongside the R tools people already use. For machine-level R
@@ -68,7 +69,7 @@ Here is a complete script:
 library(dplyr)
 library(tidyr)
 
-1 + 1
+mtcars |> count(cyl, gear) |> pivot_wider(names_from = gear, values_from = n)
 ```
 
 Run it with:
@@ -80,6 +81,7 @@ $ ir run script.R
 Or, on macOS and Linux, make it executable and run it directly:
 
 ```console
+$ chmod +x script.R
 $ ./script.R
 ```
 
