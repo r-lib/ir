@@ -290,6 +290,16 @@ pub(crate) fn assert_stdout_contains(output: &Output, needle: &str) {
     );
 }
 
+pub(crate) fn assert_stdout_contains_path(output: &Output, prefix: &str, path: &Path) {
+    let text = stdout(output).replace('\\', "/");
+    let needle = format!("{prefix}{}", path.display()).replace('\\', "/");
+    assert!(
+        text.contains(&needle),
+        "missing {needle:?}\n{}",
+        output_text(output)
+    );
+}
+
 pub(crate) fn assert_command_success(mut command: Command, label: &str) {
     let output = command
         .output()

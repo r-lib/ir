@@ -1650,37 +1650,26 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
         &out,
         &format!("Clearing ir cache at: {}", cache_dir.display()),
     );
-    assert_stdout_contains(
+    assert_stdout_contains_path(
         &out,
-        &format!(
-            "Clearing pak cache at: {}",
-            r_pkg_cache_dir.join("lib").display()
-        ),
+        "Clearing pak cache at: ",
+        &r_pkg_cache_dir.join("lib"),
     );
-    assert_stdout_contains(
+    assert_stdout_contains_path(
         &out,
-        &format!(
-            "Clearing pak package cache at: {}",
-            r_pkg_cache_dir.join("R").join("pkgcache").display()
-        ),
+        "Clearing pak package cache at: ",
+        &r_pkg_cache_dir.join("R").join("pkgcache"),
     );
-    assert_stdout_contains(
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
+    assert_stdout_contains_path(
         &out,
-        &format!("Clearing renv cache at: {}", renv_cache_dir.display()),
+        "Clearing reticulate cache at: ",
+        &r_user_cache_dir.join("R").join("reticulate"),
     );
-    assert_stdout_contains(
+    assert_stdout_contains_path(
         &out,
-        &format!(
-            "Clearing reticulate cache at: {}",
-            r_user_cache_dir.join("R").join("reticulate").display()
-        ),
-    );
-    assert_stdout_contains(
-        &out,
-        &format!(
-            "Clearing reticulate legacy cache at: {}",
-            legacy_reticulate_cache.display()
-        ),
+        "Clearing reticulate legacy cache at: ",
+        &legacy_reticulate_cache,
     );
 }
 
@@ -1799,24 +1788,63 @@ Sys.setenv(
     assert!(!renv_cache_dir.exists());
     assert!(!r_user_cache_dir.join("R").join("reticulate").exists());
     assert!(!legacy_reticulate_cache.exists());
-    assert_stdout_contains(
+    assert_stdout_contains_path(
         &out,
-        &format!(
-            "Clearing pak cache at: {}",
-            r_pkg_cache_dir.join("lib").display()
-        ),
+        "Clearing pak cache at: ",
+        &r_pkg_cache_dir.join("lib"),
     );
-    assert_stdout_contains(
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
+    assert_stdout_contains_path(
         &out,
-        &format!("Clearing renv cache at: {}", renv_cache_dir.display()),
+        "Clearing reticulate cache at: ",
+        &r_user_cache_dir.join("R").join("reticulate"),
     );
-    assert_stdout_contains(
-        &out,
-        &format!(
-            "Clearing reticulate cache at: {}",
-            r_user_cache_dir.join("R").join("reticulate").display()
-        ),
-    );
+}
+
+#[test]
+fn cache_clean_all_removes_default_windows_pak_cache() {
+    let home = temp_dir("ir-cache-clean-all-windows-pak-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-windows-pak-ir");
+    let local_app_data = temp_dir("ir-cache-clean-all-windows-pak-local-app");
+    let profile = temp_path("ir-cache-clean-all-windows-pak-profile", "R");
+    let pak_cache = local_app_data.join("R").join("Cache").join("pak");
+
+    fs::write(
+        &profile,
+        r#"
+.Platform <- .Platform
+.Platform$OS.type <- "windows"
+Sys.info <- function() c(sysname = "Windows")
+"#,
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        pak_cache.join("lib").join("pkg"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir()
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("LOCALAPPDATA", &local_app_data)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("R_PKG_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!pak_cache.exists());
+    assert_stdout_contains_path(&out, "Clearing pak cache at: ", &pak_cache);
 }
 
 #[test]
@@ -1859,10 +1887,7 @@ fn cache_clean_all_removes_existing_legacy_renv_root_without_global_renv() {
 
     assert_success(&out);
     assert!(!renv_cache_dir.exists());
-    assert_stdout_contains(
-        &out,
-        &format!("Clearing renv cache at: {}", renv_cache_dir.display()),
-    );
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
 }
 
 #[cfg(unix)]

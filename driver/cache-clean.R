@@ -98,6 +98,25 @@ ir_pak_cache_dir <- function() {
     return(file.path(r_pkg_cache_dir, "lib"))
   }
 
+  r_user_cache_dir <- Sys.getenv("R_USER_CACHE_DIR", "")
+  if (nzchar(r_user_cache_dir)) {
+    return(file.path(r_user_cache_dir, "R", "pak"))
+  }
+
+  if (.Platform$OS.type == "windows") {
+    local_app_data <- Sys.getenv("LOCALAPPDATA", "")
+    if (nzchar(local_app_data)) {
+      return(file.path(local_app_data, "R", "Cache", "pak"))
+    }
+
+    user_profile <- Sys.getenv("USERPROFILE", "")
+    if (nzchar(user_profile)) {
+      return(file.path(user_profile, "AppData", "Local", "R", "Cache", "pak"))
+    }
+
+    return(file.path(tempdir(), "r-pkg-cache", "R", "Cache", "pak"))
+  }
+
   ir_r_user_cache_dir("pak")
 }
 
