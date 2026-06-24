@@ -1,9 +1,8 @@
-use std::env;
 use std::error::Error;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
 
 use clap::ArgMatches;
 
@@ -67,50 +66,30 @@ fn clear_labeled_cache(label: &str, path: &Path) -> Result<(), Box<dyn Error>> {
 
 fn clean_tool_caches_with_r() -> Result<(), Box<dyn Error>> {
     let rscript = rscript_command();
-    let script = TempScript::write("ir-cache-clean", "R", TOOL_CACHE_CLEANER)?;
-    let status = Command::new(&rscript)
-        .arg(script.path())
-        .status()
+    let mut child = Command::new(&rscript)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .spawn()
         .map_err(|e| spawn_error(&rscript, e))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("failed to open Rscript stdin for cache cleaner")?;
+    stdin
+        .write_all(TOOL_CACHE_CLEANER.as_bytes())
+        .map_err(|e| format!("failed to write cache cleaner to Rscript stdin: {e}"))?;
+    drop(stdin);
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("failed to wait for R cache cleaner: {e}"))?;
 
     if !status.success() {
         return Err(format!("R cache cleaner failed with status {status}").into());
     }
 
     Ok(())
-}
-
-struct TempScript {
-    path: PathBuf,
-}
-
-impl TempScript {
-    fn write(prefix: &str, ext: &str, contents: &str) -> Result<Self, Box<dyn Error>> {
-        let path = unique_temp_path(prefix, ext);
-        fs::write(&path, contents)
-            .map_err(|e| format!("failed to write cache cleaner `{}`: {e}", path.display()))?;
-        Ok(Self { path })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempScript {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-fn unique_temp_path(prefix: &str, ext: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut path = env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
-    path.set_extension(ext);
-    path
 }
 
 pub(crate) fn cmd_cache_dir() -> Result<(), Box<dyn Error>> {
