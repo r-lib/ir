@@ -1,4 +1,4 @@
-Install package executable launchers
+Install package executables
 
 Usage: ir tool install [OPTIONS] <PKG_REF>
 
@@ -6,16 +6,17 @@ Arguments:
   <PKG_REF>  Package ref that provides executables to install
 
 Options:
-      --with <PKG>         Add a dependency for installed launchers; may be repeated
-      --r-version <SPEC>   Select the R version for installed launchers with rig
+      --with <PKG>         Add a dependency for installed tools; may be repeated
+      --r-version <SPEC>   Select the R version for installed tools with rig
       --rscript <RSCRIPT>  Select the Rscript executable
-      --bin-dir <DIR>      Directory where launchers are written
-      --force              Overwrite an existing launcher path
+      --bin-dir <DIR>      Directory where executables are installed
+      --force              Overwrite an existing installed executable path
   -h, --help               Print help
 
 Tool discovery:
   Supported executables are discovered from installed package exec/, bin/,
-  and architecture-specific bin/<arch>/ directories.
+  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,
+  Rapp, and direct executable scripts; bin/ entries are opaque executables.
 
 Examples:
   ir tool install btw

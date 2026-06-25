@@ -61,7 +61,10 @@ fn tool_discovery_examples_help(body: &'static str) -> StyledStr {
     let mut help = StyledStr::new();
     let _ = writeln!(help, "{header}Tool discovery:{header:#}");
     help.push_str("  Supported executables are discovered from installed package exec/, bin/,\n");
-    help.push_str("  and architecture-specific bin/<arch>/ directories.\n\n");
+    help.push_str("  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,\n");
+    help.push_str(
+        "  Rapp, and direct executable scripts; bin/ entries are opaque executables.\n\n",
+    );
     let _ = writeln!(help, "{header}Examples:{header:#}");
     for line in body.split_inclusive('\n') {
         let (line, newline) = line
@@ -242,13 +245,13 @@ fn tool_command() -> ClapCommand {
             "Tools",
             concat!(
                 "  A tool is a supported executable in an R package's exec/, bin/, or\n",
-                "  architecture-specific bin/<arch>/ directory. Rscript and Rapp entries use\n",
-                "  the selected Rscript; direct executable scripts and binaries run as package\n",
-                "  executables.\n",
+                "  architecture-specific bin/<arch>/ directory. exec/ supports Rscript, Rapp,\n",
+                "  and direct executable scripts; bin/ entries are opaque executables.\n",
                 "  `ir tool run` resolves the package plus any --with dependencies into an\n",
                 "  isolated library, then runs the selected executable. The user R library is not\n",
                 "  used.\n",
-                "  `ir tool install` writes launchers that recreate the resolved tool runtime.",
+                "  `ir tool install` writes generated launchers for exec/ entries and symlinks\n",
+                "  for bin/ entries.",
             ),
         ))
         .subcommand(tool_run_command())
@@ -285,7 +288,8 @@ fn tool_rx_command() -> ClapCommand {
                 "  It resolves the provider package plus any --with dependencies into an\n",
                 "  isolated cached R library, then launches the selected executable.\n",
                 "  Package executables are discovered from installed package exec/, bin/,\n",
-                "  and architecture-specific bin/<arch>/ directories.\n",
+                "  and architecture-specific bin/<arch>/ directories. bin/ entries are opaque\n",
+                "  executables.\n",
                 "  The tool sees the resolved package library plus base, site, and system\n",
                 "  libraries; ambient user R libraries are not used.\n\n",
                 "Examples:\n",
@@ -350,7 +354,7 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
 
 fn tool_install_command() -> ClapCommand {
     ClapCommand::new("install")
-        .about("Install package executable launchers")
+        .about("Install package executables")
         .after_help(tool_discovery_examples_help(concat!(
             "  ir tool install btw\n",
             "  ir tool install --bin-dir ~/.local/bin btw\n",
@@ -362,14 +366,14 @@ fn tool_install_command() -> ClapCommand {
                 .value_name("PKG")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a dependency for installed launchers; may be repeated"),
+                .help("Add a dependency for installed tools; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
                 .num_args(1)
-                .help("Select the R version for installed launchers with rig"),
+                .help("Select the R version for installed tools with rig"),
         )
         .arg(
             Arg::new("rscript")
@@ -383,13 +387,13 @@ fn tool_install_command() -> ClapCommand {
                 .long("bin-dir")
                 .value_name("DIR")
                 .num_args(1)
-                .help("Directory where launchers are written"),
+                .help("Directory where executables are installed"),
         )
         .arg(
             Arg::new("force")
                 .long("force")
                 .action(ArgAction::SetTrue)
-                .help("Overwrite an existing launcher path"),
+                .help("Overwrite an existing installed executable path"),
         )
         .arg(
             Arg::new("package-ref")
@@ -936,8 +940,9 @@ fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {
 
     #[cfg(unix)]
     {
-        let home = nonempty_env("HOME")
-            .ok_or("cannot determine launcher directory; set --bin-dir or IR_TOOL_BIN_DIR")?;
+        let home = nonempty_env("HOME").ok_or(
+            "cannot determine executable install directory; set --bin-dir or IR_TOOL_BIN_DIR",
+        )?;
         Ok(PathBuf::from(home).join(".local").join("bin"))
     }
 
@@ -950,8 +955,9 @@ fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {
                 .join("ir")
                 .join("bin"));
         }
-        let home = nonempty_env("USERPROFILE")
-            .ok_or("cannot determine launcher directory; set --bin-dir or IR_TOOL_BIN_DIR")?;
+        let home = nonempty_env("USERPROFILE").ok_or(
+            "cannot determine executable install directory; set --bin-dir or IR_TOOL_BIN_DIR",
+        )?;
         Ok(PathBuf::from(home)
             .join("AppData")
             .join("Local")

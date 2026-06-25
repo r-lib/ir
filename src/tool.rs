@@ -78,7 +78,7 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
 
     fs::create_dir_all(&install.bin_dir).map_err(|e| {
         format!(
-            "failed to create launcher directory `{}`: {e}",
+            "failed to create executable install directory `{}`: {e}",
             install.bin_dir.display()
         )
     })?;
@@ -87,10 +87,10 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
     let r_arch_env = nonempty_env("R_ARCH");
     let reinstall_command = tool_install_recovery_command(install, &rscript);
     for executable in &executables {
-        let target = launcher_target_path(&install.bin_dir, &executable.name);
-        if target.exists() && !install.force {
+        let target = installed_executable_target_path(&install.bin_dir, executable);
+        if path_exists(&target) && !install.force {
             return Err(format!(
-                "launcher `{}` already exists; pass --force to overwrite it",
+                "installed executable path `{}` already exists; pass --force to overwrite it",
                 target.display()
             )
             .into());
@@ -99,18 +99,22 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
 
     let mut installed = Vec::new();
     for executable in executables {
-        let target = launcher_target_path(&install.bin_dir, &executable.name);
-        let contents = installed_launcher_contents(
-            &rscript,
-            &library,
-            &executable,
-            &path_prefix,
-            r_arch_env.as_deref(),
-            &reinstall_command,
-        )?;
-        fs::write(&target, contents)
-            .map_err(|e| format!("failed to write launcher `{}`: {e}", target.display()))?;
-        make_executable(&target)?;
+        let target = installed_executable_target_path(&install.bin_dir, &executable);
+        if executable.dir_kind.is_bin() {
+            symlink_package_executable(&executable.path, &target)?;
+        } else {
+            let contents = installed_launcher_contents(
+                &rscript,
+                &library,
+                &executable,
+                &path_prefix,
+                r_arch_env.as_deref(),
+                &reinstall_command,
+            )?;
+            fs::write(&target, contents)
+                .map_err(|e| format!("failed to write launcher `{}`: {e}", target.display()))?;
+            make_executable(&target)?;
+        }
         installed.push(executable.name);
     }
     if install.setup_bin_dir_on_path {
@@ -182,7 +186,7 @@ fn package_executable_not_found_error(
         .map(|dir| dir.path.display().to_string())
         .collect::<Vec<_>>()
         .join("`, `");
-    format!("could not find executable `{executable}` or `{executable}.R` in `{dirs}`").into()
+    format!("could not find executable `{executable}` in `{dirs}`").into()
 }
 
 fn selected_r_arch(
@@ -427,8 +431,16 @@ fn package_executable_from_discovered_path(
     package: &str,
     dir_kind: PackageExecutableDirKind,
 ) -> Result<Option<PackageExecutable>, Box<dyn Error>> {
-    let Some(launcher) = package_executable_launcher_kind(path, dir_kind)? else {
-        return Ok(None);
+    let launcher = if dir_kind.is_bin() {
+        if !is_direct_package_script(path, dir_kind)? {
+            return Ok(None);
+        }
+        PackageLauncher::Direct
+    } else {
+        let Some(launcher) = package_executable_launcher_kind(path, dir_kind)? else {
+            return Ok(None);
+        };
+        launcher
     };
     package_executable_from_path_and_launcher(path, package, launcher, dir_kind).map(Some)
 }
@@ -457,10 +469,11 @@ fn package_executable_launcher_name(
 ) -> Result<String, Box<dyn Error>> {
     let name = if let Some(name) = metadata_name {
         name
-    } else if path
-        .extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(|ext| is_package_executable_launcher_suffix(ext, dir_kind))
+    } else if !dir_kind.is_bin()
+        && path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|ext| is_package_executable_launcher_suffix(ext, dir_kind))
     {
         path.file_stem()
             .and_then(OsStr::to_str)
@@ -484,7 +497,7 @@ fn package_executable_launcher_name(
     Ok(name)
 }
 
-fn is_package_executable_launcher_suffix(ext: &str, dir_kind: PackageExecutableDirKind) -> bool {
+fn is_package_executable_launcher_suffix(ext: &str, _dir_kind: PackageExecutableDirKind) -> bool {
     if ext.eq_ignore_ascii_case("R") {
         return true;
     }
@@ -494,7 +507,7 @@ fn is_package_executable_launcher_suffix(ext: &str, dir_kind: PackageExecutableD
         return true;
     }
 
-    dir_kind.is_bin() && ext.eq_ignore_ascii_case("exe")
+    false
 }
 
 struct PackageLauncherMetadata {
@@ -777,7 +790,7 @@ fn ensure_launcher_dir_on_path(bin_dir: &Path) -> Result<(), Box<dyn Error>> {
 
     let bin_dir = fs::canonicalize(bin_dir).map_err(|e| {
         format!(
-            "cannot resolve launcher directory `{}`: {e}",
+            "cannot resolve executable install directory `{}`: {e}",
             bin_dir.display()
         )
     })?;
@@ -932,9 +945,9 @@ Write-Output "Added $PathEntry to your user Path"
     {
         Ok(status) if status.success() => {}
         Ok(status) => eprintln!(
-            "Could not add launcher directory to the user Path; powershell exited with status {status}."
+            "Could not add executable install directory to the user Path; powershell exited with status {status}."
         ),
-        Err(e) => eprintln!("Could not add launcher directory to the user Path: {e}"),
+        Err(e) => eprintln!("Could not add executable install directory to the user Path: {e}"),
     }
 
     Ok(())
@@ -1158,10 +1171,10 @@ fn package_executable_launcher_kind(
 
 #[cfg(unix)]
 fn is_direct_package_script_without_shebang(
-    path: &Path,
-    dir_kind: PackageExecutableDirKind,
+    _path: &Path,
+    _dir_kind: PackageExecutableDirKind,
 ) -> Result<bool, Box<dyn Error>> {
-    Ok(dir_kind.is_bin() && is_direct_package_script(path, dir_kind)?)
+    Ok(false)
 }
 
 #[cfg(not(unix))]
@@ -1199,6 +1212,58 @@ fn shebang_mentions(shebang: &[u8], name: &[u8]) -> bool {
     shebang
         .split(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
         .any(|word| word == name)
+}
+
+fn installed_executable_target_path(bin_dir: &Path, executable: &PackageExecutable) -> PathBuf {
+    if executable.dir_kind.is_bin() {
+        bin_dir.join(&executable.name)
+    } else {
+        launcher_target_path(bin_dir, &executable.name)
+    }
+}
+
+fn path_exists(path: &Path) -> bool {
+    path.exists() || fs::symlink_metadata(path).is_ok()
+}
+
+fn symlink_package_executable(source: &Path, target: &Path) -> Result<(), Box<dyn Error>> {
+    if path_exists(target) {
+        fs::remove_file(target).map_err(|e| {
+            format!(
+                "failed to remove existing installed executable `{}`: {e}",
+                target.display()
+            )
+        })?;
+    }
+    let source = std::path::absolute(source).map_err(|e| {
+        format!(
+            "failed to normalize package executable `{}` as an absolute path: {e}",
+            source.display()
+        )
+    })?;
+    symlink_file(&source, target).map_err(|e| {
+        format!(
+            "failed to symlink installed executable `{}` to `{}`: {e}",
+            target.display(),
+            source.display()
+        )
+        .into()
+    })
+}
+
+#[cfg(unix)]
+fn symlink_file(source: &Path, target: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(source, target)
+}
+
+#[cfg(windows)]
+fn symlink_file(source: &Path, target: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(source, target)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn symlink_file(source: &Path, target: &Path) -> io::Result<()> {
+    fs::hard_link(source, target)
 }
 
 fn launcher_target_path(bin_dir: &Path, name: &str) -> PathBuf {

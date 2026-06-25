@@ -14,7 +14,8 @@ Options:
 
 Tool discovery:
   Supported executables are discovered from installed package exec/, bin/,
-  and architecture-specific bin/<arch>/ directories.
+  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,
+  Rapp, and direct executable scripts; bin/ entries are opaque executables.
 
 Examples:
   ir tool run btw

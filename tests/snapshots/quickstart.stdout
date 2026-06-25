@@ -49,7 +49,7 @@ Isolation:
 Package tools:
   Some R packages ship executables in exec/, bin/, or bin/<arch>/. Use `rx`
   or `ir tool run` to run those tools without installing the package, creating
-  a project library, or installing a launcher first.
+  a project library, or installing them first.
   Tool runs resolve the provider package plus any `--with` dependencies into an
   isolated cached R library, then launch the selected executable. Ambient user
   R libraries are not used.

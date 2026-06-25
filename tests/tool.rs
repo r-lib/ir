@@ -253,19 +253,23 @@ fn tool_run_rx_and_install_support_package_bin_executables() {
 
 #[cfg(unix)]
 #[test]
-fn tool_run_and_install_strip_exe_suffix_from_bin_executables() {
-    let cache_dir = temp_dir("ir-tool-bin-exe-cache");
-    let bin_dir = temp_dir("ir-tool-bin-exe-install-bin");
-    let library = temp_dir("ir-tool-bin-exe-library");
-    let rscript_dir = temp_dir("ir-tool-bin-exe-rscript");
-    let package = library.join("irexetool");
+fn tool_run_and_install_treat_bin_executables_opaquely() {
+    let cache_dir = temp_dir("ir-tool-bin-opaque-cache");
+    let bin_dir = temp_dir("ir-tool-bin-opaque-install-bin");
+    let library = temp_dir("ir-tool-bin-opaque-library");
+    let rscript_dir = temp_dir("ir-tool-bin-opaque-rscript");
+    let package = library.join("iropaquebin");
     let package_bin_dir = package.join("bin");
     fs::create_dir_all(&package_bin_dir).unwrap();
     write_executable(
         &package_bin_dir.join("native.exe"),
         "#!/bin/sh\nprintf 'tool.fixture=exe\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
     );
-    let rscript = write_fake_tool_resolver(&rscript_dir, "irexetool", "x64");
+    write_executable(
+        &package_bin_dir.join("script.R"),
+        "#!/bin/sh\nprintf 'tool.fixture=script.R\\n'\nprintf 'tool.args=%s\\n' \"$*\"\n",
+    );
+    let rscript = write_fake_tool_resolver(&rscript_dir, "iropaquebin", "x64");
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -273,7 +277,7 @@ fn tool_run_and_install_strip_exe_suffix_from_bin_executables() {
         .env_remove("IR_RSCRIPT")
         .args(["tool", "run", "--rscript"])
         .arg(&rscript)
-        .args(["--from", "irexetool", "native", "run", "arg"])
+        .args(["--from", "iropaquebin", "native.exe", "run", "arg"])
         .output()
         .unwrap();
     assert_success(&out);
@@ -284,21 +288,52 @@ fn tool_run_and_install_strip_exe_suffix_from_bin_executables() {
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
         .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--from", "iropaquebin", "script.R", "run", "arg"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.fixture=script.R");
+    assert_stdout_contains(&out, "tool.args=run arg");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--from", "iropaquebin", "native"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", output_text(&out));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
         .args(["tool", "install", "--rscript"])
         .arg(&rscript)
         .args(["--bin-dir"])
         .arg(&bin_dir)
-        .arg("irexetool")
+        .arg("iropaquebin")
         .output()
         .unwrap();
     assert_success(&out);
-    assert_stdout_contains(&out, "native");
+    assert_stdout_contains(&out, "native.exe");
+    assert_stdout_contains(&out, "script.R");
+    assert!(launcher_path(&bin_dir, "native.exe").exists());
+    assert!(launcher_path(&bin_dir, "script.R").exists());
     assert!(
-        !launcher_path(&bin_dir, "native.exe").exists(),
-        "launcher should strip .exe"
+        fs::symlink_metadata(launcher_path(&bin_dir, "native.exe"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "installed bin executable should be a symlink"
     );
+    assert!(!launcher_path(&bin_dir, "native").exists());
 
-    let out = Command::new(launcher_path(&bin_dir, "native"))
+    let out = Command::new(launcher_path(&bin_dir, "native.exe"))
         .args(["install", "arg"])
         .output()
         .unwrap();
@@ -382,8 +417,8 @@ fn tool_run_queries_architecture_with_forwarded_rscript_args() {
     let i386_bin_dir = package.join("bin").join("i386");
     fs::create_dir_all(&i386_bin_dir).unwrap();
     write_executable(
-        &i386_bin_dir.join("archtool.R"),
-        "#!/usr/bin/env Rscript\ncat('not reached\\n')\n",
+        &i386_bin_dir.join("archtool"),
+        "#!/bin/sh\nprintf 'tool.arch=i386\\n'\n",
     );
     let rscript = write_fake_tool_resolver_with_forwarded_arch(&rscript_dir, "irarchargs", "x64");
 
@@ -397,8 +432,7 @@ fn tool_run_queries_architecture_with_forwarded_rscript_args() {
         .output()
         .unwrap();
     assert_success(&out);
-    assert_stdout_contains(&out, "tool.ran=true");
-    assert_stdout_contains(&out, "tool.arch.arg=true");
+    assert_stdout_contains(&out, "tool.arch=i386");
 }
 
 #[cfg(unix)]
@@ -444,10 +478,10 @@ fn tool_run_does_not_load_default_packages_when_querying_architecture() {
     let library = temp_dir("ir-tool-rscript-default-packages-library");
     let rscript_dir = temp_dir("ir-tool-rscript-default-packages-rscript");
     let package = library.join("irprobeenv");
-    let x64_bin_dir = package.join("bin").join("x64");
-    fs::create_dir_all(&x64_bin_dir).unwrap();
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
     fs::write(
-        x64_bin_dir.join("probetool.R"),
+        exec_dir.join("probetool.R"),
         "#!/usr/bin/env Rscript\ncat('not reached\\n')\n",
     )
     .unwrap();
@@ -593,10 +627,10 @@ fn tool_install_launcher_preserves_selected_r_arch_env() {
     let library = temp_dir("ir-tool-install-r-arch-library");
     let rscript_dir = temp_dir("ir-tool-install-r-arch-rscript");
     let package = library.join("irinstallarch");
-    let i386_bin_dir = package.join("bin").join("i386");
-    fs::create_dir_all(&i386_bin_dir).unwrap();
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
     fs::write(
-        i386_bin_dir.join("archtool.R"),
+        exec_dir.join("archtool.R"),
         "#!/usr/bin/env Rscript\ncat('not reached\\n')\n",
     )
     .unwrap();

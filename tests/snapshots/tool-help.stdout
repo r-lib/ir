@@ -4,7 +4,7 @@ Usage: ir tool [COMMAND]
 
 Commands:
   run      Run an executable provided by an R package
-  install  Install package executable launchers
+  install  Install package executables
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -12,10 +12,10 @@ Options:
 
 Tools:
   A tool is a supported executable in an R package's exec/, bin/, or
-  architecture-specific bin/<arch>/ directory. Rscript and Rapp entries use
-  the selected Rscript; direct executable scripts and binaries run as package
-  executables.
+  architecture-specific bin/<arch>/ directory. exec/ supports Rscript, Rapp,
+  and direct executable scripts; bin/ entries are opaque executables.
   `ir tool run` resolves the package plus any --with dependencies into an
   isolated library, then runs the selected executable. The user R library is not
   used.
-  `ir tool install` writes launchers that recreate the resolved tool runtime.
+  `ir tool install` writes generated launchers for exec/ entries and symlinks
+  for bin/ entries.
