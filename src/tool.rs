@@ -10,8 +10,8 @@ use saphyr::Yaml;
 
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 use crate::runtime::{
-    nonempty_env, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
-    RSelectionArgs,
+    is_rscript_arch_arg, nonempty_env, resolve_library_and_primary_package, rscript_arch_args,
+    rscript_for_spec, spawn_error, RSelectionArgs,
 };
 use crate::spec::{load_first_yaml_document, RuntimeSpec};
 
@@ -30,8 +30,9 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
             rscript: run.rscript.as_deref(),
         },
     )?;
-    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
-    let r_arch = selected_r_arch(&rscript, &run.rscript_args)?;
+    let arch_args = rscript_arch_args(&run.rscript_args);
+    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec, &arch_args)?;
+    let r_arch = selected_r_arch(&rscript, &arch_args)?;
     let executable = find_package_executable(
         &library,
         &package_name,
@@ -63,7 +64,7 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
             rscript: install.rscript.as_deref(),
         },
     )?;
-    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
+    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec, &[])?;
     let r_arch = selected_r_arch(&rscript, &[])?;
     let executables = discover_package_executables(&library, &package_name, r_arch.as_deref())?;
     if executables.is_empty() {
@@ -134,6 +135,7 @@ fn find_package_executable(
     for dir in &dirs {
         matches.extend(find_package_executables_in_dir(dir, executable)?);
     }
+    shadow_generic_bin_executables(&mut matches);
 
     matches.sort_by(|a, b| a.path.cmp(&b.path));
     match matches.len() {
@@ -227,6 +229,7 @@ struct PackageExecutable {
     name: String,
     path: PathBuf,
     launcher: PackageLauncher,
+    dir_kind: PackageExecutableDirKind,
     rscript_args: Vec<String>,
 }
 
@@ -240,6 +243,7 @@ fn discover_package_executables(
     for dir in &dirs {
         executables.extend(package_executables_in_dir(dir)?);
     }
+    shadow_generic_bin_executables(&mut executables);
     reject_duplicate_launcher_names(&executables, package)?;
 
     executables.sort_by(|a, b| a.name.cmp(&b.name));
@@ -371,8 +375,22 @@ fn rapp_frontend_executable(path: PathBuf) -> PackageExecutable {
         name: "Rapp".to_string(),
         path,
         launcher: PackageLauncher::RappFrontend,
+        dir_kind: PackageExecutableDirKind::Exec,
         rscript_args: Vec::new(),
     }
+}
+
+fn shadow_generic_bin_executables(executables: &mut Vec<PackageExecutable>) {
+    let arch_names = executables
+        .iter()
+        .filter(|executable| executable.dir_kind == PackageExecutableDirKind::BinArch)
+        .map(|executable| executable.name.clone())
+        .collect::<Vec<_>>();
+
+    executables.retain(|executable| {
+        executable.dir_kind != PackageExecutableDirKind::Bin
+            || !arch_names.contains(&executable.name)
+    });
 }
 
 fn reject_duplicate_launcher_names(
@@ -417,6 +435,7 @@ fn package_executable_from_path_and_launcher(
         name,
         path: path.to_path_buf(),
         launcher,
+        dir_kind,
         rscript_args: metadata.rscript_args,
     })
 }
@@ -1017,7 +1036,11 @@ fn run_package_executable(
     let mut cmd;
     match executable.launcher {
         PackageLauncher::Direct => {
-            if !executable.rscript_args.is_empty() || !rscript_args.is_empty() {
+            if !executable.rscript_args.is_empty()
+                || rscript_args
+                    .iter()
+                    .any(|arg| !is_rscript_arch_arg(arg.as_str()))
+            {
                 return Err(
                     "Rscript options are only supported for Rscript and Rapp package executables"
                         .into(),

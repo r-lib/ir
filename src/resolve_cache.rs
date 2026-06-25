@@ -27,6 +27,7 @@ pub(crate) struct CachedResolution {
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
+    rscript_args: &[String],
     dependencies: &[String],
     exclude_newer: Option<&str>,
     quarto_render: bool,
@@ -53,6 +54,7 @@ pub(crate) fn paths(
         exclude_newer,
         quarto_render,
         &rscript_identity,
+        rscript_args,
     ));
     let marker_name = marker
         .file_name()
@@ -123,6 +125,7 @@ fn resolution_cache_key(
     exclude_newer: Option<&str>,
     quarto_render: bool,
     rscript_identity: &str,
+    rscript_args: &[String],
 ) -> String {
     let source_key = exclude_newer
         .map(|date| format!("exclude-newer: {date}"))
@@ -134,6 +137,9 @@ fn resolution_cache_key(
         parts.push("quarto".to_string());
     }
     parts.push(format!("rscript: {rscript_identity}"));
+    for arg in rscript_args {
+        parts.push(format!("rscript-arg: {arg}"));
+    }
 
     sha256_fields(&parts)
 }

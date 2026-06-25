@@ -437,6 +437,122 @@ fn tool_run_prefers_selected_arch_bin_on_path() {
     assert_stdout_contains(&out, "helper.arch=x64");
 }
 
+#[cfg(unix)]
+#[test]
+fn tool_run_does_not_load_default_packages_when_querying_architecture() {
+    let cache_dir = temp_dir("ir-tool-rscript-default-packages-cache");
+    let library = temp_dir("ir-tool-rscript-default-packages-library");
+    let rscript_dir = temp_dir("ir-tool-rscript-default-packages-rscript");
+    let package = library.join("irprobeenv");
+    let x64_bin_dir = package.join("bin").join("x64");
+    fs::create_dir_all(&x64_bin_dir).unwrap();
+    fs::write(
+        x64_bin_dir.join("probetool.R"),
+        "#!/usr/bin/env Rscript\ncat('not reached\\n')\n",
+    )
+    .unwrap();
+    let rscript = write_fake_tool_resolver_rejecting_default_packages_in_arch_query(
+        &rscript_dir,
+        "irprobeenv",
+        "x64",
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args([
+            "--default-packages=cli",
+            "--from",
+            "irprobeenv",
+            "probetool",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.ran=true");
+    assert_stdout_contains(&out, "tool.default.packages=true");
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_and_install_prefer_selected_arch_bin_over_generic_bin() {
+    let cache_dir = temp_dir("ir-tool-bin-arch-shadow-cache");
+    let bin_dir = temp_dir("ir-tool-bin-arch-shadow-install-bin");
+    let library = temp_dir("ir-tool-bin-arch-shadow-library");
+    let rscript_dir = temp_dir("ir-tool-bin-arch-shadow-rscript");
+    let package = library.join("irshadowarch");
+    let package_bin_dir = package.join("bin");
+    let x64_bin_dir = package_bin_dir.join("x64");
+    fs::create_dir_all(&x64_bin_dir).unwrap();
+    write_executable(
+        &package_bin_dir.join("shadowtool"),
+        "#!/bin/sh\nprintf 'tool.arch=generic\\n'\n",
+    );
+    write_executable(
+        &x64_bin_dir.join("shadowtool"),
+        "#!/bin/sh\nprintf 'tool.arch=x64\\n'\n",
+    );
+    let rscript = write_fake_tool_resolver(&rscript_dir, "irshadowarch", "x64");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--from", "irshadowarch", "shadowtool"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.arch=x64");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--rscript"])
+        .arg(&rscript)
+        .args(["--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irshadowarch")
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "shadowtool");
+
+    let out = Command::new(launcher_path(&bin_dir, "shadowtool"))
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.arch=x64");
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_run_resolves_package_with_forwarded_architecture() {
+    let cache_dir = temp_dir("ir-tool-resolve-arch-cache");
+    let library = temp_dir("ir-tool-resolve-arch-library");
+    let rscript_dir = temp_dir("ir-tool-resolve-arch-rscript");
+    let rscript =
+        write_fake_tool_resolver_with_arch_sensitive_resolution(&rscript_dir, "irresolvearch");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "run", "--rscript"])
+        .arg(&rscript)
+        .args(["--arch=i386", "--from", "irresolvearch", "archtool"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.ran=true");
+    assert_stdout_contains(&out, "tool.arch=i386");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn tool_install_adds_default_macos_bin_dir_to_zprofile_once() {
@@ -1581,6 +1697,96 @@ fn write_fake_tool_resolver_with_forwarded_arch(
                 "esac\n",
             ),
             package, default_arch
+        ),
+    );
+    rscript
+}
+
+#[cfg(unix)]
+fn write_fake_tool_resolver_rejecting_default_packages_in_arch_query(
+    rscript_dir: &Path,
+    package: &str,
+    arch: &str,
+) -> PathBuf {
+    let rscript = rscript_dir.join("Rscript");
+    write_executable(
+        &rscript,
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
+                "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  printf '%s\\n' {} > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "case \" $* \" in\n",
+                "  *' -e '*) is_arch_query=true ;;\n",
+                "  *) is_arch_query=false ;;\n",
+                "esac\n",
+                "if [ \"$is_arch_query\" = true ]; then\n",
+                "  case \" $* \" in\n",
+                "    *' --default-packages=cli '*) printf '%s\\n' 'default package loaded during arch query' >&2; exit 43 ;;\n",
+                "  esac\n",
+                "  printf '%s\\n' {}\n",
+                "  exit 0\n",
+                "fi\n",
+                "printf 'tool.ran=true\\n'\n",
+                "case \" $* \" in\n",
+                "  *' --default-packages=cli '*) printf 'tool.default.packages=true\\n' ;;\n",
+                "  *) printf 'tool.default.packages=false\\n' ;;\n",
+                "esac\n",
+            ),
+            package, arch
+        ),
+    );
+    rscript
+}
+
+#[cfg(unix)]
+fn write_fake_tool_resolver_with_arch_sensitive_resolution(
+    rscript_dir: &Path,
+    package: &str,
+) -> PathBuf {
+    let rscript = rscript_dir.join("Rscript");
+    write_executable(
+        &rscript,
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
+                "  case \" $* \" in\n",
+                "    *' --arch=i386 '*) arch=i386 ;;\n",
+                "    *) arch=x64 ;;\n",
+                "  esac\n",
+                "  mkdir -p \"$IR_TEST_LIBRARY\"/{}/bin/$arch\n",
+                "  cat >\"$IR_TEST_LIBRARY\"/{}/bin/$arch/archtool <<EOF\n",
+                "#!/bin/sh\n",
+                "printf 'tool.ran=true\\n'\n",
+                "printf 'tool.arch=$arch\\n'\n",
+                "EOF\n",
+                "  chmod +x \"$IR_TEST_LIBRARY\"/{}/bin/$arch/archtool\n",
+                "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
+                "  printf '%s\\n' {} > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
+                "  exit 0\n",
+                "fi\n",
+                "case \" $* \" in\n",
+                "  *' -e '*)\n",
+                "    case \" $* \" in\n",
+                "      *' --arch=i386 '*) printf '%s\\n' i386 ;;\n",
+                "      *) printf '%s\\n' x64 ;;\n",
+                "    esac\n",
+                "    exit 0\n",
+                "    ;;\n",
+                "esac\n",
+                "printf 'tool.ran=true\\n'\n",
+                "case \" $* \" in\n",
+                "  *' --arch=i386 '*) printf 'tool.arch.arg=true\\n' ;;\n",
+                "  *) printf 'tool.arch.arg=false\\n' ;;\n",
+                "esac\n",
+            ),
+            package, package, package, package
         ),
     );
     rscript

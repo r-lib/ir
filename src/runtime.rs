@@ -50,7 +50,8 @@ pub(crate) fn cmd_run(
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
-    let resolved = resolve_runtime(&rscript, &spec, false)?;
+    let resolution_rscript_args = rscript_arch_args(rscript_args);
+    let resolved = resolve_runtime(&rscript, &spec, false, &resolution_rscript_args)?;
 
     // Render the document, or run the user's program, in an isolated R session.
     let code = run_user_code(
@@ -87,7 +88,7 @@ pub(crate) fn cmd_render(
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
-    let resolved = resolve_runtime(&rscript, &spec, true)?;
+    let resolved = resolve_runtime(&rscript, &spec, true, &[])?;
     let code = quarto::run(
         &rscript,
         resolved.library.as_deref(),
@@ -113,6 +114,18 @@ pub(crate) struct RSelectionArgs<'a> {
 pub(crate) struct SnapshotArgs<'a> {
     pub(crate) exclude_newer: Option<&'a str>,
     pub(crate) python_exclude_newer: Option<&'a str>,
+}
+
+pub(crate) fn rscript_arch_args(rscript_args: &[String]) -> Vec<String> {
+    rscript_args
+        .iter()
+        .filter(|arg| is_rscript_arch_arg(arg))
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn is_rscript_arch_arg(arg: &str) -> bool {
+    arg.starts_with("--arch=")
 }
 
 pub(crate) fn rscript_for_spec(
@@ -273,9 +286,10 @@ fn is_future_iso_date(value: &str) -> bool {
 pub(crate) fn resolve_library_and_primary_package(
     rscript: &OsStr,
     spec: &RuntimeSpec,
+    rscript_args: &[String],
 ) -> Result<(PathBuf, String), Box<dyn Error>> {
     let cache_dir = ir_cache_dir()?;
-    let resolved = resolve_library_inner(rscript, spec, true, None, &cache_dir)?;
+    let resolved = resolve_library_inner(rscript, spec, true, None, rscript_args, &cache_dir)?;
     let library = resolved
         .library
         .ok_or("dependency resolver did not return a library path")?;
@@ -289,10 +303,18 @@ fn resolve_runtime(
     rscript: &OsStr,
     spec: &RuntimeSpec,
     include_jupyter: bool,
+    rscript_args: &[String],
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let cache_dir = ir_cache_dir()?;
     let python_request = python::request(&cache_dir, spec.python.as_ref(), include_jupyter)?;
-    resolve_library_inner(rscript, spec, false, python_request.as_ref(), &cache_dir)
+    resolve_library_inner(
+        rscript,
+        spec,
+        false,
+        python_request.as_ref(),
+        rscript_args,
+        &cache_dir,
+    )
 }
 
 struct ResolvedLibrary {
@@ -306,12 +328,14 @@ fn resolve_library_inner(
     spec: &RuntimeSpec,
     primary_package: bool,
     python_request: Option<&python::EnvRequest>,
+    rscript_args: &[String],
     cache_dir: &Path,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let dependencies = normalized_dependencies(&spec.dependencies);
     let resolution_cache_paths = resolve_cache::paths(
         cache_dir,
         rscript,
+        rscript_args,
         &dependencies,
         spec.exclude_newer.as_deref(),
         spec.quarto_render,
@@ -387,7 +411,8 @@ fn resolve_library_inner(
         let _ = fs::remove_file(&restart_file);
 
         let mut cmd = Command::new(rscript);
-        cmd.arg(&driver)
+        cmd.args(rscript_args)
+            .arg(&driver)
             .stdin(Stdio::piped())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
