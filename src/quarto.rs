@@ -129,7 +129,7 @@ fn chunk_languages(document: &str) -> ChunkLanguages {
     let mut in_yaml = false;
     let mut frontmatter_closed = false;
     let mut seen_content = false;
-    let mut fence_ticks = None;
+    let mut open_fence = None;
 
     for line in document.lines() {
         if !seen_content {
@@ -143,7 +143,7 @@ fn chunk_languages(document: &str) -> ChunkLanguages {
             }
         }
         if in_yaml {
-            if line.trim_end() == "---" {
+            if matches!(line.trim(), "---" | "...") {
                 in_yaml = false;
                 frontmatter_closed = true;
             }
@@ -153,35 +153,41 @@ fn chunk_languages(document: &str) -> ChunkLanguages {
             continue;
         }
 
-        if let Some(ticks) = fence_ticks {
-            if closing_fence(line, ticks) {
-                fence_ticks = None;
+        if let Some(fence) = open_fence {
+            if closing_fence(line, fence) {
+                open_fence = None;
             }
             continue;
         }
 
-        if let Some((language, ticks)) = executable_chunk_start(line) {
+        if let Some((language, fence)) = executable_chunk_start(line) {
             match language.as_str() {
                 "r" => chunks.has_r = true,
                 "python" => chunks.has_python = true,
                 _ => {}
             }
-            fence_ticks = Some(ticks);
+            open_fence = Some(fence);
             continue;
         }
 
-        if let Some((ticks, _)) = backtick_fence_start(line) {
-            fence_ticks = Some(ticks);
+        if let Some((fence, _)) = fence_start(line) {
+            open_fence = Some(fence);
         }
     }
 
     chunks
 }
 
-fn executable_chunk_start(line: &str) -> Option<(String, usize)> {
-    let (ticks, rest) = backtick_fence_start(line)?;
+#[derive(Clone, Copy)]
+struct Fence {
+    marker: char,
+    count: usize,
+}
+
+fn executable_chunk_start(line: &str) -> Option<(String, Fence)> {
+    let (fence, rest) = fence_start(line)?;
     let rest = rest.trim_start();
-    let inside = rest.strip_prefix('{')?;
+    let inside = rest.strip_prefix('{')?.trim_start();
     let language_end = inside
         .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
         .unwrap_or(inside.len());
@@ -190,28 +196,59 @@ fn executable_chunk_start(line: &str) -> Option<(String, usize)> {
     }
     let language = &inside[..language_end];
     let suffix = &inside[language_end..];
-    if !matches!(suffix.chars().next(), Some('}' | ' ' | ',')) {
-        return None;
+    if !matches!(suffix.chars().next(), Some('}' | ',')) {
+        let Some(ch) = suffix.chars().next() else {
+            return None;
+        };
+        if !ch.is_ascii_whitespace() {
+            return None;
+        }
     }
     let close = suffix.rfind('}')?;
     if !suffix[(close + 1)..].trim().is_empty() {
         return None;
     }
 
-    Some((language.to_ascii_lowercase(), ticks))
+    Some((language.to_ascii_lowercase(), fence))
 }
 
-fn backtick_fence_start(line: &str) -> Option<(usize, &str)> {
-    let line = line.trim_start_matches([' ', '\t', '>']);
-    let ticks = line.chars().take_while(|ch| *ch == '`').count();
-    (ticks >= 3).then(|| (ticks, &line[ticks..]))
+fn fence_start(line: &str) -> Option<(Fence, &str)> {
+    let line = markdown_fence_line(line)?;
+    let marker = match line.chars().next()? {
+        '`' => '`',
+        '~' => '~',
+        _ => return None,
+    };
+    let count = line.chars().take_while(|ch| *ch == marker).count();
+    if count < 3 {
+        return None;
+    }
+
+    Some((Fence { marker, count }, &line[count..]))
 }
 
-fn closing_fence(line: &str, expected_ticks: usize) -> bool {
-    let Some((ticks, rest)) = backtick_fence_start(line) else {
+fn markdown_fence_line(mut line: &str) -> Option<&str> {
+    loop {
+        let spaces = line.bytes().take_while(|byte| *byte == b' ').count();
+        if spaces > 3 {
+            return None;
+        }
+        line = &line[spaces..];
+        if line.starts_with('\t') {
+            return None;
+        }
+        let Some(rest) = line.strip_prefix('>') else {
+            return Some(line);
+        };
+        line = rest.strip_prefix(' ').unwrap_or(rest);
+    }
+}
+
+fn closing_fence(line: &str, expected: Fence) -> bool {
+    let Some((fence, rest)) = fence_start(line) else {
         return false;
     };
-    ticks == expected_ticks && rest.trim().is_empty()
+    fence.marker == expected.marker && fence.count >= expected.count && rest.trim().is_empty()
 }
 
 #[derive(Default)]
@@ -235,6 +272,7 @@ fn frontmatter_engine(document: &str) -> Result<FrontmatterEngine, Box<dyn Error
     if frontmatter_key_present(&doc, "jupyter") {
         engine.explicit_jupyter = true;
     }
+    apply_top_level_engine(&doc, &mut engine);
     apply_execute_engine(&doc, &mut engine);
     apply_format_execute_engines(&doc, &mut engine);
 
@@ -244,6 +282,16 @@ fn frontmatter_engine(document: &str) -> Result<FrontmatterEngine, Box<dyn Error
 fn frontmatter_key_present(doc: &Yaml<'_>, key: &str) -> bool {
     doc.as_mapping_get(key)
         .is_some_and(|value| !value.is_null())
+}
+
+fn apply_top_level_engine(doc: &Yaml<'_>, engine: &mut FrontmatterEngine) {
+    let Some(value) = doc
+        .as_mapping_get("engine")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    apply_engine_name(value, engine);
 }
 
 fn apply_execute_engine(doc: &Yaml<'_>, engine: &mut FrontmatterEngine) {

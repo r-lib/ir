@@ -9,6 +9,50 @@ use std::fs;
 use std::path::Path;
 
 #[cfg(unix)]
+fn assert_quarto_reticulate_for_document(name: &str, document: &str, expected: bool) {
+    let cache_dir = temp_dir(&format!("ir-{name}-cache"));
+    let bin_dir = temp_dir(&format!("ir-{name}-bin"));
+    let doc = temp_path(name, "qmd");
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+    let expected = if expected { "1" } else { "" };
+
+    fs::write(&doc, document).unwrap();
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  observed=${{IR_QUARTO_RETICULATE:+1}}\n\
+  if [ \"$observed\" != \"{}\" ]; then\n\
+    echo expected IR_QUARTO_RETICULATE={} got \"$observed\" >&2\n\
+    exit 1\n\
+  fi\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+            expected, expected
+        ),
+    );
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(unix)]
 #[test]
 fn render_quarto_ir_python_frontmatter_sets_quarto_python() {
     let cache_dir = temp_dir("ir-render-python-cache");
@@ -363,6 +407,140 @@ exit 1\n",
         .unwrap();
 
     assert_success(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_top_level_knitr_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-top-level-knitr-python-reticulate",
+        r#"---
+title: top-level knitr Python chunk
+format: html
+engine: knitr
+---
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_top_level_jupyter_python_chunk_does_not_request_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-top-level-jupyter-python-reticulate",
+        r#"---
+title: top-level jupyter Python chunk
+format: html
+engine: jupyter
+---
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        false,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_tilde_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-tilde-python-reticulate",
+        r#"---
+title: tilde Python chunk
+format: html
+---
+
+~~~{r}
+1 + 1
+~~~
+
+~~~{python}
+print("ok")
+~~~
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_dot_yaml_terminator_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-dot-yaml-reticulate",
+        r#"---
+title: dot YAML terminator Python chunk
+format: html
+...
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_longer_closing_fence_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-longer-closing-fence-reticulate",
+        r#"---
+title: longer closing fence Python chunk
+format: html
+---
+
+```text
+literal block
+````
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_indented_literal_python_fence_does_not_request_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-indented-literal-python-reticulate",
+        r#"---
+title: indented literal Python fence
+format: html
+---
+
+```{r}
+1 + 1
+```
+
+    ```{python}
+    print("not executable")
+    ```
+"#,
+        false,
+    );
 }
 
 #[cfg(unix)]

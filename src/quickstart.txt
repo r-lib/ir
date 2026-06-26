@@ -38,7 +38,7 @@ Python:
   activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` also
   sets QUARTO_PYTHON and injects jupyter.
   Add `reticulate` under `packages` when R code loads reticulate; `ir render`
-  injects it for knitr-backed Quarto documents with Python chunks.
+  adds it for knitr-backed Quarto documents with Python chunks.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Isolation:
