@@ -106,7 +106,8 @@ $ rx btw
 $ ir tool run btw
 ```
 
-Package authors can put executable scripts in a package's `exec/`
+Package authors can put executable scripts in a package's
+[`exec/`](https://r-pkgs.org/misc.html#other-directories)
 directory. Those scripts can be regular `Rscript` files or
 [`Rapp`](https://github.com/r-lib/Rapp) apps. `rx` resolves the package,
 finds the requested executable, and runs it in an isolated library. For
