@@ -2,10 +2,11 @@
 title: Cache
 ---
 
-`ir` caches resolver tooling, dependency resolutions, and materialised package libraries.
+`ir` caches resolver tooling, dependency resolutions, and materialised package libraries for runs, renders, and ad hoc package-tool runs.
 
 Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DIR`.
 This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
+Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of `IR_CACHE_DIR`.
 
 Resolution requests for ordinary registry refs are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
@@ -18,9 +19,10 @@ If the recorded Python path no longer exists, `ir` resolves the Python environme
 Non-standard refs skip the resolution-marker cache.
 Each run asks pak to resolve them again, so branch heads, URLs, and local paths are not hidden behind a warm resolution marker.
 
-Materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
+Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
 Scripts or tools that resolve to the same install refs share one library.
 Source refs are still passed to `renv::use()` on each run so renv can refresh source installs; renv may reuse its own package cache when the source has not changed.
+Installed tool libraries use the same content-addressing under `IR_TOOL_STORE_DIR`.
 
 ## Commands
 
@@ -31,5 +33,6 @@ $ ir cache clean --force
 ```
 
 `ir cache dir` prints the cache root.
-`ir cache clean` removes the whole `ir` cache, including materialised libraries and resolution markers.
+`ir cache clean` removes the whole `ir` cache, including resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
+It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.

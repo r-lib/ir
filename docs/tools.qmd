@@ -14,8 +14,10 @@ $ ir tool run --from btw btw --help
 
 For `rx --from pkg tool`, `ir` installs `pkg`, finds the named package executable, and launches it.
 Tool runs use an isolated library containing the resolved package plus any `--with` dependencies; the user R library is not used.
-Here, a package executable means a supported file in the installed package's `exec/` directory: Rscript and Rapp entries use the selected Rscript, while direct executable scripts such as shell or Python entries run as package scripts.
-On Unix, direct executable scripts must be executable; on Windows, direct executables are `.bat` or `.cmd` files.
+Here, a package executable means a supported file in the installed package's `exec/`, `bin/`, or architecture-specific `bin/<arch>/` directory.
+Files in `exec/` are interpreted as package launchers: Rscript and Rapp entries use the selected Rscript, while direct executable scripts run as package executables.
+Files in `bin/` and `bin/<arch>/` are run as-is; their command names are their exact file names.
+On Unix, direct executables must be executable; on Windows, direct script executables are `.bat` or `.cmd` files, and native binaries under `bin/` may be `.exe` files.
 A bare self-named package ref such as `rx btw` is shorthand for `rx --from btw btw`.
 
 An `Rscript` executable is an ordinary R script.
@@ -73,9 +75,12 @@ cat(hello(who), "\n")
 If that file is `exec/greet.R`, it is installed and discovered as `friendly-greeting`.
 Rapp apps use `base,<pkg>` as their default startup packages unless `#| launcher:` sets `default-packages`.
 
+For compiled CLIs, put the executable at `bin/tool` or `bin/<arch>/tool`.
+`rx --from mypkg tool` runs that file directly, and `ir tool install mypkg` installs a launcher for it.
+
 ## Install launchers
 
-`ir tool install` resolves a package and writes launchers for the executables it provides.
+`ir tool install` resolves a package, materialises its package library into the durable tool store, and installs the executables it provides.
 
 ```console
 $ ir tool install btw
@@ -86,16 +91,22 @@ $ ir tool install --with cli --r-version 4.5 btw
 $ ir tool install --rscript /path/to/Rscript btw
 ```
 
-Installed launchers keep the same resolved package ref, `--with` package additions, and R selection that were used at install time.
+The tool store is configured with `IR_TOOL_STORE_DIR`.
+By default, it is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix and macOS, and `%LOCALAPPDATA%\Programs\R\ir\tools` or `%USERPROFILE%\AppData\Local\Programs\R\ir\tools` on Windows.
+Installed tool libraries are persistent state, so `ir cache clean` does not remove them.
+
+Generated launchers keep the same resolved package ref, `--with` package additions, and R selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.
 Plain `Rscript` package executables keep Rscript's normal startup package behavior unless launcher metadata explicitly sets `default-packages`.
+For `bin/` entries, launchers execute the resolved file with the installed tool runtime environment.
+`ir` does not inspect launcher metadata in `bin/` files.
 
-By default, `ir tool install` writes launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
+By default, `ir tool install` writes command launchers to `IR_TOOL_BIN_DIR`, `RAPP_BIN_DIR`, `XDG_BIN_HOME`, `XDG_DATA_HOME/../bin`, or `~/.local/bin` on Unix.
 On Windows, it uses `%LOCALAPPDATA%\Programs\R\ir\bin`, falling back to `%USERPROFILE%\AppData\Local\Programs\R\ir\bin`.
 `--bin-dir` overrides those defaults.
-When no `--bin-dir` override is used, `ir tool install` also sets up `PATH` for the selected launcher directory where needed.
-On macOS, it adds the default `~/.local/bin` launcher directory to `~/.zprofile` when it is not already on `PATH`, respecting `ZDOTDIR`.
-On Windows, it adds the default or environment-selected launcher directory to the user `Path`.
+When no `--bin-dir` override is used, `ir tool install` also sets up `PATH` for the selected executable install directory where needed.
+On macOS, it adds the default `~/.local/bin` executable install directory to `~/.zprofile` when it is not already on `PATH`, respecting `ZDOTDIR`.
+On Windows, it adds the default or environment-selected executable install directory to the user `Path`.
 Set `IR_NO_MODIFY_PATH=1` or `RAPP_NO_MODIFY_PATH=1` to skip PATH setup.

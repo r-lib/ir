@@ -216,6 +216,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
     assert!(workflow.contains("-Skip rust, python, quarto, r-release"));
+    assert!(workflow.contains("GITHUB_TOKEN: ${{ github.token }}"));
     assert!(!workflow.contains("IR_TEST_R_VERSION=4.4.3"));
     assert!(!workflow.contains("IR_TEST_R_EXCLUDE_NEWER=2025-02-28"));
     assert!(workflow.contains("any::bookdown"));
@@ -636,6 +637,9 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("posit.rig"));
     assert!(!script.contains("choco"));
     assert!(script.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(script.contains("function Get-GitHubApiHeaders"));
+    assert!(script.contains("$env:GITHUB_TOKEN"));
+    assert!(script.contains("-Headers $headers"));
     assert!(script.contains("https://github.com/r-lib/rig/releases/download/$tag/$asset"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains("ProgramFiles \"rig\""));

@@ -2,7 +2,7 @@ use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -10,7 +10,8 @@ use saphyr::Yaml;
 
 use crate::cli::{is_package_executable_name, ToolInstallArgs, ToolRunArgs};
 use crate::runtime::{
-    nonempty_env, resolve_library_and_primary_package, rscript_for_spec, spawn_error,
+    is_rscript_arch_arg, nonempty_env, resolve_library_and_primary_package,
+    resolve_library_and_primary_package_in_root, rscript_arch_args, rscript_for_spec, spawn_error,
     RSelectionArgs,
 };
 use crate::spec::{load_first_yaml_document, RuntimeSpec};
@@ -30,12 +31,22 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
             rscript: run.rscript.as_deref(),
         },
     )?;
-    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
-    let executable = find_package_executable(&library, &package_name, &run.target.executable)?;
+    let arch_args = rscript_arch_args(&run.rscript_args);
+    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec, &arch_args)?;
+    let r_arch = selected_r_arch(&rscript, &arch_args)?;
+    let r_arch_env = selected_r_arch_env(&rscript, &arch_args)?;
+    let executable = find_package_executable(
+        &library,
+        &package_name,
+        &run.target.executable,
+        r_arch.as_deref(),
+    )?;
     let code = run_package_executable(
         &rscript,
         &library,
         &executable,
+        r_arch.as_deref(),
+        r_arch_env.as_deref(),
         &run.rscript_args,
         &run.tool_args,
     )?;
@@ -56,50 +67,45 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
             rscript: install.rscript.as_deref(),
         },
     )?;
-    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec)?;
-    let executables = discover_package_executables(&library, &package_name)?;
+    let tool_store_dir = tool_store_dir()?;
+    let (library, package_name) =
+        resolve_library_and_primary_package_in_root(&rscript, &spec, &[], Some(&tool_store_dir))?;
+    let r_arch = selected_r_arch(&rscript, &[])?;
+    let r_arch_env = selected_r_arch_env(&rscript, &[])?;
+    let executables = discover_package_executables(&library, &package_name, r_arch.as_deref())?;
     if executables.is_empty() {
         return Err(format!(
-            "package `{}` does not expose supported executables in `{}`",
+            "package `{}` does not expose supported executables under `{}`",
             package_name,
-            library.join(&package_name).join("exec").display()
+            library.join(&package_name).display()
         )
         .into());
     }
 
     fs::create_dir_all(&install.bin_dir).map_err(|e| {
         format!(
-            "failed to create launcher directory `{}`: {e}",
+            "failed to create executable install directory `{}`: {e}",
             install.bin_dir.display()
         )
     })?;
 
-    let path_prefix = resolved_runtime_path_prefix(&library, &rscript)?;
-    let reinstall_command = tool_install_recovery_command(install, &rscript);
-    for executable in &executables {
-        let target = launcher_target_path(&install.bin_dir, &executable.name);
-        if target.exists() && !install.force {
-            return Err(format!(
-                "launcher `{}` already exists; pass --force to overwrite it",
-                target.display()
-            )
-            .into());
-        }
-    }
+    reject_colliding_installed_target_paths(&install.bin_dir, &executables)?;
+    reject_existing_installed_target_paths(&install.bin_dir, &executables, install.force)?;
 
+    let path_prefix = resolved_runtime_path_prefix(&library, &rscript, r_arch.as_deref())?;
+    let reinstall_command = tool_install_recovery_command(install, &rscript);
     let mut installed = Vec::new();
     for executable in executables {
-        let target = launcher_target_path(&install.bin_dir, &executable.name);
+        let target = installed_executable_target_path(&install.bin_dir, &executable);
         let contents = installed_launcher_contents(
             &rscript,
             &library,
             &executable,
             &path_prefix,
+            r_arch_env.as_deref(),
             &reinstall_command,
         )?;
-        fs::write(&target, contents)
-            .map_err(|e| format!("failed to write launcher `{}`: {e}", target.display()))?;
-        make_executable(&target)?;
+        write_installed_launcher(&target, contents)?;
         installed.push(executable.name);
     }
     if install.setup_bin_dir_on_path {
@@ -115,51 +121,194 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
     Ok(())
 }
 
+fn tool_store_dir() -> Result<PathBuf, Box<dyn Error>> {
+    if let Some(path) = nonempty_env("IR_TOOL_STORE_DIR") {
+        return Ok(PathBuf::from(path));
+    }
+
+    #[cfg(unix)]
+    {
+        if let Some(path) = nonempty_env("XDG_DATA_HOME") {
+            return Ok(PathBuf::from(path).join("ir").join("tools"));
+        }
+        let home = nonempty_env("HOME")
+            .ok_or("cannot determine tool store directory; set IR_TOOL_STORE_DIR")?;
+        Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("ir")
+            .join("tools"))
+    }
+
+    #[cfg(not(unix))]
+    {
+        if let Some(path) = nonempty_env("LOCALAPPDATA") {
+            return Ok(PathBuf::from(path)
+                .join("Programs")
+                .join("R")
+                .join("ir")
+                .join("tools"));
+        }
+        let home = nonempty_env("USERPROFILE").ok_or(
+            "cannot determine Windows tool store directory; set IR_TOOL_STORE_DIR, LOCALAPPDATA, or USERPROFILE",
+        )?;
+        Ok(PathBuf::from(home)
+            .join("AppData")
+            .join("Local")
+            .join("Programs")
+            .join("R")
+            .join("ir")
+            .join("tools"))
+    }
+}
+
 fn find_package_executable(
     library: &Path,
     package: &str,
     executable: &str,
+    r_arch: Option<&str>,
 ) -> Result<PackageExecutable, Box<dyn Error>> {
-    let exec_dir = library.join(package).join("exec");
-    find_package_executable_in_dir(&exec_dir, executable)?.ok_or_else(|| {
-        if !exec_dir.is_dir() {
-            format!(
-                "package `{package}` does not have an exec directory in `{}`",
-                library.display()
-            )
-            .into()
-        } else {
-            format!(
-                "could not find executable `{executable}` or `{executable}.R` in `{}`",
-                exec_dir.display()
-            )
-            .into()
-        }
-    })
-}
-
-fn find_package_executable_in_dir(
-    exec_dir: &Path,
-    executable: &str,
-) -> Result<Option<PackageExecutable>, Box<dyn Error>> {
-    if !exec_dir.is_dir() {
-        return Ok(None);
+    let dirs = package_executable_dirs(library, package, r_arch)?;
+    let mut matches = Vec::new();
+    for dir in &dirs {
+        matches.extend(find_package_executables_in_dir(dir, executable)?);
     }
-
-    let mut matches: Vec<_> = package_executables_in_dir(exec_dir)?
-        .into_iter()
-        .filter(|candidate| candidate.name == executable)
-        .collect();
+    shadow_lower_precedence_executables(&mut matches);
 
     matches.sort_by(|a, b| a.path.cmp(&b.path));
     match matches.len() {
-        0 => Ok(None),
-        1 => Ok(Some(matches.remove(0))),
+        0 => Err(package_executable_not_found_error(
+            library, package, executable, &dirs,
+        )),
+        1 => Ok(matches.remove(0)),
         _ => Err(format!(
-            "multiple package executables map to launcher `{executable}` in `{}`",
-            exec_dir.display()
+            "multiple package executables map to launcher `{executable}` in package `{package}`"
         )
         .into()),
+    }
+}
+
+fn find_package_executables_in_dir(
+    dir: &PackageExecutableDir,
+    executable: &str,
+) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
+    let matches = package_executables_in_dir(dir)?
+        .into_iter()
+        .filter(|candidate| candidate.name == executable)
+        .collect();
+    Ok(matches)
+}
+
+fn package_executable_not_found_error(
+    library: &Path,
+    package: &str,
+    executable: &str,
+    dirs: &[PackageExecutableDir],
+) -> Box<dyn Error> {
+    if dirs.is_empty() {
+        return format!(
+            "package `{package}` does not expose supported executable directories in `{}`",
+            library.join(package).display()
+        )
+        .into();
+    }
+
+    let dirs = dirs
+        .iter()
+        .map(|dir| dir.path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("`, `");
+    format!("could not find executable `{executable}` in `{dirs}`").into()
+}
+
+fn selected_r_arch(
+    rscript: &OsStr,
+    rscript_args: &[String],
+) -> Result<Option<String>, Box<dyn Error>> {
+    let output = Command::new(rscript)
+        .arg("--vanilla")
+        .args(rscript_args)
+        .arg("-e")
+        .arg(concat!(
+            "arch <- sub('^/', '', Sys.getenv('R_ARCH')); ",
+            "if (!nzchar(arch) && !is.null(.Platform$r_arch)) ",
+            "arch <- sub('^/', '', .Platform$r_arch); ",
+            "if (!nzchar(arch)) arch <- R.version$arch; ",
+            "cat(arch)"
+        ))
+        .env_remove("IR_RESOLVE_RESULT_FILE")
+        .env_remove("IR_RESOLVE_PACKAGE_RESULT_FILE")
+        .env_remove("IR_RESOLUTION_MARKER")
+        .env_remove("IR_PRIMARY_PACKAGE_MARKER")
+        .output()
+        .map_err(|e| spawn_error(rscript, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "failed to query R architecture with `{}`: {}",
+            rscript.to_string_lossy(),
+            stderr.trim()
+        )
+        .into());
+    }
+
+    let arch = String::from_utf8(output.stdout).map_err(|e| {
+        format!(
+            "R architecture output from `{}` is not valid UTF-8: {e}",
+            rscript.to_string_lossy()
+        )
+    })?;
+    let arch = arch.trim();
+    Ok((!arch.is_empty()).then(|| arch.to_string()))
+}
+
+fn selected_r_arch_env(
+    rscript: &OsStr,
+    rscript_args: &[String],
+) -> Result<Option<OsString>, Box<dyn Error>> {
+    let output = Command::new(rscript)
+        .arg("--vanilla")
+        .args(rscript_args)
+        .arg("-e")
+        .arg(concat!(
+            "arch <- Sys.getenv('R_ARCH'); ",
+            "if (!nzchar(arch) && !is.null(.Platform$r_arch)) { ",
+            "arch <- sub('^/', '', .Platform$r_arch); ",
+            "if (nzchar(arch)) arch <- paste0('/', arch); ",
+            "}; ",
+            "cat(arch)"
+        ))
+        .env_remove("IR_RESOLVE_RESULT_FILE")
+        .env_remove("IR_RESOLVE_PACKAGE_RESULT_FILE")
+        .env_remove("IR_RESOLUTION_MARKER")
+        .env_remove("IR_PRIMARY_PACKAGE_MARKER")
+        .output()
+        .map_err(|e| spawn_error(rscript, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "failed to query R architecture environment with `{}`: {}",
+            rscript.to_string_lossy(),
+            stderr.trim()
+        )
+        .into());
+    }
+
+    let arch = String::from_utf8(output.stdout).map_err(|e| {
+        format!(
+            "R architecture environment output from `{}` is not valid UTF-8: {e}",
+            rscript.to_string_lossy()
+        )
+    })?;
+    let arch = arch.trim();
+    if arch.is_empty() {
+        Ok(None)
+    } else if arch.starts_with('/') {
+        Ok(Some(OsString::from(arch)))
+    } else {
+        Ok(Some(OsString::from(format!("/{arch}"))))
     }
 }
 
@@ -167,38 +316,103 @@ struct PackageExecutable {
     name: String,
     path: PathBuf,
     launcher: PackageLauncher,
+    dir_kind: PackageExecutableDirKind,
     rscript_args: Vec<String>,
 }
 
 fn discover_package_executables(
     library: &Path,
     package: &str,
+    r_arch: Option<&str>,
 ) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
-    let exec_dir = library.join(package).join("exec");
-    if !exec_dir.is_dir() {
-        return Err(format!(
-            "package `{package}` does not have an exec directory in `{}`",
-            library.display()
-        )
-        .into());
+    let dirs = package_executable_dirs(library, package, r_arch)?;
+    let mut executables = Vec::new();
+    for dir in &dirs {
+        executables.extend(package_executables_in_dir(dir)?);
     }
-
-    let mut executables = package_executables_in_dir(&exec_dir)?;
-    reject_duplicate_launcher_names(&executables, &exec_dir)?;
+    shadow_lower_precedence_executables(&mut executables);
+    reject_duplicate_launcher_names(&executables, package)?;
 
     executables.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(executables)
 }
 
-fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PackageExecutableDirKind {
+    Exec,
+    Bin,
+    BinArch,
+}
+
+impl PackageExecutableDirKind {
+    fn is_bin(self) -> bool {
+        matches!(self, Self::Bin | Self::BinArch)
+    }
+}
+
+struct PackageExecutableDir {
+    package: String,
+    path: PathBuf,
+    kind: PackageExecutableDirKind,
+}
+
+fn package_executable_dirs(
+    library: &Path,
+    package: &str,
+    r_arch: Option<&str>,
+) -> Result<Vec<PackageExecutableDir>, Box<dyn Error>> {
+    let package_dir = library.join(package);
+    let mut dirs = Vec::new();
+
+    let exec_dir = package_dir.join("exec");
+    if exec_dir.is_dir() {
+        dirs.push(PackageExecutableDir {
+            package: package.to_string(),
+            path: exec_dir,
+            kind: PackageExecutableDirKind::Exec,
+        });
+    }
+
+    let bin_dir = package_dir.join("bin");
+    if bin_dir.is_dir() {
+        dirs.push(PackageExecutableDir {
+            package: package.to_string(),
+            path: bin_dir.clone(),
+            kind: PackageExecutableDirKind::Bin,
+        });
+
+        let mut arch_dirs = fs::read_dir(&bin_dir)
+            .map_err(|e| format!("cannot read bin directory `{}`: {e}", bin_dir.display()))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        arch_dirs.sort();
+        for path in arch_dirs {
+            if path.is_dir() && arch_dir_matches(&path, r_arch) {
+                dirs.push(PackageExecutableDir {
+                    package: package.to_string(),
+                    path,
+                    kind: PackageExecutableDirKind::BinArch,
+                });
+            }
+        }
+    }
+
+    Ok(dirs)
+}
+
+fn arch_dir_matches(path: &Path, r_arch: Option<&str>) -> bool {
+    let Some(r_arch) = r_arch else {
+        return false;
+    };
+    path.file_name().and_then(OsStr::to_str) == Some(r_arch)
+}
+
+fn package_executables_in_dir(
+    dir: &PackageExecutableDir,
+) -> Result<Vec<PackageExecutable>, Box<dyn Error>> {
     let mut executables = Vec::new();
-    let rapp_frontend = if exec_dir
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        == Some("Rapp")
-    {
-        let path = exec_dir.join("Rapp");
+    let rapp_frontend = if dir.kind == PackageExecutableDirKind::Exec && dir.package == "Rapp" {
+        let path = dir.path.join("Rapp");
         path.is_file().then_some(path)
     } else {
         None
@@ -207,17 +421,22 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
         executables.push(rapp_frontend_executable(path.to_path_buf()));
     }
 
-    for entry in fs::read_dir(exec_dir)
-        .map_err(|e| format!("cannot read exec directory `{}`: {e}", exec_dir.display()))?
-    {
+    for entry in fs::read_dir(&dir.path).map_err(|e| {
+        format!(
+            "cannot read package executable directory `{}`: {e}",
+            dir.path.display()
+        )
+    })? {
         let path = entry?.path();
         if !path.is_file() {
             continue;
         }
-        if rapp_frontend.is_some() && is_rapp_frontend_alias(&path) {
+        if rapp_frontend.is_some() && is_rapp_frontend_alias(&path, dir.kind) {
             continue;
         }
-        let Some(executable) = package_executable_from_discovered_path(&path)? else {
+        let Some(executable) =
+            package_executable_from_discovered_path(&path, &dir.package, dir.kind)?
+        else {
             continue;
         };
         executables.push(executable);
@@ -225,11 +444,11 @@ fn package_executables_in_dir(exec_dir: &Path) -> Result<Vec<PackageExecutable>,
     Ok(executables)
 }
 
-fn is_rapp_frontend_alias(path: &Path) -> bool {
+fn is_rapp_frontend_alias(path: &Path, dir_kind: PackageExecutableDirKind) -> bool {
     let name = if path
         .extension()
         .and_then(OsStr::to_str)
-        .is_some_and(is_package_executable_launcher_suffix)
+        .is_some_and(|ext| is_package_executable_launcher_suffix(ext, dir_kind))
     {
         path.file_stem()
     } else {
@@ -243,13 +462,35 @@ fn rapp_frontend_executable(path: PathBuf) -> PackageExecutable {
         name: "Rapp".to_string(),
         path,
         launcher: PackageLauncher::RappFrontend,
+        dir_kind: PackageExecutableDirKind::Exec,
         rscript_args: Vec::new(),
     }
 }
 
+fn shadow_lower_precedence_executables(executables: &mut Vec<PackageExecutable>) {
+    let exec_names = executables
+        .iter()
+        .filter(|executable| executable.dir_kind == PackageExecutableDirKind::Exec)
+        .map(|executable| executable.name.clone())
+        .collect::<Vec<_>>();
+    let arch_names = executables
+        .iter()
+        .filter(|executable| executable.dir_kind == PackageExecutableDirKind::BinArch)
+        .map(|executable| executable.name.clone())
+        .collect::<Vec<_>>();
+
+    executables.retain(|executable| {
+        if executable.dir_kind.is_bin() && exec_names.contains(&executable.name) {
+            return false;
+        }
+        executable.dir_kind != PackageExecutableDirKind::Bin
+            || !arch_names.contains(&executable.name)
+    });
+}
+
 fn reject_duplicate_launcher_names(
     executables: &[PackageExecutable],
-    exec_dir: &Path,
+    package: &str,
 ) -> Result<(), Box<dyn Error>> {
     for (index, executable) in executables.iter().enumerate() {
         if executables[..index]
@@ -257,9 +498,8 @@ fn reject_duplicate_launcher_names(
             .any(|known| known.name == executable.name)
         {
             return Err(format!(
-                "multiple package executables map to launcher `{}` in `{}`",
-                executable.name,
-                exec_dir.display()
+                "multiple package executables map to launcher `{}` in package `{}`",
+                executable.name, package
             )
             .into());
         }
@@ -269,53 +509,52 @@ fn reject_duplicate_launcher_names(
 
 fn package_executable_from_discovered_path(
     path: &Path,
+    package: &str,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<Option<PackageExecutable>, Box<dyn Error>> {
-    let Some(launcher) = package_executable_launcher_kind(path)? else {
-        return Ok(None);
+    let launcher = if dir_kind.is_bin() {
+        if !is_direct_package_script(path, dir_kind)? {
+            return Ok(None);
+        }
+        PackageLauncher::Direct
+    } else {
+        let Some(launcher) = package_executable_launcher_kind(path, dir_kind)? else {
+            return Ok(None);
+        };
+        launcher
     };
-    package_executable_from_path_and_launcher(path, launcher).map(Some)
+    package_executable_from_path_and_launcher(path, package, launcher, dir_kind).map(Some)
 }
 
 fn package_executable_from_path_and_launcher(
     path: &Path,
+    package: &str,
     launcher: PackageLauncher,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<PackageExecutable, Box<dyn Error>> {
-    let package = package_executable_package(path)?;
-    let metadata = package_launcher_metadata(path, &package, launcher)?;
-    let name = package_executable_launcher_name(path, metadata.name)?;
+    let metadata = package_launcher_metadata(path, package, launcher)?;
+    let name = package_executable_launcher_name(path, metadata.name, dir_kind)?;
     Ok(PackageExecutable {
         name,
         path: path.to_path_buf(),
         launcher,
+        dir_kind,
         rscript_args: metadata.rscript_args,
     })
-}
-
-fn package_executable_package(path: &Path) -> Result<String, Box<dyn Error>> {
-    let package = path
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        .ok_or_else(|| {
-            format!(
-                "package executable `{}` is not under a package exec directory",
-                path.display()
-            )
-        })?;
-    Ok(package.to_string())
 }
 
 fn package_executable_launcher_name(
     path: &Path,
     metadata_name: Option<String>,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<String, Box<dyn Error>> {
     let name = if let Some(name) = metadata_name {
         name
-    } else if path
-        .extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(is_package_executable_launcher_suffix)
+    } else if !dir_kind.is_bin()
+        && path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|ext| is_package_executable_launcher_suffix(ext, dir_kind))
     {
         path.file_stem()
             .and_then(OsStr::to_str)
@@ -339,16 +578,17 @@ fn package_executable_launcher_name(
     Ok(name)
 }
 
-#[cfg(unix)]
-fn is_package_executable_launcher_suffix(ext: &str) -> bool {
-    ext.eq_ignore_ascii_case("R")
-}
+fn is_package_executable_launcher_suffix(ext: &str, _dir_kind: PackageExecutableDirKind) -> bool {
+    if ext.eq_ignore_ascii_case("R") {
+        return true;
+    }
 
-#[cfg(not(unix))]
-fn is_package_executable_launcher_suffix(ext: &str) -> bool {
-    ext.eq_ignore_ascii_case("R")
-        || ext.eq_ignore_ascii_case("cmd")
-        || ext.eq_ignore_ascii_case("bat")
+    #[cfg(not(unix))]
+    if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") {
+        return true;
+    }
+
+    false
 }
 
 struct PackageLauncherMetadata {
@@ -631,7 +871,7 @@ fn ensure_launcher_dir_on_path(bin_dir: &Path) -> Result<(), Box<dyn Error>> {
 
     let bin_dir = fs::canonicalize(bin_dir).map_err(|e| {
         format!(
-            "cannot resolve launcher directory `{}`: {e}",
+            "cannot resolve executable install directory `{}`: {e}",
             bin_dir.display()
         )
     })?;
@@ -786,9 +1026,9 @@ Write-Output "Added $PathEntry to your user Path"
     {
         Ok(status) if status.success() => {}
         Ok(status) => eprintln!(
-            "Could not add launcher directory to the user Path; powershell exited with status {status}."
+            "Could not add executable install directory to the user Path; powershell exited with status {status}."
         ),
-        Err(e) => eprintln!("Could not add launcher directory to the user Path: {e}"),
+        Err(e) => eprintln!("Could not add executable install directory to the user Path: {e}"),
     }
 
     Ok(())
@@ -822,6 +1062,7 @@ fn ensure_launcher_dir_on_path(_bin_dir: &Path) -> Result<(), Box<dyn Error>> {
 fn resolved_runtime_path_prefix(
     library: &Path,
     rscript: &OsStr,
+    r_arch: Option<&str>,
 ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut entries = Vec::new();
 
@@ -833,20 +1074,55 @@ fn resolved_runtime_path_prefix(
         entries.push(parent.to_path_buf());
     }
 
-    for entry in fs::read_dir(library)
+    let mut packages = fs::read_dir(library)
         .map_err(|e| format!("cannot read resolved library `{}`: {e}", library.display()))?
-    {
-        let exec = entry?.path().join("exec");
-        if exec.is_dir() {
-            entries.push(exec);
-        }
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    packages.sort();
+    for package in packages {
+        entries.extend(package_runtime_path_dirs(&package, r_arch)?);
     }
 
     Ok(entries)
 }
 
-fn resolved_runtime_path(library: &Path, rscript: &OsStr) -> Result<OsString, Box<dyn Error>> {
-    let mut entries = resolved_runtime_path_prefix(library, rscript)?;
+fn package_runtime_path_dirs(
+    package_dir: &Path,
+    r_arch: Option<&str>,
+) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut entries = Vec::new();
+
+    let exec = package_dir.join("exec");
+    if exec.is_dir() {
+        entries.push(exec);
+    }
+
+    let bin = package_dir.join("bin");
+    if !bin.is_dir() {
+        return Ok(entries);
+    }
+
+    let mut arch_dirs = fs::read_dir(&bin)
+        .map_err(|e| format!("cannot read bin directory `{}`: {e}", bin.display()))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    arch_dirs.sort();
+    entries.extend(
+        arch_dirs
+            .into_iter()
+            .filter(|path| path.is_dir() && arch_dir_matches(path, r_arch)),
+    );
+    entries.push(bin.clone());
+
+    Ok(entries)
+}
+
+fn resolved_runtime_path(
+    library: &Path,
+    rscript: &OsStr,
+    r_arch: Option<&str>,
+) -> Result<OsString, Box<dyn Error>> {
+    let mut entries = resolved_runtime_path_prefix(library, rscript, r_arch)?;
     let current_path = env::var_os("PATH").unwrap_or_default();
     entries.extend(env::split_paths(&current_path));
     Ok(env::join_paths(entries)?)
@@ -856,6 +1132,8 @@ fn run_package_executable(
     rscript: &OsStr,
     library: &Path,
     executable: &PackageExecutable,
+    r_arch: Option<&str>,
+    r_arch_env: Option<&OsStr>,
     rscript_args: &[String],
     args: &[String],
 ) -> Result<i32, Box<dyn Error>> {
@@ -863,7 +1141,11 @@ fn run_package_executable(
     let mut cmd;
     match executable.launcher {
         PackageLauncher::Direct => {
-            if !executable.rscript_args.is_empty() || !rscript_args.is_empty() {
+            if !executable.rscript_args.is_empty()
+                || rscript_args
+                    .iter()
+                    .any(|arg| !is_rscript_arch_arg(arg.as_str()))
+            {
                 return Err(
                     "Rscript options are only supported for Rscript and Rapp package executables"
                         .into(),
@@ -898,7 +1180,10 @@ fn run_package_executable(
         .env("R_LIBS", library)
         .env("R_LIBS_USER", "NULL")
         .env("RAPP_LAUNCHER_NAME", &executable.name)
-        .env("PATH", resolved_runtime_path(library, rscript)?);
+        .env("PATH", resolved_runtime_path(library, rscript, r_arch)?);
+    if let Some(r_arch_env) = r_arch_env {
+        cmd.env("R_ARCH", r_arch_env);
+    }
 
     #[cfg(unix)]
     {
@@ -933,28 +1218,36 @@ enum PackageLauncher {
     RappFrontend,
 }
 
+const EXECUTABLE_PREFIX_LIMIT_BYTES: u64 = 4096;
+
 fn package_executable_launcher_kind(
     executable: &Path,
+    dir_kind: PackageExecutableDirKind,
 ) -> Result<Option<PackageLauncher>, Box<dyn Error>> {
-    let file = File::open(executable)
+    let mut file = File::open(executable)
         .map_err(|e| format!("cannot read executable `{}`: {e}", executable.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut shebang = Vec::new();
-    reader.read_until(b'\n', &mut shebang)?;
+    let mut prefix = Vec::new();
+    file.by_ref()
+        .take(EXECUTABLE_PREFIX_LIMIT_BYTES)
+        .read_to_end(&mut prefix)?;
+    let shebang = prefix
+        .split(|byte| *byte == b'\n')
+        .next()
+        .unwrap_or(prefix.as_slice());
 
     if !shebang.starts_with(b"#!") {
-        return if is_direct_package_script_without_shebang(executable)? {
+        return if is_direct_package_script_without_shebang(executable, dir_kind)? {
             Ok(Some(PackageLauncher::Direct))
         } else {
             Ok(None)
         };
     }
 
-    if shebang_mentions(&shebang, b"Rapp") {
+    if shebang_mentions(shebang, b"Rapp") {
         Ok(Some(PackageLauncher::Rapp))
-    } else if shebang_mentions(&shebang, b"Rscript") {
+    } else if shebang_mentions(shebang, b"Rscript") {
         Ok(Some(PackageLauncher::Rscript))
-    } else if is_direct_package_script(executable)? {
+    } else if is_direct_package_script(executable, dir_kind)? {
         Ok(Some(PackageLauncher::Direct))
     } else {
         Ok(None)
@@ -962,34 +1255,126 @@ fn package_executable_launcher_kind(
 }
 
 #[cfg(unix)]
-fn is_direct_package_script_without_shebang(_path: &Path) -> Result<bool, Box<dyn Error>> {
+fn is_direct_package_script_without_shebang(
+    _path: &Path,
+    _dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
     Ok(false)
 }
 
 #[cfg(not(unix))]
-fn is_direct_package_script_without_shebang(path: &Path) -> Result<bool, Box<dyn Error>> {
-    is_direct_package_script(path)
+fn is_direct_package_script_without_shebang(
+    path: &Path,
+    dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
+    is_direct_package_script(path, dir_kind)
 }
 
 #[cfg(unix)]
-fn is_direct_package_script(path: &Path) -> Result<bool, Box<dyn Error>> {
+fn is_direct_package_script(
+    path: &Path,
+    _dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 
     Ok(fs::metadata(path)?.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
-fn is_direct_package_script(path: &Path) -> Result<bool, Box<dyn Error>> {
+fn is_direct_package_script(
+    path: &Path,
+    dir_kind: PackageExecutableDirKind,
+) -> Result<bool, Box<dyn Error>> {
     let Some(ext) = path.extension().and_then(OsStr::to_str) else {
         return Ok(false);
     };
-    Ok(ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd"))
+    Ok(ext.eq_ignore_ascii_case("bat")
+        || ext.eq_ignore_ascii_case("cmd")
+        || (dir_kind.is_bin() && ext.eq_ignore_ascii_case("exe")))
 }
 
 fn shebang_mentions(shebang: &[u8], name: &[u8]) -> bool {
     shebang
         .split(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
         .any(|word| word == name)
+}
+
+fn installed_executable_target_path(bin_dir: &Path, executable: &PackageExecutable) -> PathBuf {
+    #[cfg(not(unix))]
+    {
+        if executable.dir_kind.is_bin()
+            && executable
+                .path
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat")
+                })
+        {
+            return bin_dir.join(&executable.name);
+        }
+    }
+    launcher_target_path(bin_dir, &executable.name)
+}
+
+fn reject_colliding_installed_target_paths(
+    bin_dir: &Path,
+    executables: &[PackageExecutable],
+) -> Result<(), Box<dyn Error>> {
+    for (index, executable) in executables.iter().enumerate() {
+        let target = installed_executable_target_path(bin_dir, executable);
+        if executables[..index]
+            .iter()
+            .any(|known| installed_executable_target_path(bin_dir, known) == target)
+        {
+            return Err(format!(
+                "multiple package executables map to installed executable path `{}`",
+                target.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn reject_existing_installed_target_paths(
+    bin_dir: &Path,
+    executables: &[PackageExecutable],
+    force: bool,
+) -> Result<(), Box<dyn Error>> {
+    if force {
+        return Ok(());
+    }
+
+    for executable in executables {
+        let target = installed_executable_target_path(bin_dir, executable);
+        if path_exists(&target) {
+            return Err(format!(
+                "installed executable path `{}` already exists; pass --force to overwrite it",
+                target.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn path_exists(path: &Path) -> bool {
+    path.exists() || fs::symlink_metadata(path).is_ok()
+}
+
+fn write_installed_launcher(target: &Path, contents: String) -> Result<(), Box<dyn Error>> {
+    if path_exists(target) {
+        fs::remove_file(target).map_err(|e| {
+            format!(
+                "failed to remove existing installed executable `{}`: {e}",
+                target.display()
+            )
+        })?;
+    }
+    fs::write(target, contents)
+        .map_err(|e| format!("failed to write launcher `{}`: {e}", target.display()))?;
+    make_executable(target)
 }
 
 fn launcher_target_path(bin_dir: &Path, name: &str) -> PathBuf {
@@ -1071,6 +1456,7 @@ fn installed_launcher_contents(
     library: &Path,
     executable: &PackageExecutable,
     path_prefix: &[PathBuf],
+    r_arch_env: Option<&OsStr>,
     recovery_command: &str,
 ) -> Result<String, Box<dyn Error>> {
     let mut lines = vec![
@@ -1078,11 +1464,11 @@ fn installed_launcher_contents(
         "# Generated by `ir tool install`. Do not edit by hand.".to_string(),
         format!("IR_LIBRARY={}", sh_quote_path(library)?),
         "if [ ! -d \"$IR_LIBRARY\" ]; then".to_string(),
-        "  printf '%s\\n' \"ir: missing ir cache library: $IR_LIBRARY\" >&2".to_string(),
+        "  printf '%s\\n' \"ir: missing ir installed tool library: $IR_LIBRARY\" >&2".to_string(),
         format!(
             "  printf '%s\\n' {} >&2",
             sh_quote_str(&format!(
-                "ir: run `{recovery_command}` to recreate this launcher after `ir cache clean`."
+                "ir: run `{recovery_command}` to recreate this tool."
             ))
         ),
         "  exit 1".to_string(),
@@ -1094,6 +1480,9 @@ fn installed_launcher_contents(
             sh_quote_str(&executable.name)
         ),
     ];
+    if let Some(r_arch_env) = r_arch_env {
+        lines.push(format!("export R_ARCH={}", sh_quote_os(r_arch_env)));
+    }
 
     if !path_prefix.is_empty() {
         let prefix = path_prefix
@@ -1137,6 +1526,7 @@ fn installed_launcher_contents(
     library: &Path,
     executable: &PackageExecutable,
     path_prefix: &[PathBuf],
+    r_arch_env: Option<&OsStr>,
     recovery_command: &str,
 ) -> Result<String, Box<dyn Error>> {
     let mut cmd = Vec::new();
@@ -1170,6 +1560,9 @@ fn installed_launcher_contents(
         r#"set "R_LIBS_USER=NULL""#.to_string(),
         format!(r#"set "RAPP_LAUNCHER_NAME={}""#, executable.name),
     ];
+    if let Some(r_arch_env) = r_arch_env {
+        env_lines.push(format!(r#"set "R_ARCH={}""#, r_arch_env.to_string_lossy()));
+    }
     if let Some(path_assignment) = cmd_path_prefix_assignment(path_prefix)? {
         env_lines.push(path_assignment);
     }
@@ -1180,8 +1573,8 @@ fn installed_launcher_contents(
          setlocal\r\n\
          set \"IR_LIBRARY={}\"\r\n\
          if not exist \"%IR_LIBRARY%\" (\r\n\
-         echo ir: missing ir cache library: %IR_LIBRARY% 1>&2\r\n\
-         echo ir: run `{}` to recreate this launcher after `ir cache clean`. 1>&2\r\n\
+         echo ir: missing ir installed tool library: %IR_LIBRARY% 1>&2\r\n\
+         echo ir: run `{}` to recreate this tool. 1>&2\r\n\
          exit /b 1\r\n\
          )\r\n\
          {}\r\n\

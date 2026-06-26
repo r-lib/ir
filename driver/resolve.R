@@ -113,7 +113,8 @@ ir_input_key <- function(deps,
                          rversion      = getRversion(),
                          platform      = R.version$platform,
                          exclude_newer = NULL,
-                         quarto        = FALSE) {
+                         quarto        = FALSE,
+                         library_root  = NULL) {
   source_key <- if (is.null(exclude_newer))
     "latest"
   else
@@ -125,6 +126,8 @@ ir_input_key <- function(deps,
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
                              if (quarto) "quarto" else NULL,
+                             if (!is.null(library_root))
+                               paste0("library-root: ", library_root) else NULL,
                              as.character(rversion),
                              platform),
                            collapse = "\n"))
@@ -201,6 +204,7 @@ ir_install_specs <- function(res) {
 
 ir_resolve_main <- function() {
   cache_dir <- ir_cache_dir()
+  library_root <- ir_env_optional("IR_LIBRARY_ROOT")
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
@@ -257,7 +261,8 @@ ir_resolve_main <- function() {
   if (is.null(marker) && cache_resolution) {
     marker <- file.path(cache_dir, "resolutions",
                         ir_input_key(deps, exclude_newer = exclude_newer,
-                                     quarto = quarto))
+                                     quarto = quarto,
+                                     library_root = library_root))
   }
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
   if (!is.null(package_result_file) &&
@@ -340,7 +345,8 @@ ir_resolve_main <- function() {
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
-  library_path <- file.path(cache_dir, "libraries", secretbase::sha256(key))
+  if (is.null(library_root)) library_root <- cache_dir
+  library_path <- file.path(library_root, "libraries", secretbase::sha256(key))
 
   ## 4. Materialise the symlinked library via renv::use()
   # Skip when the library already holds every resolved package: repeat runs of

@@ -27,9 +27,11 @@ pub(crate) struct CachedResolution {
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
+    rscript_args: &[String],
     dependencies: &[String],
     exclude_newer: Option<&str>,
     quarto_render: bool,
+    library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
     if !dependencies
         .iter()
@@ -53,6 +55,8 @@ pub(crate) fn paths(
         exclude_newer,
         quarto_render,
         &rscript_identity,
+        rscript_args,
+        library_root,
     ));
     let marker_name = marker
         .file_name()
@@ -123,6 +127,8 @@ fn resolution_cache_key(
     exclude_newer: Option<&str>,
     quarto_render: bool,
     rscript_identity: &str,
+    rscript_args: &[String],
+    library_root: Option<&Path>,
 ) -> String {
     let source_key = exclude_newer
         .map(|date| format!("exclude-newer: {date}"))
@@ -134,6 +140,12 @@ fn resolution_cache_key(
         parts.push("quarto".to_string());
     }
     parts.push(format!("rscript: {rscript_identity}"));
+    for arg in rscript_args {
+        parts.push(format!("rscript-arg: {arg}"));
+    }
+    if let Some(library_root) = library_root {
+        parts.push(format!("library-root: {}", library_root.display()));
+    }
 
     sha256_fields(&parts)
 }
@@ -406,26 +418,89 @@ mod tests {
 
         env::set_var("R_ARCH", "x64");
         env::remove_var("R_HOME");
-        let x64_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let x64_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         env::set_var("R_ARCH", "i386");
-        let i386_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let i386_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         env::set_var("R_ARCH", "x64");
         env::set_var("R_HOME", dir.join("R-home"));
-        let r_home_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let r_home_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         assert_ne!(x64_marker, i386_marker);
         assert_ne!(x64_marker, r_home_marker);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn library_root_changes_resolution_marker() {
+        let dir = unique_dir("ir-resolve-cache-library-root-unit");
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let rscript = dummy_rscript(&dir);
+        let dependencies = vec!["cli".to_string()];
+
+        let cache_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            Some("2026-06-01"),
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
+        let store_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            Some("2026-06-01"),
+            false,
+            Some(&dir.join("tool-store")),
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
+
+        assert_ne!(cache_marker, store_marker);
+        assert!(store_marker.starts_with(cache_dir.join("resolutions")));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -451,9 +526,11 @@ mod tests {
                 paths(
                     &cache_dir,
                     rscript.as_os_str(),
+                    &[],
                     &dependencies,
                     Some("2026-06-01"),
-                    false
+                    false,
+                    None
                 )
                 .unwrap()
                 .is_none(),
@@ -477,9 +554,11 @@ mod tests {
                 paths(
                     &cache_dir,
                     rscript.as_os_str(),
+                    &[],
                     &dependencies,
                     Some("2026-06-01"),
-                    false
+                    false,
+                    None
                 )
                 .unwrap()
                 .is_some(),

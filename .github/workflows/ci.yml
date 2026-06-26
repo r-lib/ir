@@ -108,6 +108,8 @@ jobs:
       - name: Install rig and non-default R (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # Keep the GitHub setup actions above for Rust/Python/Quarto/default R
           # caching and environment setup. Use this script here only for rig and

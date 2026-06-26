@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn command_on_path(command: &str) -> Option<OsString> {
@@ -38,11 +39,23 @@ fn executable_file(path: &Path) -> bool {
 static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn ir() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ir"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
+    command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
+    command
 }
 
 pub(crate) fn rx() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_rx"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rx"));
+    command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
+    command
+}
+
+fn test_tool_store_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let (dir, _) = unique_dir_in(&std::env::temp_dir(), "ir-test-tool-store");
+        dir
+    })
 }
 
 pub(crate) fn ir_bin_name() -> String {
@@ -206,6 +219,35 @@ pub(crate) fn copy_dir_files(source: &Path, destination: &Path) {
                     "failed to copy fixture {} to {}: {e}",
                     path.display(),
                     destination.display()
+                )
+            });
+        }
+    }
+}
+
+pub(crate) fn copy_dir_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap_or_else(|e| {
+        panic!(
+            "failed to create fixture copy {}: {e}",
+            destination.display()
+        )
+    });
+    for entry in fs::read_dir(source)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", source.display()))
+    {
+        let entry = entry.unwrap_or_else(|e| {
+            panic!("failed to read fixture entry in {}: {e}", source.display())
+        });
+        let path = entry.path();
+        let target = destination.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_tree(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap_or_else(|e| {
+                panic!(
+                    "failed to copy fixture {} to {}: {e}",
+                    path.display(),
+                    target.display()
                 )
             });
         }

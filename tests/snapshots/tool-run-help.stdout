@@ -12,6 +12,11 @@ Options:
       --rscript <RSCRIPT>  Select the Rscript executable
   -h, --help               Print help
 
+Tool discovery:
+  Supported executables are discovered from installed package exec/, bin/,
+  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,
+  Rapp, and direct executable scripts; bin/ entries are run as-is.
+
 Examples:
   ir tool run btw
   ir tool run btw --help

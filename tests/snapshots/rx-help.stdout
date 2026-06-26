@@ -17,6 +17,9 @@ Mental model:
   rx is the package-executable frontend for `ir tool run`.
   It resolves the provider package plus any --with dependencies into an
   isolated cached R library, then launches the selected executable.
+  Package executables are discovered from installed package exec/, bin/,
+  and architecture-specific bin/<arch>/ directories. bin/ entries are run
+  as-is.
   The tool sees the resolved package library plus base, site, and system
   libraries; ambient user R libraries are not used.
 

@@ -1,0 +1,7 @@
+Package: irrustbin
+Version: 0.0.1
+Title: Rust CLI Package Fixture
+Description: Test fixture for package bin executables.
+Authors@R: person("IR", "Fixture", email = "ir@example.com", role = c("aut", "cre"))
+License: MIT
+Encoding: UTF-8

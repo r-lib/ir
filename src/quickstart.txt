@@ -47,15 +47,16 @@ Isolation:
   `rx` and `ir tool run` are isolated package-executable runs.
 
 Package tools:
-  Some R packages ship executables in exec/. Use `rx` or `ir tool run` to run
-  those tools without installing the package, creating a project library, or
-  installing a launcher first.
+  Some R packages ship executables in exec/, bin/, or bin/<arch>/. Use `rx`
+  or `ir tool run` to run those tools without installing the package, creating
+  a project library, or installing them first.
   Tool runs resolve the provider package plus any `--with` dependencies into an
   isolated cached R library, then launch the selected executable. Ambient user
   R libraries are not used.
   Use tools for ad hoc package frontends. Use `ir tool install` for repeated
-  shell use. For durable analytical artifacts, prefer `ir run` or `ir render`
-  with frontmatter.
+  shell use; installed tool libraries live outside the cache and survive
+  `ir cache clean`. For durable analytical artifacts, prefer `ir run` or
+  `ir render` with frontmatter.
 
 Workflow:
   Use `--with PKG` while exploring; promote stable dependencies to frontmatter.

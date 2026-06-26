@@ -204,13 +204,40 @@ function Get-RigWindowsArch {
     }
 }
 
+function Get-GitHubApiHeaders {
+    $token = $env:GITHUB_TOKEN
+    if (-not $token) {
+        $token = $env:GITHUB_PAT
+    }
+    if (-not $token) {
+        return $null
+    }
+
+    return @{
+        "Accept" = "application/vnd.github+json"
+        "Authorization" = "Bearer $token"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+}
+
 function Get-LatestRigReleaseTag {
+    $headers = Get-GitHubApiHeaders
     if ($DryRun) {
-        Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi"
+        if ($headers) {
+            Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi -Headers <github-token>"
+        }
+        else {
+            Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi"
+        }
         return "<latest-rig-tag>"
     }
 
-    $release = Invoke-RestMethod -Uri $RigLatestReleaseApi
+    if ($headers) {
+        $release = Invoke-RestMethod -Uri $RigLatestReleaseApi -Headers $headers
+    }
+    else {
+        $release = Invoke-RestMethod -Uri $RigLatestReleaseApi
+    }
     $tag = [string]$release.tag_name
     if (-not $tag) {
         throw "could not resolve latest rig release tag"
