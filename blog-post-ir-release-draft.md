@@ -191,36 +191,6 @@ Together, these options let a file carry the important parts of its
 runtime contract without requiring a surrounding project, but most files
 should only need the date.
 
-## Python environments too
-
-Some R scripts and Quarto documents also need Python. `ir` can resolve a
-Python environment from metadata before launching the script:
-
-```r
-#!/usr/bin/env -S ir run
-#| packages:
-#|   - reticulate
-#| python-packages:
-#|   - pandas
-#|   - matplotlib
-#| python-version: "3.11"
-#| exclude-newer: "2026-06-01"
-
-library(reticulate)
-pd <- import("pandas")
-```
-
-`ir` creates the environment with reticulate's uv-backed environment
-helper, sets `RETICULATE_PYTHON`, and activates the environment for
-subprocesses. For Quarto, put Python metadata under the document's
-`ir:` key; `ir` passes the resolved interpreter to Quarto with
-`QUARTO_PYTHON`.
-
-When Python metadata is present, `exclude-newer` is also used for Python
-environment resolution unless `python-exclude-newer` is set. Use
-`python-exclude-newer` when Python packages should use a different
-snapshot date from R packages.
-
 ## Quarto documents too
 
 `ir` uses the same metadata model for Quarto documents. Put package
@@ -251,6 +221,72 @@ date-only `exclude-newer`, it sets [`QUARTO_R`](
 ) so Quarto renders with that R. `ir` also seeds `rmarkdown`
 automatically for knitr-based renders unless you declare it yourself.
 
+## Python environments too
+
+Some R scripts and Quarto documents also need Python. In an R script,
+declare the R packages and Python requirements in the same metadata
+block:
+
+```r
+#!/usr/bin/env -S ir run
+#| packages:
+#|   - reticulate
+#| python-packages:
+#|   - pandas
+#|   - matplotlib
+#| python-version: "3.11"
+#| exclude-newer: "2026-06-01"
+
+library(reticulate)
+pd <- import("pandas")
+```
+
+`ir` creates the environment with reticulate's uv-backed environment
+helper, sets `RETICULATE_PYTHON`, and activates the environment for
+subprocesses. Declare `reticulate` under `packages` when the R script
+loads reticulate.
+
+For Quarto, put Python metadata under the document's `ir:` key. A knitr
+document that uses reticulate can mix R and Python requirements:
+
+```yaml
+---
+title: My report
+ir:
+  packages:
+    - reticulate
+  python-packages:
+    - pandas
+  exclude-newer: 2025-01-01
+---
+```
+
+For a Quarto document that uses the Jupyter engine, the `ir:` metadata
+can contain only Python requirements:
+
+```yaml
+---
+title: My notebook
+jupyter: python3
+ir:
+  python-packages:
+    - matplotlib
+    - pandas
+  python-version: "3.11"
+---
+```
+
+For Quarto renders, `ir` injects `jupyter` into the Python environment,
+passes the resolved interpreter to Quarto with `QUARTO_PYTHON`, and also
+sets `RETICULATE_PYTHON` so documents that use reticulate see the same
+interpreter. `ir` does not add `reticulate` to the R package library
+just because Python metadata is present; declare it under `ir.packages`
+when R code calls reticulate.
+
+When Python metadata is present, `exclude-newer` is also used for Python
+environment resolution unless `python-exclude-newer` is set. Use
+`python-exclude-newer` when Python packages should use a different
+snapshot date from R packages.
 
 ## Install `ir`
 
