@@ -197,9 +197,7 @@ fn executable_chunk_start(line: &str) -> Option<(String, Fence)> {
     let language = &inside[..language_end];
     let suffix = &inside[language_end..];
     if !matches!(suffix.chars().next(), Some('}' | ',')) {
-        let Some(ch) = suffix.chars().next() else {
-            return None;
-        };
+        let ch = suffix.chars().next()?;
         if !ch.is_ascii_whitespace() {
             return None;
         }
