@@ -102,6 +102,8 @@ fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
 }
 
 fn quarto_reticulate_required(script: &Path, document: &str) -> Result<bool, Box<dyn Error>> {
+    // This heuristic intentionally considers only fenced executable chunks.
+    // Inline Python expressions are undefined here, not a reticulate signal.
     let chunks = chunk_languages(document);
     if !chunks.has_python {
         return Ok(false);
