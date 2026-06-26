@@ -91,5 +91,4 @@ Declare `rmarkdown` yourself under `ir.packages` - directly (for example, `rmark
 Knitr-backed Quarto documents with Python chunks can use `reticulate` for Python execution.
 `ir` detects local Python chunks in `.Rmd` files and in `.qmd` files that select knitr or contain both R and Python chunks, then appends `reticulate` when the resolved package set does not already provide it.
 
-Jupyter documents are not reticulate cases.
-When a Jupyter render should run in an `ir`-managed Python environment, declare `ir.python-packages` or `ir.python-version`; `ir render` then injects `jupyter` into that Python environment.
+For Jupyter renders, declare `ir.python-packages` or `ir.python-version` when `ir render` should create the Python environment and inject `jupyter`.
