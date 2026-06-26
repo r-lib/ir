@@ -451,20 +451,21 @@ ul.task-list li input[type="checkbox"] {
 
 <span style="color: #5555FF; font-weight: bold;">Commands:</span>
   <span style="color: #00BBBB; font-weight: bold;">run</span>      Run an executable provided by an R package
-  <span style="color: #00BBBB; font-weight: bold;">install</span>  Install package executable launchers
+  <span style="color: #00BBBB; font-weight: bold;">install</span>  Install package executables
   <span style="color: #00BBBB; font-weight: bold;">help</span>     Print this message or the help of the given subcommand(s)
 
 <span style="color: #5555FF; font-weight: bold;">Options:</span>
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>  Print help
 
 <span style="color: #5555FF; font-weight: bold;">Tools:</span>
-  A tool is a supported executable in an R package's exec/ directory.
-  Rscript and Rapp entries use the selected Rscript; direct executable scripts
-  run as package scripts.
+  A tool is a supported executable in an R package's exec/, bin/, or
+  architecture-specific bin/&lt;arch&gt;/ directory. exec/ supports Rscript, Rapp,
+  and direct executable scripts; bin/ entries are run as-is.
   `ir tool run` resolves the package plus any --with dependencies into an
   isolated library, then runs the selected executable. The user R library is not
   used.
-  `ir tool install` writes launchers that recreate the resolved tool runtime.</code></pre>
+  `ir tool install` materializes a durable package library, then writes
+  launchers backed by that library.</code></pre>
 
 </div>
 </div>
@@ -487,6 +488,11 @@ ul.task-list li input[type="checkbox"] {
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>  Select the Rscript executable
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>               Print help
 
+<span style="color: #5555FF; font-weight: bold;">Tool discovery:</span>
+  Supported executables are discovered from installed package exec/, bin/,
+  and architecture-specific bin/&lt;arch&gt;/ directories. exec/ supports Rscript,
+  Rapp, and direct executable scripts; bin/ entries are run as-is.
+
 <span style="color: #5555FF; font-weight: bold;">Examples:</span>
   ir tool run btw
   ir tool run btw --help
@@ -503,7 +509,7 @@ ul.task-list li input[type="checkbox"] {
 <h2 class="anchored" data-anchor-id="ir-tool-install"><code>ir tool install</code></h2>
 <div class="cell">
 <div class="cell-output-display">
-<pre class="ir-cli-help"><code>Install package executable launchers
+<pre class="ir-cli-help"><code>Install package executables
 
 <span style="color: #5555FF; font-weight: bold;">Usage:</span> <span style="color: #00BBBB; font-weight: bold;">ir tool install</span> <span style="color: #555555;">[OPTIONS]</span> <span style="color: #555555;">&lt;PKG_REF&gt;</span>
 
@@ -511,12 +517,22 @@ ul.task-list li input[type="checkbox"] {
   <span style="color: #555555;">&lt;PKG_REF&gt;</span>  Package ref that provides executables to install
 
 <span style="color: #5555FF; font-weight: bold;">Options:</span>
-      <span style="color: #00BBBB; font-weight: bold;">--with</span><span style="color: #555555;"> &lt;PKG&gt;</span>         Add a dependency for installed launchers; may be repeated
-      <span style="color: #00BBBB; font-weight: bold;">--r-version</span><span style="color: #555555;"> &lt;SPEC&gt;</span>   Select the R version for installed launchers with rig
+      <span style="color: #00BBBB; font-weight: bold;">--with</span><span style="color: #555555;"> &lt;PKG&gt;</span>         Add a dependency for installed tools; may be repeated
+      <span style="color: #00BBBB; font-weight: bold;">--r-version</span><span style="color: #555555;"> &lt;SPEC&gt;</span>   Select the R version for installed tools with rig
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>  Select the Rscript executable
-      <span style="color: #00BBBB; font-weight: bold;">--bin-dir</span><span style="color: #555555;"> &lt;DIR&gt;</span>      Directory where launchers are written
-      <span style="color: #00BBBB; font-weight: bold;">--force</span>              Overwrite an existing launcher path
+      <span style="color: #00BBBB; font-weight: bold;">--bin-dir</span><span style="color: #555555;"> &lt;DIR&gt;</span>      Directory where executables are installed
+      <span style="color: #00BBBB; font-weight: bold;">--force</span>              Overwrite an existing installed executable path
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>               Print help
+
+<span style="color: #5555FF; font-weight: bold;">Tool discovery:</span>
+  Supported executables are discovered from installed package exec/, bin/,
+  and architecture-specific bin/&lt;arch&gt;/ directories. exec/ supports Rscript,
+  Rapp, and direct executable scripts; bin/ entries are run as-is.
+
+<span style="color: #5555FF; font-weight: bold;">Install storage:</span>
+  `ir tool install` materializes the package library under the durable tool
+  store, configurable with IR_TOOL_STORE_DIR, then installs command names
+  into --bin-dir as launchers backed by that library.
 
 <span style="color: #5555FF; font-weight: bold;">Examples:</span>
   ir tool install btw

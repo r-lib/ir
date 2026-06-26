@@ -389,9 +389,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Select R with <code>--rscript</code>, <code>--r-version</code>, environment variables, frontmatter, or date-only <code>exclude-newer</code>.</li>
 <li>Evaluate inline expressions with <code>ir run -e</code> and add command-line packages with <code>--with</code>.</li>
 <li>Render Quarto documents and Quarto-formatted R scripts through <code>ir render</code>, using the same package metadata model with <code>rmarkdown</code> seeded automatically for the knitr engine.</li>
-<li>Run executables provided by R packages with <code>rx</code> or <code>ir tool run</code>.</li>
-<li>Install persistent launchers for package executables with <code>ir tool install</code>.</li>
-<li>Inspect and clear the cache with <code>ir cache dir</code> and <code>ir cache clean</code>.</li>
+<li>Run executables from R package <code>exec/</code>, <code>bin/</code>, or <code>bin/&lt;arch&gt;/</code> directories with <code>rx</code> or <code>ir tool run</code>.</li>
+<li>Install persistent launchers for package tools with <code>ir tool install</code>; installed tool libraries live in the durable tool store.</li>
+<li>Inspect and clear run/render cache state with <code>ir cache dir</code> and <code>ir cache clean</code>.</li>
 <li>Configure cache, Rscript, Quarto, and launcher destinations with environment variables.</li>
 <li>Bootstrap resolver tooling (<code>pak</code>, <code>renv</code>, <code>secretbase</code>) automatically on first use, with no manual install.</li>
 </ul>

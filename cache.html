@@ -330,17 +330,17 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p><code>ir</code> caches resolver tooling, dependency resolutions, and materialised package libraries.</p>
-<p>Rust owns the cache root and passes it to the resolver R session as <code>IR_CACHE_DIR</code>. This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.</p>
+<p><code>ir</code> caches resolver tooling, dependency resolutions, and materialised package libraries for runs, renders, and ad hoc package-tool runs.</p>
+<p>Rust owns the cache root and passes it to the resolver R session as <code>IR_CACHE_DIR</code>. This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree. Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of <code>IR_CACHE_DIR</code>.</p>
 <p>Resolution requests for ordinary registry refs are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as <code>R_ARCH</code> and <code>R_HOME</code>. If the same request was already resolved, <code>ir</code> reuses the cached library before launching the resolver R session, so pak is not invoked again. Latest resolution records a Unix timestamp inside the cache marker; markers older than <code>IR_LATEST_RESOLUTION_MAX_AGE_SECONDS</code> are refreshed in place, so newly published versions are picked up without accumulating one marker per refresh window. The default max age is 86400 seconds (24 hours). Snapshot resolution uses the <code>exclude-newer</code> date in the key because that repository state is immutable. Python environments use separate cache markers that record the resolved Python executable path. If the recorded Python path no longer exists, <code>ir</code> resolves the Python environment again.</p>
 <p>Non-standard refs skip the resolution-marker cache. Each run asks pak to resolve them again, so branch heads, URLs, and local paths are not hidden behind a warm resolution marker.</p>
-<p>Materialised libraries are content-addressed by the install refs passed to <code>renv::use()</code>, R version, and platform. Scripts or tools that resolve to the same install refs share one library. Source refs are still passed to <code>renv::use()</code> on each run so renv can refresh source installs; renv may reuse its own package cache when the source has not changed.</p>
+<p>Cache-backed materialised libraries are content-addressed by the install refs passed to <code>renv::use()</code>, R version, and platform. Scripts or tools that resolve to the same install refs share one library. Source refs are still passed to <code>renv::use()</code> on each run so renv can refresh source installs; renv may reuse its own package cache when the source has not changed. Installed tool libraries use the same content-addressing under <code>IR_TOOL_STORE_DIR</code>.</p>
 <section id="commands" class="level2">
 <h2 class="anchored" data-anchor-id="commands">Commands</h2>
 <pre class="console"><code>$ ir cache dir
 $ ir cache clean
 $ ir cache clean --force</code></pre>
-<p><code>ir cache dir</code> prints the cache root. <code>ir cache clean</code> removes the whole <code>ir</code> cache, including materialised libraries and resolution markers. <code>--force</code> is accepted and has the same behavior.</p>
+<p><code>ir cache dir</code> prints the cache root. <code>ir cache clean</code> removes the whole <code>ir</code> cache, including resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries. It does not remove installed tool libraries under <code>IR_TOOL_STORE_DIR</code>. <code>--force</code> is accepted and has the same behavior.</p>
 
 
 </section>
