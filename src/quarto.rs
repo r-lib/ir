@@ -193,9 +193,7 @@ fn executable_chunk_start(line: &str) -> Option<(String, usize)> {
     if !matches!(suffix.chars().next(), Some('}' | ' ' | ',')) {
         return None;
     }
-    let Some(close) = suffix.rfind('}') else {
-        return None;
-    };
+    let close = suffix.rfind('}')?;
     if !suffix[(close + 1)..].trim().is_empty() {
         return None;
     }

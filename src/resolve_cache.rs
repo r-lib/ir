@@ -24,14 +24,19 @@ pub(crate) struct CachedResolution {
     pub(crate) primary_package: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct QuartoCacheFlags {
+    pub(crate) render: bool,
+    pub(crate) reticulate: bool,
+}
+
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
     rscript_args: &[String],
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto_render: bool,
-    quarto_reticulate: bool,
+    quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
     if !dependencies
@@ -54,8 +59,7 @@ pub(crate) fn paths(
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
-        quarto_render,
-        quarto_reticulate,
+        quarto,
         &rscript_identity,
         rscript_args,
         library_root,
@@ -127,8 +131,7 @@ pub(crate) fn read(
 fn resolution_cache_key(
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto_render: bool,
-    quarto_reticulate: bool,
+    quarto: QuartoCacheFlags,
     rscript_identity: &str,
     rscript_args: &[String],
     library_root: Option<&Path>,
@@ -139,10 +142,10 @@ fn resolution_cache_key(
     let mut parts = dependencies.to_vec();
     parts.sort();
     parts.push(source_key);
-    if quarto_render {
+    if quarto.render {
         parts.push("quarto".to_string());
     }
-    if quarto_reticulate {
+    if quarto.reticulate {
         parts.push("quarto-reticulate".to_string());
     }
     parts.push(format!("rscript: {rscript_identity}"));
@@ -409,6 +412,13 @@ mod tests {
         path
     }
 
+    fn default_quarto_flags() -> QuartoCacheFlags {
+        QuartoCacheFlags {
+            render: false,
+            reticulate: false,
+        }
+    }
+
     #[test]
     fn runtime_selection_env_changes_resolution_marker() {
         let _guard = ENV_LOCK
@@ -430,8 +440,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            false,
-            false,
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -445,8 +454,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            false,
-            false,
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -461,8 +469,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            false,
-            false,
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -489,8 +496,7 @@ mod tests {
             &[],
             &dependencies,
             Some("2026-06-01"),
-            false,
-            false,
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -502,8 +508,7 @@ mod tests {
             &[],
             &dependencies,
             Some("2026-06-01"),
-            false,
-            false,
+            default_quarto_flags(),
             Some(&dir.join("tool-store")),
         )
         .unwrap()
@@ -540,8 +545,7 @@ mod tests {
                     &[],
                     &dependencies,
                     Some("2026-06-01"),
-                    false,
-                    false,
+                    default_quarto_flags(),
                     None
                 )
                 .unwrap()
@@ -569,8 +573,7 @@ mod tests {
                     &[],
                     &dependencies,
                     Some("2026-06-01"),
-                    false,
-                    false,
+                    default_quarto_flags(),
                     None
                 )
                 .unwrap()

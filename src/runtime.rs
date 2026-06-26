@@ -354,8 +354,10 @@ fn resolve_library_inner(
         rscript_args,
         &dependencies,
         spec.exclude_newer.as_deref(),
-        spec.quarto_render,
-        spec.quarto_reticulate,
+        resolve_cache::QuartoCacheFlags {
+            render: spec.quarto_render,
+            reticulate: spec.quarto_reticulate,
+        },
         library_root,
     )?;
     let cached_library = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?;
