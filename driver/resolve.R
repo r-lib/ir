@@ -114,18 +114,21 @@ ir_input_key <- function(deps,
                          platform      = R.version$platform,
                          exclude_newer = NULL,
                          quarto        = FALSE,
+                         quarto_reticulate = FALSE,
                          library_root  = NULL) {
   source_key <- if (is.null(exclude_newer))
     "latest"
   else
     sprintf("exclude-newer: %s", exclude_newer)
 
-  # `quarto` folds in only when TRUE: a Quarto render may inject rmarkdown, so
-  # its resolved set differs from a plain run of the same deps. Omitting the
-  # marker for non-Quarto runs keeps their existing keys (and cache) stable.
+  # `quarto` flags fold in only when TRUE: a Quarto render may inject rmarkdown
+  # or reticulate, so its resolved set differs from a plain run of the same deps.
+  # Omitting the marker for non-Quarto runs keeps their existing keys stable.
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
                              if (quarto) "quarto" else NULL,
+                             if (quarto_reticulate)
+                               "quarto-reticulate" else NULL,
                              if (!is.null(library_root))
                                paste0("library-root: ", library_root) else NULL,
                              as.character(rversion),
@@ -249,6 +252,7 @@ ir_resolve_main <- function() {
   # IR_QUARTO_RENDER so the resolver can inject it when the resolved set does not
   # already provide it. (Distinct from IR_QUARTO, the quarto executable path.)
   quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
+  quarto_reticulate <- !is.null(ir_env_optional("IR_QUARTO_RETICULATE"))
 
   ## 1b. Resolution cache: Rust checks this marker before launching this
   ## resolver. Keep the in-resolver check as the fallback for direct driver runs
@@ -262,6 +266,7 @@ ir_resolve_main <- function() {
     marker <- file.path(cache_dir, "resolutions",
                         ir_input_key(deps, exclude_newer = exclude_newer,
                                      quarto = quarto,
+                                     quarto_reticulate = quarto_reticulate,
                                      library_root = library_root))
   }
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
@@ -321,6 +326,13 @@ ir_resolve_main <- function() {
     have_rmarkdown <- !is.null(res) && "rmarkdown" %in% res$package
     if (!have_rmarkdown) {
       refs_in <- c(refs_in, "rmarkdown")
+      res <- ir_resolve_refs(refs_in)
+    }
+  }
+  if (quarto_reticulate) {
+    have_reticulate <- !is.null(res) && "reticulate" %in% res$package
+    if (!have_reticulate) {
+      refs_in <- c(refs_in, "reticulate")
       res <- ir_resolve_refs(refs_in)
     }
   }

@@ -37,7 +37,8 @@ Python:
   `ir` resolves a Python environment with reticulate's uv helper before launch,
   activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` also
   sets QUARTO_PYTHON and injects jupyter.
-  Add `reticulate` under `packages` only when R code loads reticulate.
+  Add `reticulate` under `packages` when R code loads reticulate; `ir render`
+  adds it for knitr-backed Quarto documents with Python chunks.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Isolation:

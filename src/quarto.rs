@@ -6,7 +6,9 @@ use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::spec::{parse_quarto_frontmatter, RuntimeSpec};
+use saphyr::Yaml;
+
+use crate::spec::{load_first_yaml_document, parse_quarto_frontmatter, RuntimeSpec};
 
 pub(crate) struct RenderSource {
     path: PathBuf,
@@ -85,15 +87,257 @@ pub(crate) fn run(
 }
 
 fn read_quarto_document_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
-    parse_quarto_frontmatter(&read_to_string(script)?)
+    let document = read_to_string(script)?;
+    let mut spec = parse_quarto_frontmatter(&document)?;
+    spec.quarto_reticulate = quarto_reticulate_required(script, &document)?;
+    Ok(spec)
 }
 
 fn read_quarto_script_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
-    parse_quarto_frontmatter(&read_quarto_script_frontmatter_to_string(script)?)
+    let document = read_quarto_script_markdown_to_string(script)?;
+    let mut spec = parse_quarto_frontmatter(&quarto_script_frontmatter_to_string(&document))?;
+    spec.quarto_reticulate = quarto_reticulate_required(script, &document)?;
+    Ok(spec)
 }
 
 fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     Ok(fs::read_to_string(script)?)
+}
+
+fn quarto_reticulate_required(script: &Path, document: &str) -> Result<bool, Box<dyn Error>> {
+    // This heuristic intentionally considers only fenced executable chunks.
+    // Inline Python expressions are undefined here, not a reticulate signal.
+    // Detection is local-document only: ir does not probe _quarto.yml or
+    // _metadata.yml, so project-inherited engine settings are out of scope.
+    let chunks = chunk_languages(document);
+    if !chunks.has_python {
+        return Ok(false);
+    }
+
+    if is_r_markdown(script) || is_r_script(script) {
+        return Ok(true);
+    }
+
+    let engine = frontmatter_engine(document)?;
+    if engine.explicit_knitr {
+        return Ok(true);
+    }
+    if engine.explicit_jupyter {
+        return Ok(false);
+    }
+
+    Ok(is_r_markdown(script) || chunks.has_r)
+}
+
+#[derive(Default)]
+struct ChunkLanguages {
+    has_r: bool,
+    has_python: bool,
+}
+
+fn chunk_languages(document: &str) -> ChunkLanguages {
+    let mut chunks = ChunkLanguages::default();
+    let mut in_yaml = false;
+    let mut frontmatter_closed = false;
+    let mut seen_content = false;
+    let mut open_fence = None;
+
+    for line in document.lines() {
+        if !seen_content {
+            if line.trim().is_empty() {
+                continue;
+            }
+            seen_content = true;
+            if line.trim_end() == "---" {
+                in_yaml = true;
+                continue;
+            }
+        }
+        if in_yaml {
+            if matches!(line.trim(), "---" | "...") {
+                in_yaml = false;
+                frontmatter_closed = true;
+            }
+            continue;
+        }
+        if !frontmatter_closed && line.trim().is_empty() {
+            continue;
+        }
+
+        if let Some(fence) = open_fence {
+            if closing_fence(line, fence) {
+                open_fence = None;
+            }
+            continue;
+        }
+
+        if let Some((language, fence)) = executable_chunk_start(line) {
+            match language.as_str() {
+                "r" => chunks.has_r = true,
+                "python" => chunks.has_python = true,
+                _ => {}
+            }
+            open_fence = Some(fence);
+            continue;
+        }
+
+        if let Some((fence, _)) = fence_start(line) {
+            open_fence = Some(fence);
+        }
+    }
+
+    chunks
+}
+
+#[derive(Clone, Copy)]
+struct Fence {
+    marker: char,
+    count: usize,
+}
+
+fn executable_chunk_start(line: &str) -> Option<(String, Fence)> {
+    let (fence, rest) = fence_start(line)?;
+    let rest = rest.trim_start();
+    let inside = rest.strip_prefix('{')?.trim_start();
+    let language_end = inside
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(inside.len());
+    if language_end == 0 {
+        return None;
+    }
+    let language = &inside[..language_end];
+    let suffix = &inside[language_end..];
+    if !matches!(suffix.chars().next(), Some('}' | ',')) {
+        let ch = suffix.chars().next()?;
+        if !ch.is_ascii_whitespace() {
+            return None;
+        }
+    }
+    let close = suffix.rfind('}')?;
+    if !suffix[(close + 1)..].trim().is_empty() {
+        return None;
+    }
+
+    Some((language.to_ascii_lowercase(), fence))
+}
+
+fn fence_start(line: &str) -> Option<(Fence, &str)> {
+    let line = markdown_fence_line(line)?;
+    let marker = match line.chars().next()? {
+        '`' => '`',
+        '~' => '~',
+        _ => return None,
+    };
+    let count = line.chars().take_while(|ch| *ch == marker).count();
+    if count < 3 {
+        return None;
+    }
+
+    Some((Fence { marker, count }, &line[count..]))
+}
+
+fn markdown_fence_line(mut line: &str) -> Option<&str> {
+    loop {
+        let spaces = line.bytes().take_while(|byte| *byte == b' ').count();
+        if spaces > 3 {
+            return None;
+        }
+        line = &line[spaces..];
+        if line.starts_with('\t') {
+            return None;
+        }
+        let Some(rest) = line.strip_prefix('>') else {
+            return Some(line);
+        };
+        line = rest.strip_prefix(' ').unwrap_or(rest);
+    }
+}
+
+fn closing_fence(line: &str, expected: Fence) -> bool {
+    let Some((fence, rest)) = fence_start(line) else {
+        return false;
+    };
+    fence.marker == expected.marker && fence.count >= expected.count && rest.trim().is_empty()
+}
+
+#[derive(Default)]
+struct FrontmatterEngine {
+    explicit_knitr: bool,
+    explicit_jupyter: bool,
+}
+
+fn frontmatter_engine(document: &str) -> Result<FrontmatterEngine, Box<dyn Error>> {
+    let Some(doc) = load_first_yaml_document(document, "script frontmatter")? else {
+        return Ok(FrontmatterEngine::default());
+    };
+    if doc.is_null() || !doc.is_mapping() {
+        return Ok(FrontmatterEngine::default());
+    }
+
+    let mut engine = FrontmatterEngine::default();
+    if frontmatter_key_present(&doc, "knitr") {
+        engine.explicit_knitr = true;
+    }
+    if frontmatter_key_present(&doc, "jupyter") {
+        engine.explicit_jupyter = true;
+    }
+    apply_top_level_engine(&doc, &mut engine);
+    apply_execute_engine(&doc, &mut engine);
+    apply_format_execute_engines(&doc, &mut engine);
+
+    Ok(engine)
+}
+
+fn frontmatter_key_present(doc: &Yaml<'_>, key: &str) -> bool {
+    doc.as_mapping_get(key)
+        .is_some_and(|value| !value.is_null())
+}
+
+fn apply_top_level_engine(doc: &Yaml<'_>, engine: &mut FrontmatterEngine) {
+    let Some(value) = doc
+        .as_mapping_get("engine")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    apply_engine_name(value, engine);
+}
+
+fn apply_execute_engine(doc: &Yaml<'_>, engine: &mut FrontmatterEngine) {
+    let Some(execute) = doc.as_mapping_get("execute") else {
+        return;
+    };
+    let Some(value) = execute
+        .as_mapping_get("engine")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    apply_engine_name(value, engine);
+}
+
+fn apply_format_execute_engines(doc: &Yaml<'_>, engine: &mut FrontmatterEngine) {
+    let Some(format) = doc.as_mapping_get("format") else {
+        return;
+    };
+    let Some(formats) = format.as_mapping() else {
+        return;
+    };
+    // Target-dependent engine selection is not modeled here; format-scoped
+    // engines are only a broad local signal for this dependency heuristic.
+    for format in formats.values() {
+        apply_execute_engine(format, engine);
+    }
+}
+
+fn apply_engine_name(value: &str, engine: &mut FrontmatterEngine) {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "knitr" => engine.explicit_knitr = true,
+        "jupyter" => engine.explicit_jupyter = true,
+        // `engine: markdown` is intentionally not modeled: ir render is scoped
+        // to executable self-describing documents.
+        _ => {}
+    }
 }
 
 /// True for Quarto markdown documents.
@@ -105,6 +349,17 @@ pub(crate) fn is_quarto_document(script: &Path) -> bool {
             .map(str::to_ascii_lowercase)
             .as_deref(),
         Some("qmd") | Some("rmd")
+    )
+}
+
+fn is_r_markdown(script: &Path) -> bool {
+    matches!(
+        script
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("rmd")
     )
 }
 
@@ -120,41 +375,42 @@ fn is_r_script(script: &Path) -> bool {
     )
 }
 
-fn read_quarto_script_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+fn read_quarto_script_markdown_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     let file = File::open(script)?;
-    let mut reader = BufReader::new(file);
-    let mut frontmatter = String::new();
-    let mut line = String::new();
+    let mut document = String::new();
 
-    let mut read_next_line = |line: &mut String| {
-        line.clear();
-        reader.read_line(line)
-    };
-
-    read_next_line(&mut line)?;
-    if line.starts_with("#!") {
-        read_next_line(&mut line)?;
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if let Some(rest) = strip_quarto_script_comment(&line) {
+            document.push_str(rest);
+            document.push('\n');
+        }
     }
 
-    let Some(first) = strip_quarto_script_comment(&line) else {
-        return Ok(frontmatter);
+    Ok(document)
+}
+
+fn quarto_script_frontmatter_to_string(document: &str) -> String {
+    let mut frontmatter = String::new();
+    let mut lines = document.lines();
+    let Some(first) = lines.next() else {
+        return frontmatter;
     };
     if first.trim_end() != "---" {
-        return Ok(frontmatter);
+        return frontmatter;
     }
     frontmatter.push_str(first);
+    frontmatter.push('\n');
 
-    while read_next_line(&mut line)? != 0 {
-        let Some(rest) = strip_quarto_script_comment(&line) else {
-            break;
-        };
-        frontmatter.push_str(rest);
-        if rest.trim_end() == "---" {
+    for line in lines {
+        frontmatter.push_str(line);
+        frontmatter.push('\n');
+        if matches!(line.trim(), "---" | "...") {
             break;
         }
     }
 
-    Ok(frontmatter)
+    frontmatter
 }
 
 fn strip_quarto_script_comment(line: &str) -> Option<&str> {

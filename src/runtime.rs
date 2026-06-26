@@ -354,7 +354,10 @@ fn resolve_library_inner(
         rscript_args,
         &dependencies,
         spec.exclude_newer.as_deref(),
-        spec.quarto_render,
+        resolve_cache::QuartoCacheFlags {
+            render: spec.quarto_render,
+            reticulate: spec.quarto_reticulate,
+        },
         library_root,
     )?;
     let cached_library = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?;
@@ -445,6 +448,7 @@ fn resolve_library_inner(
             .env_remove("IR_PRIMARY_PACKAGE_MARKER")
             .env_remove("IR_LIBRARY_ROOT")
             .env_remove("IR_QUARTO_RENDER")
+            .env_remove("IR_QUARTO_RETICULATE")
             .env_remove("IR_EXCLUDE_NEWER")
             .env_remove("IR_PYTHON_RESULT_FILE")
             .env_remove("IR_PYTHON_PACKAGES_FILE")
@@ -482,6 +486,9 @@ fn resolve_library_inner(
                 // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
                 // this flag tells the resolver a Quarto render needs rmarkdown.
                 cmd.env("IR_QUARTO_RENDER", "1");
+            }
+            if spec.quarto_reticulate {
+                cmd.env("IR_QUARTO_RETICULATE", "1");
             }
         }
         if let (Some(request), Some(result_file), Some(packages_file)) =

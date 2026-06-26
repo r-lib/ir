@@ -12,6 +12,8 @@ pub(crate) struct RuntimeSpec {
     pub(crate) python: Option<PythonSpec>,
     // A Quarto render needs rmarkdown injected for the knitr engine.
     pub(crate) quarto_render: bool,
+    // A knitr-backed Quarto render with Python chunks can use reticulate.
+    pub(crate) quarto_reticulate: bool,
 }
 
 #[derive(Debug, Default)]
