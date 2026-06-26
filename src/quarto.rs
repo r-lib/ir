@@ -94,7 +94,10 @@ fn read_quarto_document_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error
 }
 
 fn read_quarto_script_spec(script: &Path) -> Result<RuntimeSpec, Box<dyn Error>> {
-    parse_quarto_frontmatter(&read_quarto_script_frontmatter_to_string(script)?)
+    let document = read_quarto_script_markdown_to_string(script)?;
+    let mut spec = parse_quarto_frontmatter(&quarto_script_frontmatter_to_string(&document))?;
+    spec.quarto_reticulate = quarto_reticulate_required(script, &document)?;
+    Ok(spec)
 }
 
 fn read_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
@@ -109,6 +112,10 @@ fn quarto_reticulate_required(script: &Path, document: &str) -> Result<bool, Box
     let chunks = chunk_languages(document);
     if !chunks.has_python {
         return Ok(false);
+    }
+
+    if is_r_markdown(script) || is_r_script(script) {
+        return Ok(true);
     }
 
     let engine = frontmatter_engine(document)?;
@@ -327,6 +334,8 @@ fn apply_engine_name(value: &str, engine: &mut FrontmatterEngine) {
     match value.trim().to_ascii_lowercase().as_str() {
         "knitr" => engine.explicit_knitr = true,
         "jupyter" => engine.explicit_jupyter = true,
+        // `engine: markdown` is intentionally not modeled: ir render is scoped
+        // to executable self-describing documents.
         _ => {}
     }
 }
@@ -366,41 +375,42 @@ fn is_r_script(script: &Path) -> bool {
     )
 }
 
-fn read_quarto_script_frontmatter_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
+fn read_quarto_script_markdown_to_string(script: &Path) -> Result<String, Box<dyn Error>> {
     let file = File::open(script)?;
-    let mut reader = BufReader::new(file);
-    let mut frontmatter = String::new();
-    let mut line = String::new();
+    let mut document = String::new();
 
-    let mut read_next_line = |line: &mut String| {
-        line.clear();
-        reader.read_line(line)
-    };
-
-    read_next_line(&mut line)?;
-    if line.starts_with("#!") {
-        read_next_line(&mut line)?;
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if let Some(rest) = strip_quarto_script_comment(&line) {
+            document.push_str(rest);
+            document.push('\n');
+        }
     }
 
-    let Some(first) = strip_quarto_script_comment(&line) else {
-        return Ok(frontmatter);
+    Ok(document)
+}
+
+fn quarto_script_frontmatter_to_string(document: &str) -> String {
+    let mut frontmatter = String::new();
+    let mut lines = document.lines();
+    let Some(first) = lines.next() else {
+        return frontmatter;
     };
     if first.trim_end() != "---" {
-        return Ok(frontmatter);
+        return frontmatter;
     }
     frontmatter.push_str(first);
+    frontmatter.push('\n');
 
-    while read_next_line(&mut line)? != 0 {
-        let Some(rest) = strip_quarto_script_comment(&line) else {
-            break;
-        };
-        frontmatter.push_str(rest);
-        if rest.trim_end() == "---" {
+    for line in lines {
+        frontmatter.push_str(line);
+        frontmatter.push('\n');
+        if matches!(line.trim(), "---" | "...") {
             break;
         }
     }
 
-    Ok(frontmatter)
+    frontmatter
 }
 
 fn strip_quarto_script_comment(line: &str) -> Option<&str> {

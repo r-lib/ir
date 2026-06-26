@@ -10,9 +10,19 @@ use std::path::Path;
 
 #[cfg(unix)]
 fn assert_quarto_reticulate_for_document(name: &str, document: &str, expected: bool) {
+    assert_quarto_reticulate_for_source(name, "qmd", document, expected);
+}
+
+#[cfg(unix)]
+fn assert_quarto_reticulate_for_source(
+    name: &str,
+    extension: &str,
+    document: &str,
+    expected: bool,
+) {
     let cache_dir = temp_dir(&format!("ir-{name}-cache"));
     let bin_dir = temp_dir(&format!("ir-{name}-bin"));
-    let doc = temp_path(name, "qmd");
+    let doc = temp_path(name, extension);
     let rscript = bin_dir.join("Rscript");
     let quarto = bin_dir.join("quarto");
     let expected = if expected { "1" } else { "" };
@@ -453,6 +463,26 @@ print("ok")
 
 #[cfg(unix)]
 #[test]
+fn render_quarto_rmd_with_jupyter_metadata_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_source(
+        "ir-render-rmd-jupyter-python-reticulate",
+        "Rmd",
+        r#"---
+title: Rmd ignores Jupyter metadata
+format: html
+jupyter: python3
+---
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn render_quarto_tilde_python_chunk_requests_reticulate() {
     assert_quarto_reticulate_for_document(
         "ir-render-tilde-python-reticulate",
@@ -540,6 +570,25 @@ format: html
     ```
 "#,
         false,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_script_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_source(
+        "ir-render-script-python-reticulate",
+        "R",
+        r#"#' ---
+#' title: script Python chunk
+#' format: html
+#' ---
+
+#' ```{python}
+#' print("ok")
+#' ```
+"#,
+        true,
     );
 }
 
