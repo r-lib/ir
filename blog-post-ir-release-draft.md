@@ -217,9 +217,8 @@ $ ir render report.qmd
 $ ir render report.qmd --to pdf
 ```
 
-When `ir` selects an R executable by `--rscript`, `IR_RSCRIPT`,
-`--r-version`, frontmatter `ir.r-version`, or date-only `exclude-newer`,
-it sets [`QUARTO_R`](
+When `ir` selects an R executable using `--r-version`, frontmatter
+`ir.r-version`, or date-only `exclude-newer`, it sets [`QUARTO_R`](
   https://quarto.org/docs/advanced/environment-vars.html#variables-quarto-inspects
 ) so Quarto renders with that R. `ir` also seeds `rmarkdown`
 automatically for knitr-based renders unless you declare it yourself.
@@ -282,9 +281,9 @@ ir:
 For Quarto renders, `ir` injects `jupyter` into the Python environment,
 passes the resolved interpreter to Quarto with `QUARTO_PYTHON`, and also
 sets `RETICULATE_PYTHON` so documents that use reticulate see the same
-interpreter. `ir` does not add `reticulate` to the R package library
-just because Python metadata is present; declare it under `ir.packages`
-when R code calls reticulate.
+interpreter. If the document uses the knitr engine and contains Python
+chunks, `ir` automatically adds `reticulate` to the R package
+manifest.
 
 When Python metadata is present, `exclude-newer` is also used for Python
 environment resolution unless `python-exclude-newer` is set. Use
