@@ -207,7 +207,7 @@
     "href": "config.html#install",
     "title": "Install and Configuration",
     "section": "Install",
-    "text": "Install\nInstall a pre-built binary on Linux or macOS:\n$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh\nInstall on Windows PowerShell:\n&gt; irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex\nThe installers download the latest release archive and install ir and rx into ~/.local/bin on Unix or $HOME\\bin on Windows. On macOS, the default ~/.local/bin directory is added to ~/.zprofile when needed. On Windows, the install directory is added to the user PATH. On Linux, the installer tells you if the install directory is not on PATH. If rig is not on PATH, the installers print platform-specific rig install guidance. Set IR_NO_MODIFY_PATH=1 to skip PATH changes. Set IR_INSTALL_DIR to choose another directory."
+    "text": "Install\nInstall a pre-built binary on Linux or macOS:\n$ curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh\nInstall on Windows PowerShell:\n&gt; irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex\nThe installers download the latest release archive and install ir and rx into ~/.local/bin on Unix or $HOME\\bin on Windows. On macOS, the default ~/.local/bin directory is added to ~/.zprofile when needed. On Windows, the install directory is added to the user PATH. On Linux, the installer tells you if the install directory is not on PATH. If rig is not on PATH, the installers print platform-specific rig install guidance. Set IR_NO_MODIFY_PATH=1 to skip PATH changes. Set IR_INSTALL_DIR to choose another directory."
   },
   {
     "objectID": "config.html#environment",

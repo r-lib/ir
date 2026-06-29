@@ -1,1 +1,1 @@
-Sitemap: https://t-kalinowski.github.io/ir/sitemap.xml
+Sitemap: https://r-lib.github.io/ir/sitemap.xml

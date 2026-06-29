@@ -345,9 +345,9 @@ ul.task-list li input[type="checkbox"] {
 <section id="install" class="level2">
 <h2 class="anchored" data-anchor-id="install">Install</h2>
 <p>Install a pre-built binary on Linux or macOS:</p>
-<pre class="console"><code>$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh</code></pre>
+<pre class="console"><code>$ curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh</code></pre>
 <p>Install on Windows PowerShell:</p>
-<pre class="console"><code>&gt; irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex</code></pre>
+<pre class="console"><code>&gt; irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex</code></pre>
 <p>The installers download the latest release archive and install <code>ir</code> and <code>rx</code> into <code>~/.local/bin</code> on Unix or <code>$HOME\bin</code> on Windows. On macOS, the default <code>~/.local/bin</code> directory is added to <code>~/.zprofile</code> when needed. On Windows, the install directory is added to the user <code>PATH</code>. On Linux, the installer tells you if the install directory is not on <code>PATH</code>. If <code>rig</code> is not on <code>PATH</code>, the installers print platform-specific rig install guidance. Set <code>IR_NO_MODIFY_PATH=1</code> to skip PATH changes. Set <code>IR_INSTALL_DIR</code> to choose another directory.</p>
 </section>
 <section id="environment" class="level2">
@@ -536,7 +536,7 @@ ul.task-list li input[type="checkbox"] {
     }
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);
-        var filterRegex = new RegExp("https:\/\/t-kalinowski\.github\.io\/ir\/");
+        var filterRegex = new RegExp("https:\/\/r-lib\.github\.io\/ir\/");
       var isInternal = (href) => {
           return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
       }
