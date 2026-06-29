@@ -440,6 +440,12 @@ fn cache_command() -> ClapCommand {
                         .long("force")
                         .action(ArgAction::SetTrue)
                         .help("Accepted for compatibility; same as `ir cache clean`"),
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .action(ArgAction::SetTrue)
+                        .help("Also clear pak, renv, reticulate, and external uv caches"),
                 ),
         )
         .subcommand(ClapCommand::new("dir").about("Show the cache directory"))

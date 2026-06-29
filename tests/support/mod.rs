@@ -332,6 +332,22 @@ pub(crate) fn assert_stdout_contains(output: &Output, needle: &str) {
     );
 }
 
+pub(crate) fn assert_stdout_contains_path(output: &Output, prefix: &str, path: &Path) {
+    let text = normalize_cli_path_text(&stdout(output));
+    let needle = normalize_cli_path_text(&format!("{prefix}{}", path.display()));
+    assert!(
+        text.contains(&needle),
+        "missing {needle:?}\n{}",
+        output_text(output)
+    );
+}
+
+fn normalize_cli_path_text(text: &str) -> String {
+    text.replace('\\', "/")
+        .replace("//?/UNC/", "//")
+        .replace("//?/", "")
+}
+
 pub(crate) fn assert_command_success(mut command: Command, label: &str) {
     let output = command
         .output()

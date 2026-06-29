@@ -148,6 +148,14 @@ pub(crate) fn rscript_for_spec(
     Ok(rscript_command())
 }
 
+pub(crate) fn rscript_for_env() -> Result<OsString, Box<dyn Error>> {
+    if let Some(selection) = env_r_selection()? {
+        return resolve_r_selection(selection, None);
+    }
+
+    Ok(rscript_command())
+}
+
 fn cli_r_selection(
     r_requirement: Option<&str>,
     rscript: Option<&str>,

@@ -145,7 +145,9 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "apt-get install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "r-rig_");
+    assert_stdout_contains(&out, ".deb");
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -172,11 +174,9 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "xcode-select --install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(
-        &out,
-        "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-<latest-rig-version>-macOS-<macos-arch>.pkg",
-    );
-    assert_stdout_contains(&out, "installer -pkg /tmp/ir-rig.pkg -target /");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "macOS-");
+    assert_stdout_contains(&out, "installer -pkg");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -214,7 +214,8 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     ]);
 
     assert_success(&out);
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
+    assert_stdout_contains(&out, "r-rig_");
     assert_stdout_contains(&out, "rig add oldrel/2");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -294,6 +295,16 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("R_PROFILE_USER"));
     assert!(workflow.contains("scripts/ci-rprofile.R"));
     assert!(workflow.contains("scripts/warm-renv-cache.R"));
+    let install_unix = workflow
+        .split("      - name: Install rig and non-default R (Unix)")
+        .nth(1)
+        .and_then(|block| {
+            block
+                .split("      - name: Install rig and non-default R (Windows)")
+                .next()
+        })
+        .expect("workflow should install rig and non-default R on Unix");
+    assert!(install_unix.contains("GITHUB_TOKEN: ${{ github.token }}"));
     let warm_non_default_cache = workflow
         .split("      - name: Warm non-default R package cache")
         .nth(1)
@@ -514,12 +525,18 @@ fn install_dev_deps_scripts_install_rig_from_upstream_release_without_pinned_ver
     let sh_path = repo_root().join("scripts/install-dev-deps.sh");
     let sh = fs::read_to_string(&sh_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
-    assert!(sh.contains("https://github.com/r-lib/rig/releases/latest"));
-    assert!(sh.contains("rig-${rig_version}-macOS-${rig_arch}.pkg"));
-    assert!(sh.contains("releases/download/${rig_tag}/${rig_asset}"));
+
+    assert!(sh.contains("GITHUB_TOKEN"));
+    assert!(sh.contains("Authorization"));
+    assert!(sh.contains("Bearer"));
+    assert!(sh.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(sh.contains("rig-[0-9.]+-macOS-$(macos_rig_arch)"));
+    assert!(sh.contains("r-rig_[0-9.]+-[0-9]+_$(linux_rig_deb_arch)"));
     assert!(sh.contains("installer -pkg"));
     assert!(!sh.contains("brew tap r-lib/rig"));
     assert!(!sh.contains("brew install --cask rig"));
+    assert!(!sh.contains("https://rig.r-pkg.org/deb/rig.gpg"));
+    assert!(!sh.contains("apt/sources.list.d/rig.list"));
     assert!(!sh.contains("0.8.1"));
 
     let ps1_path = repo_root().join("scripts/install-dev-deps.ps1");
