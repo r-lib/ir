@@ -1,7 +1,7 @@
 ---
 title: 'ir 0.1.0: self-describing R scripts and Quarto documents'
 description: >
-  `ir` is a new command-line tool for running standalone R scripts and
+  `ir` is a new command-line tool for running portable R scripts and
   rendering Quarto documents whose package requirements, and optional R
   selection, live inside the file itself.
 topics: [Best Practices, Publishing]
@@ -9,37 +9,39 @@ tags/software: [R, Python, Quarto, Packages, Reproducibility, CLI]
 ---
 
 Today we are announcing the first public release of `ir`, a small
-command-line tool for running standalone R scripts and rendering Quarto
-documents that declare their runtime requirements in the file itself.
+command-line tool that runs R scripts and renders Quarto documents using
+runtime requirements declared in the file itself.
 
-`ir` is for the one-file workflows that do not quite need a project, but
-still need to be understandable, repeatable, and easy to run later. Put
-the package requirements, and optionally the R selection, next to the
-code, then run the file. `ir` resolves the requirements, prepares cached
-package libraries, and launches R or Quarto with the runtime ready to
-use.
+`ir` is for one-file workflows that do not quite need a project but
+still need to be easy to share and rerun later. Simply put the package
+requirements, and optionally the R selection, next to the code. When you
+render or execute the file, `ir` resolves the requirements, prepares
+cached package libraries, and launches R or Quarto with a runtime ready
+to use.
 
-The shape is inspired by [`uv`](https://docs.astral.sh/uv/): a script
-can carry enough metadata to describe its runtime, and the runner can
-resolve that runtime into a cached environment on demand. `ir` brings
-that pattern to R scripts and Quarto documents, using `pak`, `renv`, and
-`rig` on the R side, and reticulate's uv-backed helper when Python is
-part of the runtime.
+The interface is inspired by
+[PEP 723](https://peps.python.org/pep-0723/) and
+[`uv run --script`](https://docs.astral.sh/uv/). A script can carry
+enough metadata to describe its runtime, and the runner can resolve that
+runtime into a cached environment on demand. `ir` brings that pattern to
+R scripts and Quarto documents, using `pak`, `renv`, and `rig` on the R
+side, and `reticulate`'s uv-backed helper when Python is part of the
+runtime.
 
 `ir` focuses on two workflows:
 
-- running or rendering self-describing scripts and documents (`ir run`,
-  `ir render`)
+- running or rendering self-describing scripts and documents \
+  (`ir run`, `ir render`)
 - running or installing command-line tools distributed through R
   packages (`rx`, `ir tool install`)
 
 ## Why `ir`?
 
-R scripts often begin as small, local utilities: a report refresh, a
-data pull, a model check, a quick diagnostic, or an example shared with
-a colleague. Over time, the script can become important, but the setup
-still lives somewhere else: in a README, in a shell history, in a
-project library, or in the author's current R installation.
+R scripts often begin as small, local utilities: a report, a data pull,
+a model-training or evaluation run, a quick diagnostic, or an example
+shared with a colleague. Over time, the script can become important, but
+the setup still lives somewhere else: in a README, in a shell history,
+in a project library, or in the author's current R installation.
 
 `ir` makes the runtime specification part of the source file. That means
 a script can say, directly:
@@ -49,9 +51,9 @@ a script can say, directly:
 - whether user libraries should be visible
 - whether CRAN packages should be resolved as of a specific date
 
-This should help you to re-run the script reliably at a later date. As
-the metadata is part of the file, you don't need to worry about it being
-lost or accidentally overwritten.
+This should help you rerun the script reliably at a later date. Keeping
+the metadata in the file makes it less likely to be lost or fall out of
+sync with the code.
 
 ## How `ir` fits with existing tools
 
@@ -69,7 +71,7 @@ of them directly:
   repositories. `pak` is bootstrapped automatically on first use, so you
   do not need to install it separately.
 - [`renv`](https://rstudio.github.io/renv/) gives R projects isolated
-  package libraries and lockfiles. `ir` uses `renv` 's global package
+  package libraries and lockfiles. `ir` uses `renv`'s global package
   cache to assemble reusable libraries without creating a `renv` project
   or lockfile.
 
@@ -136,10 +138,23 @@ package subdirectories such as [`exec/` and `bin/`](
 [`Rapp`](https://github.com/r-lib/Rapp) apps, or direct executable
 scripts. `rx` resolves the package, finds the requested executable, and
 runs it in an isolated library. For tools you use regularly,
-`ir tool install` writes persistent launchers:
+`ir tool install` writes persistent launchers.
+
+For example, this resolves the `btw` CLI from the `btw` R package on
+demand and runs `btw --help`:
 
 ```console
+$ rx btw --help
+```
+
+To install `btw` so it is generally available:
+
+```console
+# run once
 $ ir tool install btw
+
+# now you only need
+$ btw --help
 ```
 
 This gives package-provided CLIs a shared command namespace: run them on
@@ -153,16 +168,10 @@ and installing packages. Later runs reuse cached resolutions and
 content-addressed package libraries when the same requirements are seen
 again.
 
-That makes `ir` useful for short-lived and repeated command-line work.
+That makes `ir` useful for both one-off and repeated command-line work.
 You can run a script, run an inline expression, render a report, or
 launch a package-provided executable without creating a project
 directory just to hold the dependency state.
-
-```console
-$ ir run --with cli -e 'cli::cli_alert_success("works")'
-$ ir run --r-version 4.5 script.R
-$ ir render report.qmd --to html
-```
 
 `ir` also bootstraps its own resolver tooling on first use, so you do
 not need to pre-install `pak` or `renv`.
@@ -197,8 +206,9 @@ r-version: "4.3"
 ```
 
 Together, these options let a file carry the important parts of its
-runtime contract without requiring a surrounding project, but most files
-should only need the date.
+runtime requirements without needing a surrounding project. For
+reproducibility, most files should need only a list of packages and a
+date.
 
 ## Quarto documents too
 
@@ -250,10 +260,10 @@ library(reticulate)
 pd <- import("pandas")
 ```
 
-`ir` creates the environment with reticulate's uv-backed environment
+`ir` creates the environment with `reticulate`'s uv-backed environment
 helper, sets `RETICULATE_PYTHON`, and activates the environment for
 subprocesses. Declare `reticulate` under `packages` when the R script
-loads reticulate.
+loads `reticulate`.
 
 For Quarto, put Python metadata under the document's `ir:` key. A knitr
 document that uses reticulate can mix R and Python requirements:
@@ -301,19 +311,19 @@ snapshot date from R packages.
 Install a pre-built binary on Linux or macOS:
 
 ```console
-$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
+$ curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh
 ```
 
 Install on Windows PowerShell:
 
 ```console
-> irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
+> irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex
 ```
 
 The installers download the latest GitHub release and install both `ir`
 and `rx`. You can also download release artifacts from the
-[GitHub releases](https://github.com/t-kalinowski/ir/releases) page or
-with `gh release download`.
+[GitHub releases](https://github.com/r-lib/ir/releases) page or with
+`gh release download`.
 
 You will also need `R` / `Rscript`; `rig` is required when selecting R
 by version or by date-only `exclude-newer`, and Quarto is required when
@@ -323,9 +333,9 @@ rendering Quarto sources.
 
 The project is open source under the MIT license. To get started:
 
-- Read the documentation: https://t-kalinowski.github.io/ir/
-- Browse the source: https://github.com/t-kalinowski/ir
-- Open an issue: https://github.com/t-kalinowski/ir/issues
+- Read the documentation: https://r-lib.github.io/ir/
+- Browse the source: https://github.com/r-lib/ir
+- Open an issue: https://github.com/r-lib/ir/issues
 
 This is a first public release, and feedback is especially useful now.
 If you try `ir` on your own scripts or Quarto documents, we would like
