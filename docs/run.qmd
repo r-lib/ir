@@ -35,7 +35,7 @@ $ ./script.R
 The script frontmatter supports:
 
 - `packages`: package refs resolved with pak.
-- `r-version`: an optional R version requirement selected from installed versions reported by rig.
+- `r-version`: an optional R version requirement selected through rig. If no matching R is installed, `ir` downloads one into its private cache in rig user mode.
 - `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
 - `python-version`: an optional Python version requirement.
 - `python-exclude-newer`: an optional Python package snapshot date.

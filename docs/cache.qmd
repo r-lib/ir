@@ -2,7 +2,7 @@
 title: Cache
 ---
 
-`ir` caches resolver tooling, dependency resolutions, and materialised package libraries for runs, renders, and ad hoc package-tool runs.
+`ir` caches R installations, resolver tooling, dependency resolutions, and materialised package libraries for runs, renders, and ad hoc package-tool runs.
 
 Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DIR`.
 This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
@@ -33,6 +33,7 @@ $ ir cache clean --force
 ```
 
 `ir cache dir` prints the cache root.
-`ir cache clean` removes the whole `ir` cache, including resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
+`ir cache clean` removes the whole `ir` cache, including R versions installed on demand, cached symbolic R resolutions, resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
+It does not undo per-user integration state that rig may create on macOS or Windows.
 It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.

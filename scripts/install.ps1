@@ -13,7 +13,7 @@ $Owner = "r-lib"
 $Repo = "ir"
 $App = "ir"
 $Target = "x86_64-pc-windows-msvc"
-$RigInstallUrl = "https://github.com/r-lib/rig#id-windows"
+$RigSourceUrl = "https://github.com/r-lib/rig"
 
 $url = "https://github.com/$Owner/$Repo/releases/latest/download/$App-$Target.zip"
 $installDir = if ($env:IR_INSTALL_DIR) { $env:IR_INSTALL_DIR } else { Join-Path $HOME "bin" }
@@ -131,17 +131,29 @@ function Ensure-InstallDirOnPath([string]$InstallDir, [string]$Commands) {
 }
 
 function Show-RigHint {
-    if (Get-Command rig -ErrorAction SilentlyContinue) {
-        return
+    $rig = Get-Command rig -ErrorAction SilentlyContinue
+    if ($rig) {
+        & rig --user --version *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
     }
 
     Write-Host ""
-    Write-Host "rig was not found on PATH."
-    Write-Host "rig is optional, but install it to use r-version, --r-version, IR_R_VERSION, or date-only exclude-newer."
-    Write-Host "Install rig on Windows:"
-    Write-Host "  winget install --id posit.rig"
-    Write-Host "Other options: $RigInstallUrl"
-    Write-Host "Restart PowerShell after installing if rig is still not found."
+    if ($rig) {
+        Write-Host "The rig on PATH does not support user-mode R installations."
+    } else {
+        Write-Host "rig was not found on PATH."
+    }
+    Write-Host "The development version of rig is optional, but required for r-version, --r-version, IR_R_VERSION, or date-only exclude-newer."
+    Write-Host "Install it from source with Rust:"
+    Write-Host '  $cargoInstallRoot = if ($env:CARGO_INSTALL_ROOT) { $env:CARGO_INSTALL_ROOT } elseif ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }'
+    Write-Host "  cargo install --git $RigSourceUrl --locked --force --root `$cargoInstallRoot rig"
+    Write-Host "Then put Cargo's bin directory before any existing rig on PATH:"
+    Write-Host '  $cargoBin = Join-Path $cargoInstallRoot "bin"'
+    Write-Host '  $env:PATH = "$cargoBin;$env:PATH"'
+    Write-Host "Also put that directory before the old rig in your user PATH."
+    Write-Host "Source: $RigSourceUrl"
 }
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "$App-install-$([System.Guid]::NewGuid().ToString('N'))"

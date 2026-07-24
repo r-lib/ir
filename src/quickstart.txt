@@ -65,8 +65,11 @@ Workflow:
   Write ordinary R after the metadata. Do not embed package-manager ceremony.
 
 System requirements:
-  R/Rscript must be available, either on PATH or selected with `--rscript`/`IR_RSCRIPT`.
-  Use rig for `r-version` selection and date-only `exclude-newer` R selection.
+  When no R version or date is selected, R/Rscript must be available on PATH
+  or selected with `--rscript`/`IR_RSCRIPT`. Use the development version of rig
+  for `r-version` selection and date-only `exclude-newer` R selection. Missing
+  R versions are installed on demand in the ir cache with rig user mode,
+  without administrator privileges.
   Quarto must be available for `ir render` and `ir preview`. OS libraries and
   compilers required by packages remain system dependencies.
 

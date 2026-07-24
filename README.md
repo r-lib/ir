@@ -31,7 +31,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
+- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. If no matching R is installed, `ir` downloads it into its private cache with rig. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
 - **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
 
@@ -78,7 +78,7 @@ The direct installers download the latest release and install `ir` and `rx` into
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
-If `rig` is not on `PATH`, the installers print platform-specific rig install guidance.
+If a rig build with user-mode support is not on `PATH`, the installers print guidance for installing the development version from source.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 
@@ -113,8 +113,13 @@ inspect the plan.
 ## Requirements
 
 - `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
-- `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
+- The development version of `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection. `ir` reuses matching rig-managed R installations and downloads missing versions into its cache in rig user mode, without administrator privileges.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
+
+Install the development rig with `cargo install --git https://github.com/r-lib/rig --locked --force rig`, then put Cargo's install `bin` directory before any older rig on `PATH`.
+Symbolic selectors such as `release` and `oldrel/2` keep their resolved version in the `ir` cache, so later runs can reuse it without contacting rig's resolver.
+
+On macOS and Windows, rig user mode may also update its normal per-user RStudio, `PATH`, or registry integration state. `ir cache clean` removes the cached R installation, but not that integration state.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
 

@@ -108,27 +108,45 @@ fn public_ir_links_use_r_lib_owner() {
 }
 
 #[test]
-fn public_installers_recommend_rig_when_missing() {
+fn public_installers_recommend_development_rig_when_missing_or_old() {
     let sh_path = repo_root().join("scripts/install.sh");
     let sh = fs::read_to_string(&sh_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
     assert!(sh.contains("command -v rig"), "{sh}");
+    assert!(sh.contains("rig --user --version"), "{sh}");
     assert!(sh.contains("rig was not found on PATH."), "{sh}");
-    assert!(sh.contains("brew install --cask rig"), "{sh}");
-    assert!(sh.contains("sudo apt install r-rig"), "{sh}");
-    assert!(sh.contains("https://github.com/r-lib/rig#id-macos"), "{sh}");
-    assert!(sh.contains("https://github.com/r-lib/rig#id-linux"), "{sh}");
+    assert!(
+        sh.contains("cargo install --git ${RIG_SOURCE_URL} --locked --force --root")
+            && sh.contains("\\${rig_root}"),
+        "{sh}"
+    );
+    assert!(sh.contains("before any existing rig on PATH"), "{sh}");
+    assert!(
+        sh.contains("rig_root=\"${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}\""),
+        "{sh}"
+    );
+    assert!(
+        sh.contains(
+            "export PATH=\"${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}/bin:${PATH}\""
+        ),
+        "{sh}"
+    );
+    assert!(sh.contains("https://github.com/r-lib/rig"), "{sh}");
 
     let ps1_path = repo_root().join("scripts/install.ps1");
     let ps1 = fs::read_to_string(&ps1_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
     assert!(ps1.contains("Get-Command rig"), "{ps1}");
+    assert!(ps1.contains("rig --user --version"), "{ps1}");
     assert!(ps1.contains("rig was not found on PATH."), "{ps1}");
-    assert!(ps1.contains("winget install --id posit.rig"), "{ps1}");
     assert!(
-        ps1.contains("https://github.com/r-lib/rig#id-windows"),
+        ps1.contains("cargo install --git $RigSourceUrl --locked --force --root")
+            && ps1.contains("`$cargoInstallRoot rig"),
         "{ps1}"
     );
+    assert!(ps1.contains("before any existing rig on PATH"), "{ps1}");
+    assert!(ps1.contains("$env:CARGO_INSTALL_ROOT"), "{ps1}");
+    assert!(ps1.contains("$env:PATH = \"$cargoBin;$env:PATH\""), "{ps1}");
 }
 
 #[cfg(unix)]
@@ -163,7 +181,10 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "apt-get install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(
+        &out,
+        "cargo install --git https://github.com/r-lib/rig --locked --force --root ",
+    );
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -192,14 +213,15 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_stdout_contains(&out, "https://sh.rustup.rs");
     assert_stdout_contains(
         &out,
-        "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-<latest-rig-version>-macOS-<macos-arch>.pkg",
+        "cargo install --git https://github.com/r-lib/rig --locked --force --root ",
     );
-    assert_stdout_contains(&out, "installer -pkg /tmp/ir-rig.pkg -target /");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("installer -pkg"), "{stdout}");
+    assert!(!stdout.contains("/releases/download/"), "{stdout}");
     assert!(!stdout.contains("brew tap r-lib/rig"), "{stdout}");
     assert!(!stdout.contains("brew install --cask rig"), "{stdout}");
     assert!(
@@ -232,7 +254,10 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     ]);
 
     assert_success(&out);
-    assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
+    assert_stdout_contains(
+        &out,
+        "cargo install --git https://github.com/r-lib/rig --locked --force --root ",
+    );
     assert_stdout_contains(&out, "rig add oldrel/2");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -519,6 +544,30 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
     assert!(ps1.contains("scripts/resolve-test-r.py\" $TestRSpec"));
     assert!(ps1.contains("$fields = @($metadata)"));
     assert!(!ps1.contains(r#"-split "\s+""#));
+    assert!(ps1.contains(r#"$env:RIG_MODE = "user""#));
+    assert!(ps1.contains(r#"$env:RIG_BINARY_DIR = Join-Path $env:USERPROFILE ".local\bin""#));
+    assert!(
+        ps1.find(r#"$env:RIG_MODE = "user""#).unwrap()
+            < ps1
+                .find(r#"Invoke-Step "rig" @("add", "release")"#)
+                .unwrap()
+    );
+    assert!(ps1.contains(r#"Add-Content -Path $env:GITHUB_ENV -Value "RIG_MODE=user""#));
+    assert!(ps1.contains(
+        r#"Add-Content -Path $env:GITHUB_ENV -Value "RIG_BINARY_DIR=$env:RIG_BINARY_DIR""#
+    ));
+    assert!(ps1.contains(r#"Write-Host "  `$env:RIG_MODE='user'""#));
+    assert!(ps1.contains(r#"Write-Host "  `$env:RIG_BINARY_DIR='$env:RIG_BINARY_DIR'""#));
+    let custom_rig_bin = ps1.find("if ($env:RIG_BINARY_DIR) {").unwrap();
+    let default_rig_bin = ps1
+        .find(r#"Set-PathFirst (Join-Path $env:USERPROFILE ".local\bin")"#)
+        .unwrap();
+    assert!(ps1[custom_rig_bin..default_rig_bin].contains("Set-PathFirst $env:RIG_BINARY_DIR"));
+    assert!(ps1[custom_rig_bin..default_rig_bin].contains("else"));
+    let r_install = ps1
+        .find(r#"Invoke-Step "rig" @("add", $TestRSpec)"#)
+        .unwrap();
+    assert!(ps1[r_install..].contains("Add-KnownInstallPaths"));
     assert!(ps1.contains("IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"));
     assert!(ps1.contains("IR_TEST_RSCRIPT=$TestRscript"));
     assert!(
@@ -528,30 +577,53 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
 }
 
 #[test]
-fn install_dev_deps_scripts_install_rig_from_upstream_release_without_pinned_version() {
+fn install_dev_deps_scripts_install_development_rig_with_cargo() {
     let sh_path = repo_root().join("scripts/install-dev-deps.sh");
     let sh = fs::read_to_string(&sh_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
-    assert!(sh.contains("https://github.com/r-lib/rig/releases/latest"));
-    assert!(sh.contains("rig-${rig_version}-macOS-${rig_arch}.pkg"));
-    assert!(sh.contains("releases/download/${rig_tag}/${rig_asset}"));
-    assert!(sh.contains("installer -pkg"));
+    assert!(sh.contains("rig --user --version"), "{sh}");
+    assert!(
+        sh.contains(
+            "cargo install --git \"$RIG_SOURCE_URL\" --locked --force --root \"$cargo_install_root\" rig"
+        ),
+        "{sh}"
+    );
+    assert!(
+        sh.contains("cargo_install_root=\"${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}\""),
+        "{sh}"
+    );
+    assert!(
+        sh.contains("export PATH=\"${CARGO_HOME:-${HOME}/.cargo}/bin:${PATH}\""),
+        "{sh}"
+    );
+    assert!(sh.contains("https://github.com/r-lib/rig"), "{sh}");
+    assert!(!sh.contains("https://rig.r-pkg.org/deb/rig.gpg"), "{sh}");
+    assert!(!sh.contains("/releases/latest"), "{sh}");
+    assert!(!sh.contains("installer -pkg"), "{sh}");
     assert!(!sh.contains("brew tap r-lib/rig"));
     assert!(!sh.contains("brew install --cask rig"));
-    assert!(!sh.contains("0.8.1"));
 
     let ps1_path = repo_root().join("scripts/install-dev-deps.ps1");
     let ps1 = fs::read_to_string(&ps1_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
-    assert!(ps1.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
-    assert!(ps1.contains("rig-windows-$version.exe"));
-    assert!(ps1.contains("rig-windows-arm64-$version.exe"));
-    assert!(ps1.contains("Start-Process"));
-    assert!(ps1.contains("-Wait"));
-    assert!(ps1.contains("-PassThru"));
-    assert!(ps1.contains("Install-WingetPackage \"posit.rig\""));
-    assert!(!ps1.contains("choco install rig"));
-    assert!(!ps1.contains("0.8.1"));
+    assert!(ps1.contains("rig --user --version"), "{ps1}");
+    assert!(
+        ps1.contains(
+            "Invoke-Step \"cargo\" @(\"install\", \"--git\", $RigSourceUrl, \"--locked\", \"--force\", \"--root\", $cargoInstallRoot, \"rig\")"
+        ),
+        "{ps1}"
+    );
+    assert!(ps1.contains("$env:CARGO_INSTALL_ROOT"), "{ps1}");
+    assert!(ps1.contains("https://github.com/r-lib/rig"), "{ps1}");
+    assert!(
+        !ps1.contains("https://api.github.com/repos/r-lib/rig/releases/latest"),
+        "{ps1}"
+    );
+    assert!(!ps1.contains("Install-RigFromGitHubRelease"), "{ps1}");
+    assert!(
+        !ps1.contains("Install-WingetPackage \"posit.rig\""),
+        "{ps1}"
+    );
 }
 
 #[test]
@@ -664,7 +736,10 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "rustup-init-");
     assert_stdout_contains(&out, "-y --default-toolchain stable");
     assert!(!String::from_utf8_lossy(&out.stdout).contains("Rustlang.Rustup"));
-    assert_stdout_contains(&out, "winget install --id posit.rig");
+    assert_stdout_contains(
+        &out,
+        "cargo install --git https://github.com/r-lib/rig --locked --force --root ",
+    );
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add oldrel/2");
@@ -676,11 +751,12 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
     assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
     assert_stdout_contains(&out, "IR_TEST_RSCRIPT='<Rscript-for-oldrel/2>'");
+    assert_stdout_contains(&out, "$env:RIG_MODE='user'");
 }
 
 #[cfg(windows)]
 #[test]
-fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
+fn install_dev_deps_ps1_uses_development_rig_on_github_actions() {
     let out = Command::new("powershell")
         .current_dir(repo_root())
         .env("GITHUB_ACTIONS", "true")
@@ -697,19 +773,12 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
     assert_success(&out);
     assert_stdout_contains(
         &out,
-        "Invoke-RestMethod -Uri https://api.github.com/repos/r-lib/rig/releases/latest",
-    );
-    assert_stdout_contains(
-        &out,
-        "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-windows-<latest-rig-version>.exe",
-    );
-    assert_stdout_contains(
-        &out,
-        "ir-rig-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+        "cargo install --git https://github.com/r-lib/rig --locked --force --root ",
     );
     assert_stdout_contains(&out, "rig add oldrel/2");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("choco install rig"), "{stdout}");
+    assert!(!stdout.contains("Invoke-RestMethod"), "{stdout}");
+    assert!(!stdout.contains("/releases/download/"), "{stdout}");
     assert!(
         !stdout.contains("winget install --id posit.rig"),
         "{stdout}"
@@ -751,13 +820,12 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("Microsoft.VisualStudio.2022.BuildTools"));
     assert!(script.contains("https://win.rustup.rs"));
     assert!(!script.contains("Rustlang.Rustup"));
-    assert!(script.contains("posit.rig"));
-    assert!(!script.contains("choco"));
-    assert!(script.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
-    assert!(script.contains("function Get-GitHubApiHeaders"));
-    assert!(script.contains("$env:GITHUB_TOKEN"));
-    assert!(script.contains("-Headers $headers"));
-    assert!(script.contains("https://github.com/r-lib/rig/releases/download/$tag/$asset"));
+    assert!(script.contains("https://github.com/r-lib/rig"));
+    assert!(script.contains("rig --user --version"));
+    assert!(!script.contains("posit.rig"));
+    assert!(!script.contains("api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(!script.contains("Get-GitHubApiHeaders"));
+    assert!(!script.contains("releases/download/$tag/$asset"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains("ProgramFiles \"rig\""));
     assert!(script.contains("ProgramFiles \"rig\\bin\""));

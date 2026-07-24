@@ -12,8 +12,7 @@ set -eu
 OWNER="r-lib"
 REPO="ir"
 APP="ir"
-RIG_MACOS_INSTALL_URL="https://github.com/r-lib/rig#id-macos"
-RIG_LINUX_INSTALL_URL="https://github.com/r-lib/rig#id-linux"
+RIG_SOURCE_URL="https://github.com/r-lib/rig"
 
 # Linux binaries are built against glibc 2.35 (Ubuntu 22.04). Refuse to install
 # on older systems where the binary would fail to load, with a clear message.
@@ -50,60 +49,25 @@ show_path_hint() {
   echo "add ${INSTALL_DIR} to your PATH to run ${commands}"
 }
 
-show_debian_rig_hint() {
-  echo "Install rig on Debian/Ubuntu:"
-  echo "  sudo curl -L https://rig.r-pkg.org/deb/rig.gpg -o /etc/apt/trusted.gpg.d/rig.gpg"
-  echo "  echo \"deb http://rig.r-pkg.org/deb rig main\" | sudo tee /etc/apt/sources.list.d/rig.list"
-  echo "  sudo apt update"
-  echo "  sudo apt install r-rig"
-}
-
-linux_is_debian_like() {
-  [ -r /etc/os-release ] || return 1
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID:-} ${ID_LIKE:-}" in
-    *debian* | *ubuntu*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 show_rig_hint() {
-  if command -v rig >/dev/null 2>&1; then
+  if command -v rig >/dev/null 2>&1 && rig --user --version >/dev/null 2>&1; then
     return 0
   fi
 
   echo
-  echo "rig was not found on PATH."
-  echo "rig is optional, but install it to use r-version, --r-version, IR_R_VERSION, or date-only exclude-newer."
-
-  case "$OS" in
-    Darwin)
-      if command -v brew >/dev/null 2>&1; then
-        echo "Install rig with Homebrew:"
-        echo "  brew tap r-lib/rig"
-        echo "  brew trust r-lib/rig"
-        echo "  brew install --cask rig"
-      else
-        echo "Install rig from: https://github.com/r-lib/rig/releases"
-      fi
-      echo "More options: ${RIG_MACOS_INSTALL_URL}"
-      ;;
-    Linux)
-      if linux_is_debian_like; then
-        show_debian_rig_hint
-      elif command -v yum >/dev/null 2>&1; then
-        echo "Install rig on RPM-based Linux:"
-        echo '  sudo yum install -y https://github.com/r-lib/rig/releases/download/latest/r-rig-latest-1.$(arch).rpm'
-      elif command -v zypper >/dev/null 2>&1; then
-        echo "Install rig on OpenSUSE/SLES:"
-        echo '  sudo zypper install -y --allow-unsigned-rpm https://github.com/r-lib/rig/releases/download/latest/r-rig-latest-1.$(arch).rpm'
-      else
-        echo "Install rig from: ${RIG_LINUX_INSTALL_URL}"
-      fi
-      echo "More options: ${RIG_LINUX_INSTALL_URL}"
-      ;;
-  esac
+  if command -v rig >/dev/null 2>&1; then
+    echo "The rig on PATH does not support user-mode R installations."
+  else
+    echo "rig was not found on PATH."
+  fi
+  echo "The development version of rig is optional, but required for r-version, --r-version, IR_R_VERSION, or date-only exclude-newer."
+  echo "Install it from source with Rust:"
+  echo '  rig_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}"'
+  echo "  cargo install --git ${RIG_SOURCE_URL} --locked --force --root \"\${rig_root}\" rig"
+  echo "Then put Cargo's bin directory before any existing rig on PATH:"
+  echo '  export PATH="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}/bin:${PATH}"'
+  echo "Add the same line to your shell profile so the development rig remains first."
+  echo "Source: ${RIG_SOURCE_URL}"
 }
 
 zprofile_path() {
