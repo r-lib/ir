@@ -18,7 +18,6 @@ SKIP_PYTHON=0
 SKIP_QUARTO=0
 SKIP_R_RELEASE=0
 SKIP_TEST_R=0
-RIG_LATEST_RELEASE_URL="https://github.com/r-lib/rig/releases/latest"
 
 usage() {
   cat <<EOF
@@ -138,18 +137,13 @@ linux_quarto_arch() {
   esac
 }
 
-macos_rig_arch() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "<macos-arch>"
-    return 0
-  fi
-
+linux_rig_deb_arch() {
   case "$(uname -m)" in
-    arm64 | aarch64)
-      echo "arm64"
-      ;;
     x86_64 | amd64)
-      echo "x86_64"
+      echo "amd64"
+      ;;
+    aarch64 | arm64)
+      echo "arm64"
       ;;
     *)
       die "unsupported architecture for rig: $(uname -m)"
@@ -157,53 +151,99 @@ macos_rig_arch() {
   esac
 }
 
-latest_rig_release_tag() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "<latest-rig-tag>"
-    return 0
-  fi
-
-  require_command curl
-  latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$RIG_LATEST_RELEASE_URL")"
-  rig_tag="${latest_url##*/}"
-  [ -n "$rig_tag" ] || die "could not resolve latest rig release tag"
-  [ "$rig_tag" != "latest" ] || die "could not resolve latest rig release tag"
-  echo "$rig_tag"
-}
-
-rig_version_from_tag() {
-  case "$1" in
-    "<latest-rig-tag>")
-      echo "<latest-rig-version>"
+macos_rig_arch() {
+  case "$(uname -m)" in
+    x86_64 | amd64)
+      echo "x86_64"
       ;;
-    v*)
-      echo "${1#v}"
+    aarch64 | arm64)
+      echo "arm64"
       ;;
     *)
-      echo "$1"
+      die "unsupported architecture for rig: $(uname -m)"
       ;;
   esac
 }
 
-install_macos_rig() {
-  require_command curl
-  require_command installer
+rig_release_asset_url() {
+  pattern="$1"
 
-  rig_tag="$(latest_rig_release_tag)"
-  rig_version="$(rig_version_from_tag "$rig_tag")"
-  rig_arch="$(macos_rig_arch)"
-  rig_asset="rig-${rig_version}-macOS-${rig_arch}.pkg"
-  rig_url="https://github.com/r-lib/rig/releases/download/${rig_tag}/${rig_asset}"
   if [ "$DRY_RUN" -eq 1 ]; then
-    rig_pkg="/tmp/ir-rig.pkg"
-  else
-    rig_pkg="${TMPDIR:-/tmp}/ir-rig.$$.pkg"
+    echo "https://api.github.com/repos/r-lib/rig/releases/latest#${pattern}"
+    return 0
   fi
 
-  run curl -fsSL "$rig_url" -o "$rig_pkg"
+  require_command python3
+  python3 - "$pattern" <<'PY'
+import json
+import os
+import re
+import sys
+import urllib.request
+
+pattern = re.compile(sys.argv[1])
+request = urllib.request.Request(
+    "https://api.github.com/repos/r-lib/rig/releases/latest",
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ir-install-dev-deps",
+    },
+)
+token = os.environ.get("GITHUB_TOKEN", "")
+if token:
+    request.add_header("Authorization", f"Bearer {token}")
+
+with urllib.request.urlopen(request) as response:
+    release = json.load(response)
+
+matches = [
+    asset["browser_download_url"]
+    for asset in release.get("assets", [])
+    if pattern.fullmatch(asset.get("name", ""))
+]
+if len(matches) != 1:
+    names = "\n".join(asset.get("name", "") for asset in release.get("assets", []))
+    raise SystemExit(
+        f"expected exactly one rig release asset matching {pattern.pattern!r}; "
+        f"found {len(matches)}\n{names}"
+    )
+
+print(matches[0])
+PY
+}
+
+install_macos_rig() {
+  require_command curl
+  require_command python3
+  require_command installer
+
+  rig_pkg="${TMPDIR:-/tmp}/ir-rig.pkg"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    rig_pkg="${TMPDIR:-/tmp}/ir-rig.$$".pkg
+  fi
+
+  rig_pkg_url="$(rig_release_asset_url "rig-[0-9.]+-macOS-$(macos_rig_arch)\\.pkg")"
+  run curl -fsSL "$rig_pkg_url" -o "$rig_pkg"
   run_root installer -pkg "$rig_pkg" -target /
   if [ "$DRY_RUN" -eq 0 ]; then
     rm -f "$rig_pkg"
+  fi
+}
+
+install_linux_deb_rig() {
+  require_command curl
+  require_command python3
+
+  rig_deb="${TMPDIR:-/tmp}/ir-rig.deb"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    rig_deb="${TMPDIR:-/tmp}/ir-rig.$$".deb
+  fi
+
+  rig_deb_url="$(rig_release_asset_url "r-rig_[0-9.]+-[0-9]+_$(linux_rig_deb_arch)\\.deb")"
+  run curl -fsSL "$rig_deb_url" -o "$rig_deb"
+  run_root apt-get install -y --no-install-recommends "$rig_deb"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    rm -f "$rig_deb"
   fi
 }
 
@@ -286,22 +326,7 @@ install_linux_deb() {
   fi
 
   if ! have_command rig; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      run curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o /tmp/ir-rig.gpg
-      run sudo install -m 0644 /tmp/ir-rig.gpg /etc/apt/trusted.gpg.d/rig.gpg
-      echo "+ write /tmp/ir-rig.list: deb http://rig.r-pkg.org/deb rig main"
-      run sudo install -m 0644 /tmp/ir-rig.list /etc/apt/sources.list.d/rig.list
-    else
-      rig_key="${TMPDIR:-/tmp}/ir-rig.$$".gpg
-      rig_list="${TMPDIR:-/tmp}/ir-rig.$$".list
-      run curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o "$rig_key"
-      printf '%s\n' "deb http://rig.r-pkg.org/deb rig main" >"$rig_list"
-      run_root install -m 0644 "$rig_key" /etc/apt/trusted.gpg.d/rig.gpg
-      run_root install -m 0644 "$rig_list" /etc/apt/sources.list.d/rig.list
-      rm -f "$rig_key" "$rig_list"
-    fi
-    run_root apt-get update
-    run_root apt-get install -y --no-install-recommends r-rig
+    install_linux_deb_rig
   fi
 
   if [ "$SKIP_QUARTO" -eq 0 ] && ! have_command quarto; then

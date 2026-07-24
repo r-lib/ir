@@ -153,6 +153,17 @@ fn resolver_probe_count(entered: &Path) -> usize {
         .count()
 }
 
+fn remove_python_resolver_env(cmd: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        let remove = name
+            .to_str()
+            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV");
+        if remove {
+            cmd.env_remove(name);
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn concurrent_python_render_serializes_python_resolver_tooling() {
@@ -199,10 +210,12 @@ ir:
         .arg(&doc)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    remove_python_resolver_env(&mut first);
     let first = first.spawn().unwrap();
     let first = wait_for_resolver_probe(first, &active);
 
-    let second = ir()
+    let mut second = ir();
+    second
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &user_cache_dir)
         .env("R_PROFILE_USER", &profile)
@@ -213,9 +226,9 @@ ir:
         .env("IR_TEST_SLEEP", "1")
         .env("IR_TEST_PYTHON", &python)
         .args(["render"])
-        .arg(&doc)
-        .output()
-        .unwrap();
+        .arg(&doc);
+    remove_python_resolver_env(&mut second);
+    let second = second.output().unwrap();
     let first = first.wait_with_output().unwrap();
 
     assert_success(&first);

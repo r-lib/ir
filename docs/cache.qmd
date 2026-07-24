@@ -30,9 +30,11 @@ Installed tool libraries use the same content-addressing under `IR_TOOL_STORE_DI
 $ ir cache dir
 $ ir cache clean
 $ ir cache clean --force
+$ ir cache clean --all
 ```
 
 `ir cache dir` prints the cache root.
 `ir cache clean` removes the whole `ir` cache, including resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
 It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.
+`--all` also removes the pak, renv, reticulate, and external uv caches that `ir` uses, printing each cache path before it is cleared.

@@ -104,6 +104,8 @@ jobs:
             --skip python \
             --skip quarto \
             --skip r-release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Install rig and non-default R (Windows)
         if: runner.os == 'Windows'
