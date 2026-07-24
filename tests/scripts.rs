@@ -55,6 +55,18 @@ fn readme_install_commands_are_copyable() {
 }
 
 #[test]
+fn public_windows_install_guidance_recommends_scoop() {
+    for file in ["README.md", "docs/config.qmd"] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        assert!(text.contains("scoop install ir"), "{file}");
+        assert!(
+            text.contains("https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1"),
+            "{file}"
+        );
+    }
+}
+
+#[test]
 fn public_ir_links_use_r_lib_owner() {
     for file in [
         "README.md",

@@ -60,13 +60,19 @@ Install a pre-built binary on Linux or macOS:
 curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh
 ```
 
-Install on Windows PowerShell:
+Install on Windows with Scoop:
+
+```powershell
+scoop install ir
+```
+
+Alternatively, install the Windows binary directly from PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex
 ```
 
-The installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
+The direct installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
