@@ -61,9 +61,10 @@ Install a pre-built binary on Linux or macOS:
 curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh
 ```
 
-Install on Windows with Scoop:
+Install on Windows with Scoop using the `r-bucket` bucket:
 
 ```powershell
+scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
 scoop install ir
 ```
 

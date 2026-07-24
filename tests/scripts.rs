@@ -58,7 +58,13 @@ fn readme_install_commands_are_copyable() {
 fn public_windows_install_guidance_recommends_scoop() {
     for file in ["README.md", "docs/config.qmd"] {
         let text = fs::read_to_string(repo_root().join(file)).unwrap();
-        assert!(text.contains("scoop install ir"), "{file}");
+        let add_bucket = text
+            .find("scoop bucket add r-bucket https://github.com/cderv/r-bucket.git")
+            .unwrap_or_else(|| panic!("{file} should add the Scoop bucket"));
+        let install = text
+            .find("scoop install ir")
+            .unwrap_or_else(|| panic!("{file} should install ir with Scoop"));
+        assert!(add_bucket < install, "{file}");
         assert!(
             text.contains("https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1"),
             "{file}"
