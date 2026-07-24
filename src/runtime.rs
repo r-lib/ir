@@ -13,7 +13,7 @@ use time::{Date, OffsetDateTime};
 use crate::driver;
 use crate::lock::{resolver_lock_path, FileLock};
 use crate::python;
-use crate::quarto::{self, QuartoCommand, QuartoSource};
+use crate::quarto::{self, QuartoCommand, QuartoOptions, QuartoSource};
 use crate::resolve_cache;
 use crate::rig;
 use crate::script::RunSource;
@@ -75,8 +75,7 @@ pub(crate) fn cmd_quarto(
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
     quarto_args: &[String],
-    isolated: bool,
-    vanilla: bool,
+    options: QuartoOptions,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     apply_exclude_newer_overrides(
@@ -86,7 +85,10 @@ pub(crate) fn cmd_quarto(
     )?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
-    let isolated = isolated || spec.isolated;
+    let options = QuartoOptions {
+        isolated: options.isolated || spec.isolated,
+        ..options
+    };
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
     let resolved = resolve_runtime(&rscript, &spec, true, &[])?;
@@ -97,8 +99,7 @@ pub(crate) fn cmd_quarto(
         resolved.python.as_deref(),
         source.path(),
         quarto_args,
-        isolated,
-        vanilla,
+        options,
     )?;
     std::process::exit(code);
 }

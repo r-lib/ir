@@ -96,8 +96,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     python_exclude_newer: render.python_exclude_newer.as_deref(),
                 },
                 &render.quarto_args,
-                render.isolated,
-                render.vanilla,
+                quarto::QuartoOptions {
+                    isolated: render.isolated,
+                    vanilla: render.vanilla,
+                },
             )
         }
         Some(("preview", _)) => {
@@ -115,8 +117,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     python_exclude_newer: preview.python_exclude_newer.as_deref(),
                 },
                 &preview.quarto_args,
-                preview.isolated,
-                preview.vanilla,
+                quarto::QuartoOptions {
+                    isolated: preview.isolated,
+                    vanilla: preview.vanilla,
+                },
             )
         }
         Some(("quickstart", _)) => quickstart::cmd_quickstart(),

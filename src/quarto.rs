@@ -25,6 +25,12 @@ impl QuartoCommand {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct QuartoOptions {
+    pub(crate) isolated: bool,
+    pub(crate) vanilla: bool,
+}
+
 pub(crate) struct QuartoSource {
     path: PathBuf,
 }
@@ -65,8 +71,7 @@ pub(crate) fn run(
     python: Option<&Path>,
     doc: &Path,
     quarto_args: &[String],
-    isolated: bool,
-    vanilla: bool,
+    options: QuartoOptions,
 ) -> Result<i32, Box<dyn Error>> {
     let mut cmd = Command::new(self::command());
     cmd.arg(command.as_str()).arg(doc).args(quarto_args);
@@ -81,10 +86,10 @@ pub(crate) fn run(
         cmd.env("QUARTO_PYTHON", python);
         cmd.env("RETICULATE_PYTHON", python);
     }
-    if isolated {
+    if options.isolated {
         cmd.env("R_LIBS_USER", "NULL");
     }
-    if vanilla {
+    if options.vanilla {
         cmd.env("QUARTO_KNITR_RSCRIPT_ARGS", "--vanilla");
     }
 

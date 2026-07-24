@@ -560,6 +560,33 @@ fn cli_tests_do_not_use_global_e2e_lock() {
 }
 
 #[test]
+fn local_check_runs_all_ci_diagnostics_and_is_required_for_agents() {
+    let check_path = repo_root().join("scripts/check.sh");
+    let check = fs::read_to_string(&check_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", check_path.display()));
+    let workflow_path = repo_root().join(".github/workflows/ci.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", workflow_path.display()));
+
+    for command in [
+        "cargo fmt --all -- --check",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo nextest run --verbose --no-fail-fast",
+    ] {
+        assert!(check.contains(command), "{check_path:?} omits `{command}`");
+        assert!(
+            workflow.contains(command),
+            "{workflow_path:?} omits `{command}`"
+        );
+    }
+
+    let agents_path = repo_root().join("AGENTS.md");
+    let agents = fs::read_to_string(&agents_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", agents_path.display()));
+    assert!(agents.contains("scripts/check.sh"), "{agents_path:?}");
+}
+
+#[test]
 fn r_version_selection_test_uses_dynamic_test_r_version() {
     let path = repo_root().join("tests/rig_selection.rs");
     let test = fs::read_to_string(&path)
