@@ -306,6 +306,7 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#ir" id="toc-ir" class="nav-link active" data-scroll-target="#ir"><code>ir</code></a></li>
   <li><a href="#ir-run" id="toc-ir-run" class="nav-link" data-scroll-target="#ir-run"><code>ir run</code></a></li>
   <li><a href="#ir-render" id="toc-ir-render" class="nav-link" data-scroll-target="#ir-render"><code>ir render</code></a></li>
+  <li><a href="#ir-preview" id="toc-ir-preview" class="nav-link" data-scroll-target="#ir-preview"><code>ir preview</code></a></li>
   <li><a href="#ir-tool" id="toc-ir-tool" class="nav-link" data-scroll-target="#ir-tool"><code>ir tool</code></a></li>
   <li><a href="#ir-tool-run" id="toc-ir-tool-run" class="nav-link" data-scroll-target="#ir-tool-run"><code>ir tool run</code></a></li>
   <li><a href="#ir-tool-install" id="toc-ir-tool-install" class="nav-link" data-scroll-target="#ir-tool-install"><code>ir tool install</code></a></li>
@@ -351,6 +352,7 @@ ul.task-list li input[type="checkbox"] {
 <span style="color: #5555FF; font-weight: bold;">Commands:</span>
   <span style="color: #00BBBB; font-weight: bold;">run</span>         Run a script or inline R expression
   <span style="color: #00BBBB; font-weight: bold;">render</span>      Render a Quarto document or script
+  <span style="color: #00BBBB; font-weight: bold;">preview</span>     Preview a Quarto document or script
   <span style="color: #00BBBB; font-weight: bold;">tool</span>        Run package executables
   <span style="color: #00BBBB; font-weight: bold;">quickstart</span>  Show a concise usage guide for AI agents
   <span style="color: #00BBBB; font-weight: bold;">cache</span>       Manage ir's cache
@@ -363,6 +365,7 @@ ul.task-list li input[type="checkbox"] {
 <span style="color: #5555FF; font-weight: bold;">Examples:</span>
   ir run script.R
   ir render report.qmd
+  ir preview report.qmd
   ir tool run btw
   ir cache dir</code></pre>
 
@@ -437,6 +440,38 @@ ul.task-list li input[type="checkbox"] {
   ir render --vanilla slides.qmd --output slides.html
 <span style="color: #555555;">      # --vanilla is passed to the Rscript used by Quarto.</span>
 <span style="color: #555555;">      # --output slides.html is passed to quarto render.</span></code></pre>
+
+</div>
+</div>
+</section>
+<section id="ir-preview" class="level2">
+<h2 class="anchored" data-anchor-id="ir-preview"><code>ir preview</code></h2>
+<div class="cell">
+<div class="cell-output-display">
+<pre class="ir-cli-help"><code>Preview a Quarto document or script
+
+<span style="color: #5555FF; font-weight: bold;">Usage:</span> <span style="color: #00BBBB; font-weight: bold;">ir preview</span> <span style="color: #555555;">[OPTIONS]</span> <span style="color: #555555;">&lt;SOURCE&gt;</span> <span style="color: #555555;">[QUARTO_ARGS]...</span>
+
+<span style="color: #5555FF; font-weight: bold;">Arguments:</span>
+  <span style="color: #555555;">&lt;SOURCE&gt;</span>          Quarto document or script to preview
+  <span style="color: #555555;">[QUARTO_ARGS]...</span>  Arguments passed to `quarto preview`
+
+<span style="color: #5555FF; font-weight: bold;">Options:</span>
+      <span style="color: #00BBBB; font-weight: bold;">--with</span><span style="color: #555555;"> &lt;PKG&gt;</span>                   Add a dependency for this preview; may be repeated
+      <span style="color: #00BBBB; font-weight: bold;">--r-version</span><span style="color: #555555;"> &lt;SPEC&gt;</span>             Select the R version for this preview with rig
+      <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>            Select the Rscript executable
+      <span style="color: #00BBBB; font-weight: bold;">--exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>         Resolve packages from the Posit Package Manager snapshot at this date
+      <span style="color: #00BBBB; font-weight: bold;">--python-exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>  Resolve Python packages using this snapshot date
+      <span style="color: #00BBBB; font-weight: bold;">--isolated</span>                     Disable the user library for this preview
+      <span style="color: #00BBBB; font-weight: bold;">--vanilla</span>                      Pass --vanilla to the Rscript used by Quarto
+  <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>                         Print help
+
+<span style="color: #5555FF; font-weight: bold;">Examples:</span>
+  ir preview report.qmd
+  ir preview report.qmd --port 4321
+
+  ir preview --with ggplot2 report.qmd --no-browser
+<span style="color: #555555;">      # --with is for ir; --no-browser is passed to quarto preview.</span></code></pre>
 
 </div>
 </div>

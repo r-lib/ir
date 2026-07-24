@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Quarto Rendering – ir</title>
+<title>Quarto – ir</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -349,7 +349,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Quarto Rendering</h1>
+<h1 class="title">Quarto</h1>
 </div>
 
 
@@ -366,7 +366,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<p><code>ir render</code> renders Quarto documents and Quarto-formatted R scripts with <code>quarto render</code>. Runtime metadata lives under an <code>ir:</code> key in the source YAML.</p>
+<p><code>ir render</code> and <code>ir preview</code> run Quarto documents and Quarto-formatted R scripts with their declared runtime requirements. Runtime metadata lives under an <code>ir:</code> key in the source YAML.</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">title</span><span class="kw">:</span><span class="at"> My report</span></span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ir</span><span class="kw">:</span></span>
@@ -392,30 +392,35 @@ $ ir render --vanilla report.qmd</code></pre>
 <pre class="console"><code>$ ir render report.R</code></pre>
 <p>The <code>ir.packages</code> value follows the same rules as script <code>packages</code>: use a YAML sequence where each entry is one package ref, or omit it, set it to <code>[]</code>, or set it to <code>null</code> for no dependencies.</p>
 <p><code>ir</code> resolves the document packages into the same cached library model used for scripts, then launches <code>quarto render</code>. Arguments after the source path are passed to <code>quarto render</code>.</p>
+<p>Preview the document with the same runtime:</p>
+<pre class="console"><code>$ ir preview report.qmd
+$ ir preview report.qmd --port 4321
+$ ir preview --with ggplot2 report.qmd --no-browser</code></pre>
+<p><code>ir preview</code> launches <code>quarto preview</code>. Arguments after the source path are passed to <code>quarto preview</code>.</p>
 <p>Use <code>--vanilla</code> before the source path to pass <code>--vanilla</code> to the Rscript used by Quarto. Snapshot date precedence is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>ir.exclude-newer</code>. An empty <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> overrides frontmatter <code>ir.exclude-newer</code> and resolves latest packages. Future snapshot dates also resolve latest packages.</p>
 <p>When <code>ir</code> selects an R executable by <code>--rscript</code>, <code>IR_RSCRIPT</code>, <code>--r-version</code>, <code>IR_R_VERSION</code>, frontmatter <code>ir.r-version</code>, or date-only <code>exclude-newer</code>, it sets <code>QUARTO_R</code> so Quarto renders with that R. Frontmatter <code>ir.rscript</code> is rejected.</p>
 <p>Set <code>IR_QUARTO</code> to use a specific Quarto executable.</p>
 <section id="python-environments" class="level2">
 <h2 class="anchored" data-anchor-id="python-environments">Python environments</h2>
-<p>Use <code>ir.python-packages</code> to ask <code>ir render</code> for a Python environment before launching Quarto. <code>ir</code> resolves the environment with <code>reticulate:::uv_get_or_create_env()</code> and injects <code>jupyter</code>. It passes the resulting Python executable to Quarto with <code>QUARTO_PYTHON</code> and to reticulate with <code>RETICULATE_PYTHON</code>. Python environment resolution uses <code>ir</code>’s private reticulate tooling. Declare render-time R dependencies with <code>ir.packages</code> and Python dependencies with <code>ir.python-packages</code>. When Python metadata is present, <code>ir.exclude-newer</code> is also used during Python environment resolution unless <code>ir.python-exclude-newer</code> is set. Set <code>ir.python-exclude-newer</code> to <code>null</code> or <code>""</code> to use latest Python packages while keeping <code>ir.exclude-newer</code> for R.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">title</span><span class="kw">:</span><span class="at"> Python report</span></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="fu">jupyter</span><span class="kw">:</span><span class="at"> python3</span></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ir</span><span class="kw">:</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-packages</span><span class="kw">:</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> pandas</span></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> matplotlib</span></span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-version</span><span class="kw">:</span><span class="at"> </span><span class="st">"3.11"</span></span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">exclude-newer</span><span class="kw">:</span><span class="at"> 2026-06-01</span></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-exclude-newer</span><span class="kw">:</span><span class="at"> 2026-05-01</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Use <code>ir.python-packages</code> to ask <code>ir render</code> or <code>ir preview</code> for a Python environment before launching Quarto. <code>ir</code> resolves the environment with <code>reticulate:::uv_get_or_create_env()</code> and injects <code>jupyter</code>. It passes the resulting Python executable to Quarto with <code>QUARTO_PYTHON</code> and to reticulate with <code>RETICULATE_PYTHON</code>. Python environment resolution uses <code>ir</code>’s private reticulate tooling. Declare Quarto runtime R dependencies with <code>ir.packages</code> and Python dependencies with <code>ir.python-packages</code>. When Python metadata is present, <code>ir.exclude-newer</code> is also used during Python environment resolution unless <code>ir.python-exclude-newer</code> is set. Set <code>ir.python-exclude-newer</code> to <code>null</code> or <code>""</code> to use latest Python packages while keeping <code>ir.exclude-newer</code> for R.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">title</span><span class="kw">:</span><span class="at"> Python report</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="fu">jupyter</span><span class="kw">:</span><span class="at"> python3</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ir</span><span class="kw">:</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-packages</span><span class="kw">:</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> pandas</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> matplotlib</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-version</span><span class="kw">:</span><span class="at"> </span><span class="st">"3.11"</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">exclude-newer</span><span class="kw">:</span><span class="at"> 2026-06-01</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">python-exclude-newer</span><span class="kw">:</span><span class="at"> 2026-05-01</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="r-package-injection" class="level2">
 <h2 class="anchored" data-anchor-id="r-package-injection">R package injection</h2>
-<p>A Quarto render needs the <code>rmarkdown</code> package for the knitr engine. <code>ir</code> appends <code>rmarkdown</code> to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of <code>exclude-newer</code> when set).</p>
+<p>A Quarto render or preview needs the <code>rmarkdown</code> package for the knitr engine. <code>ir</code> appends <code>rmarkdown</code> to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of <code>exclude-newer</code> when set).</p>
 <p>Declare <code>rmarkdown</code> yourself under <code>ir.packages</code> - directly (for example, <code>rmarkdown@2.29</code>) or transitively through a package that imports it - to override the injected seed.</p>
 <p>Knitr-backed Quarto documents with Python chunks can use <code>reticulate</code> for Python execution. <code>ir</code> detects local Python chunks in <code>.Rmd</code> files and in <code>.qmd</code> files that select knitr or contain both R and Python chunks, then appends <code>reticulate</code> when the resolved package set does not already provide it.</p>
-<p>For Jupyter renders, declare <code>ir.python-packages</code> or <code>ir.python-version</code> when <code>ir render</code> should create the Python environment and inject <code>jupyter</code>.</p>
+<p>For Jupyter documents, declare <code>ir.python-packages</code> or <code>ir.python-version</code> when <code>ir</code> should create the Python environment and inject <code>jupyter</code>.</p>
 
 
 </section>

@@ -337,7 +337,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><code>R</code> / <code>Rscript</code> on <code>PATH</code>, <code>--rscript</code>, or <code>IR_RSCRIPT</code>, when R is not selected by frontmatter <code>r-version</code>, <code>IR_R_VERSION</code>, <code>--r-version</code>, or date-only <code>exclude-newer</code>.</li>
 <li><code>rig</code> on <code>PATH</code> when <code>r-version</code>, <code>IR_R_VERSION</code>, or <code>--r-version</code> is set, or when date-only <code>exclude-newer</code> selects R.</li>
-<li><code>quarto</code> on <code>PATH</code>, or <code>IR_QUARTO</code>, when rendering <code>.qmd</code>, <code>.Rmd</code>, or R script files.</li>
+<li><code>quarto</code> on <code>PATH</code>, or <code>IR_QUARTO</code>, when rendering or previewing <code>.qmd</code>, <code>.Rmd</code>, or R script files.</li>
 <li><code>ir</code> installs its own resolver tooling (<code>pak</code>, <code>renv</code>, <code>secretbase</code>) on first use into a dedicated library under the cache directory, so you do not need to pre-install them. Copies already on the R library path are reused instead of installing a private one.</li>
 <li>A Rust toolchain only when building from source.</li>
 </ul>
@@ -373,7 +373,7 @@ ul.task-list li input[type="checkbox"] {
 </tr>
 <tr class="even">
 <td><code>IR_EXCLUDE_NEWER</code></td>
-<td><code>ir run</code> and <code>ir render</code> package snapshot date; also selects R when no explicit R selector is set</td>
+<td><code>ir run</code>, <code>ir render</code>, and <code>ir preview</code> package snapshot date; also selects R when no explicit R selector is set</td>
 <td>unset</td>
 </tr>
 <tr class="odd">
@@ -393,7 +393,7 @@ ul.task-list li input[type="checkbox"] {
 </tr>
 <tr class="even">
 <td><code>IR_QUARTO</code></td>
-<td>Quarto rendering</td>
+<td>Quarto rendering and preview</td>
 <td><code>quarto</code> on <code>PATH</code></td>
 </tr>
 <tr class="odd">
@@ -444,7 +444,7 @@ ul.task-list li input[type="checkbox"] {
 </tbody>
 </table>
 <p>The default cache directory is computed before launching R. <code>IR_CACHE_DIR</code> is authoritative; otherwise <code>ir</code> uses the process <code>R_USER_CACHE_DIR</code>, process <code>XDG_CACHE_HOME</code>, or a platform default and appends <code>R/ir</code>. The selected path is passed to the resolver R session, so R startup files do not redirect the <code>ir</code> cache. Installed tool libraries use <code>IR_TOOL_STORE_DIR</code>. When unset, the default is <code>$XDG_DATA_HOME/ir/tools</code> or <code>~/.local/share/ir/tools</code> on Unix and macOS, and <code>%LOCALAPPDATA%\Programs\R\ir\tools</code> or <code>%USERPROFILE%\AppData\Local\Programs\R\ir\tools</code> on Windows. This store is persistent state and is not removed by <code>ir cache clean</code>.</p>
-<p>Package snapshot date precedence for <code>ir run</code> and <code>ir render</code> is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>exclude-newer</code>. <code>IR_EXCLUDE_NEWER</code> is ignored when <code>--exclude-newer</code> is supplied. Set <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> to an empty string to override frontmatter <code>exclude-newer</code> and resolve latest packages. Future snapshot dates also resolve latest packages. When Python metadata is present, the selected <code>exclude-newer</code> value is also used during Python environment resolution unless <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> is set. Set <code>python-exclude-newer</code> to <code>null</code>, or set <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> to an empty string, to resolve latest Python packages while keeping <code>exclude-newer</code> for R. R selection precedence is command line, then environment, then frontmatter <code>r-version</code>. Use <code>--rscript</code> or <code>IR_RSCRIPT</code> to select a specific Rscript executable. Use <code>--r-version</code>, <code>IR_R_VERSION</code>, or frontmatter <code>r-version</code> to select an installed R through <code>rig</code>. Do not set both <code>--rscript</code> and <code>--r-version</code>, or both <code>IR_RSCRIPT</code> and <code>IR_R_VERSION</code>. Frontmatter <code>rscript</code> is rejected. When <code>exclude-newer</code> is set without an explicit R selector, <code>ir</code> uses <code>rig</code> to select the latest R minor version available on that date. <code>--bin-dir &lt;dir&gt;</code> overrides the executable install directory environment variables for <code>ir tool install</code>. On macOS, <code>ir tool install</code> adds the default <code>~/.local/bin</code> directory to the zsh profile when needed. On Windows, it adds the default or environment-selected executable install directory to the user <code>Path</code>.</p>
+<p>Package snapshot date precedence for <code>ir run</code>, <code>ir render</code>, and <code>ir preview</code> is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>exclude-newer</code>. <code>IR_EXCLUDE_NEWER</code> is ignored when <code>--exclude-newer</code> is supplied. Set <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> to an empty string to override frontmatter <code>exclude-newer</code> and resolve latest packages. Future snapshot dates also resolve latest packages. When Python metadata is present, the selected <code>exclude-newer</code> value is also used during Python environment resolution unless <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> is set. Set <code>python-exclude-newer</code> to <code>null</code>, or set <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> to an empty string, to resolve latest Python packages while keeping <code>exclude-newer</code> for R. R selection precedence is command line, then environment, then frontmatter <code>r-version</code>. Use <code>--rscript</code> or <code>IR_RSCRIPT</code> to select a specific Rscript executable. Use <code>--r-version</code>, <code>IR_R_VERSION</code>, or frontmatter <code>r-version</code> to select an installed R through <code>rig</code>. Do not set both <code>--rscript</code> and <code>--r-version</code>, or both <code>IR_RSCRIPT</code> and <code>IR_R_VERSION</code>. Frontmatter <code>rscript</code> is rejected. When <code>exclude-newer</code> is set without an explicit R selector, <code>ir</code> uses <code>rig</code> to select the latest R minor version available on that date. <code>--bin-dir &lt;dir&gt;</code> overrides the executable install directory environment variables for <code>ir tool install</code>. On macOS, <code>ir tool install</code> adds the default <code>~/.local/bin</code> directory to the zsh profile when needed. On Windows, it adds the default or environment-selected executable install directory to the user <code>Path</code>.</p>
 
 
 </section>
