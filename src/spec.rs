@@ -82,8 +82,8 @@ fn runtime_spec_from_yaml_mapping(
         isolated: frontmatter_optional_bool(doc, "isolated")?.unwrap_or(false),
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
         python: frontmatter_python_spec(doc, key_prefix)?,
-        // Quarto rendering is a property of the command, not the frontmatter.
-        // cmd_render sets it after parsing.
+        // Quarto execution is a property of the command, not the frontmatter.
+        // cmd_quarto sets it after parsing.
         ..RuntimeSpec::default()
     })
 }

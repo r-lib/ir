@@ -10,11 +10,26 @@ use saphyr::Yaml;
 
 use crate::spec::{load_first_yaml_document, parse_quarto_frontmatter, RuntimeSpec};
 
-pub(crate) struct RenderSource {
+#[derive(Clone, Copy)]
+pub(crate) enum QuartoCommand {
+    Preview,
+    Render,
+}
+
+impl QuartoCommand {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Preview => "preview",
+            Self::Render => "render",
+        }
+    }
+}
+
+pub(crate) struct QuartoSource {
     path: PathBuf,
 }
 
-impl RenderSource {
+impl QuartoSource {
     pub(crate) fn from_source_arg(source: String) -> Result<Self, Box<dyn Error>> {
         let path = PathBuf::from(&source);
         fs::metadata(&path).map_err(|e| format!("cannot read source `{source}`: {e}"))?;
@@ -36,24 +51,25 @@ impl RenderSource {
     }
 }
 
-/// Phase 2 — render `doc` with `quarto render`, pointed at the selected R and
-/// the materialised library.
+/// Phase 2 — run Quarto with `doc`, pointed at the selected R and the
+/// materialised library.
 ///
 /// `QUARTO_R` pins Quarto to `ir`'s selected Rscript. `R_LIBS`
 /// injects the resolved library exactly as for a script. With `vanilla`, that
-/// Rscript receives `--vanilla`. `render_args` become
-/// `quarto render <doc> <render_args>`.
+/// Rscript receives `--vanilla`. `quarto_args` become
+/// `quarto <command> <doc> <quarto_args>`.
 pub(crate) fn run(
+    command: QuartoCommand,
     rscript: &OsStr,
     library: Option<&Path>,
     python: Option<&Path>,
     doc: &Path,
-    render_args: &[String],
+    quarto_args: &[String],
     isolated: bool,
     vanilla: bool,
 ) -> Result<i32, Box<dyn Error>> {
-    let mut cmd = Command::new(command());
-    cmd.arg("render").arg(doc).args(render_args);
+    let mut cmd = Command::new(self::command());
+    cmd.arg(command.as_str()).arg(doc).args(quarto_args);
 
     if let Some(value) = r_value(rscript) {
         cmd.env("QUARTO_R", value);
@@ -334,8 +350,8 @@ fn apply_engine_name(value: &str, engine: &mut FrontmatterEngine) {
     match value.trim().to_ascii_lowercase().as_str() {
         "knitr" => engine.explicit_knitr = true,
         "jupyter" => engine.explicit_jupyter = true,
-        // `engine: markdown` is intentionally not modeled: ir render is scoped
-        // to executable self-describing documents.
+        // `engine: markdown` is intentionally not modeled: ir's Quarto
+        // commands are scoped to executable self-describing documents.
         _ => {}
     }
 }

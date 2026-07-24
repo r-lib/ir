@@ -35,10 +35,10 @@ Python:
   Add `python-packages` and optional `python-version` to frontmatter.
   In Quarto, put those keys under `ir:` with the R runtime metadata.
   `ir` resolves a Python environment with reticulate's uv helper before launch,
-  activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` also
-  sets QUARTO_PYTHON and injects jupyter.
+  activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` and
+  `ir preview` also set QUARTO_PYTHON and inject jupyter.
   Add `reticulate` under `packages` when R code loads reticulate; `ir render`
-  adds it for knitr-backed Quarto documents with Python chunks.
+  and `ir preview` add it for knitr-backed Quarto documents with Python chunks.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Isolation:
@@ -57,7 +57,7 @@ Package tools:
   Use tools for ad hoc package frontends. Use `ir tool install` for repeated
   shell use; installed tool libraries live outside the cache and survive
   `ir cache clean`. For durable analytical artifacts, prefer `ir run` or
-  `ir render` with frontmatter.
+  `ir render` or `ir preview` with frontmatter.
 
 Workflow:
   Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
@@ -67,12 +67,13 @@ Workflow:
 System requirements:
   R/Rscript must be available, either on PATH or selected with `--rscript`/`IR_RSCRIPT`.
   Use rig for `r-version` selection and date-only `exclude-newer` R selection.
-  Quarto must be available for `ir render`. OS libraries and compilers required
-  by packages remain system dependencies.
+  Quarto must be available for `ir render` and `ir preview`. OS libraries and
+  compilers required by packages remain system dependencies.
 
 Commands:
   ir run script.R
   ir render report.qmd
+  ir preview report.qmd
   ir run --with cli -e 'cli::cli_alert_success("ok")'
   ir tool run btw --help
   rx btw --help
@@ -85,6 +86,9 @@ Argument boundaries:
   ir render --with ggplot2 report.qmd --to html
       # `--with ggplot2` is for ir; `--to html` is passed to Quarto.
 
+  ir preview --with ggplot2 report.qmd --no-browser
+      # `--with ggplot2` is for ir; `--no-browser` is passed to Quarto.
+
   rx --from btw --with cli btw --help
       # `--from` and `--with` are for rx; `--help` is passed to the btw executable.
 
@@ -92,6 +96,7 @@ Inspection commands:
   ir --help
   ir run --help
   ir render --help
+  ir preview --help
   ir tool run --help
   ir tool install --help
   rx --help

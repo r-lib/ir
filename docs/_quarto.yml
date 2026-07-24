@@ -12,8 +12,8 @@ project:
 website:
   title: ir
   description: >-
-    Run standalone R scripts and render Quarto sources from embedded package
-    metadata.
+    Run standalone R scripts and render or preview Quarto sources from embedded
+    package metadata.
   navbar:
     left:
       - href: index.qmd

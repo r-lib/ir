@@ -13,7 +13,7 @@ use time::{Date, OffsetDateTime};
 use crate::driver;
 use crate::lock::{resolver_lock_path, FileLock};
 use crate::python;
-use crate::quarto::{self, RenderSource};
+use crate::quarto::{self, QuartoCommand, QuartoSource};
 use crate::resolve_cache;
 use crate::rig;
 use crate::script::RunSource;
@@ -66,14 +66,15 @@ pub(crate) fn cmd_run(
     std::process::exit(code);
 }
 
-/// Resolve dependencies for `source`, then render it with Quarto. Exits the
+/// Resolve dependencies for `source`, then run it with Quarto. Exits the
 /// process with Quarto's own exit code.
-pub(crate) fn cmd_render(
-    source: &RenderSource,
+pub(crate) fn cmd_quarto(
+    command: QuartoCommand,
+    source: &QuartoSource,
     with_deps: &[String],
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
-    render_args: &[String],
+    quarto_args: &[String],
     isolated: bool,
     vanilla: bool,
 ) -> Result<(), Box<dyn Error>> {
@@ -90,11 +91,12 @@ pub(crate) fn cmd_render(
 
     let resolved = resolve_runtime(&rscript, &spec, true, &[])?;
     let code = quarto::run(
+        command,
         &rscript,
         resolved.library.as_deref(),
         resolved.python.as_deref(),
         source.path(),
-        render_args,
+        quarto_args,
         isolated,
         vanilla,
     )?;

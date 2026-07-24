@@ -1,6 +1,6 @@
 # ir
 
-`ir` runs self-describing R scripts and renders Quarto sources.
+`ir` runs self-describing R scripts and renders or previews Quarto sources.
 
 Put the packages and R version next to the code, then run the file.
 `ir` resolves the requirements, prepares a cached package library, and starts R with that library ready to use.
@@ -32,7 +32,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
 - **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
-- **It works with normal R habits.** Forward `Rscript` options, render Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
+- **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
 
 `ir` is designed to be small, fast, and predictable: resolve once, reuse cached libraries aggressively, and avoid making you manage a project directory for a one-file workflow.
@@ -43,6 +43,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 ir run script.R
 ir run --vanilla script.R
 ir render report.qmd --to html
+ir preview report.qmd
 ir run --with cli -e 'cli::cli_alert_success("works")'
 ir run --r-version 4.5 script.R
 ir run --exclude-newer 2024-01-15 script.R
@@ -106,7 +107,7 @@ inspect the plan.
 
 - `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
 - `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
-- `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
+- `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
 
@@ -115,7 +116,7 @@ On first use, `ir` prepares its resolver tooling in its cache, so you do not nee
 For command details, configuration, and edge cases, see:
 
 - [Scripts](https://r-lib.github.io/ir/run.html)
-- [Quarto rendering](https://r-lib.github.io/ir/quarto.html)
+- [Quarto rendering and preview](https://r-lib.github.io/ir/quarto.html)
 - [Package tools](https://r-lib.github.io/ir/tools.html)
 - [Cache management](https://r-lib.github.io/ir/cache.html)
 - [Install and configuration](https://r-lib.github.io/ir/config.html)

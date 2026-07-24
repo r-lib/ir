@@ -5,7 +5,7 @@ subtitle: >-
   command-line runs.
 ---
 
-`ir` runs standalone R scripts and renders Quarto sources that declare their runtime requirements in the file itself.
+`ir` runs standalone R scripts and renders or previews Quarto sources that declare their runtime requirements in the file itself.
 It resolves those requirements into cached package libraries and runs the program with the selected R.
 
 ```r
@@ -30,7 +30,7 @@ library(tidyr)
 - Pin CRAN resolution to a Posit Package Manager snapshot with `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer`.
 - Select R with `--rscript`, `--r-version`, environment variables, frontmatter `r-version`, or date-only `exclude-newer`.
 - Evaluate inline expressions with `ir run -e` and add command-line packages with `--with`.
-- Render Quarto documents and Quarto-formatted R scripts through `ir render`, using the same package metadata model with `rmarkdown` seeded automatically for the knitr engine.
+- Render or preview Quarto documents and Quarto-formatted R scripts through `ir render` or `ir preview`, using the same package metadata model with `rmarkdown` seeded automatically for the knitr engine.
 - Run executables from R package `exec/`, `bin/`, or `bin/<arch>/` directories with `rx` or `ir tool run`.
 - Install persistent launchers for package tools with `ir tool install`; installed tool libraries live in the durable tool store.
 - Inspect and clear run/render cache state with `ir cache dir` and `ir cache clean`.
@@ -44,6 +44,7 @@ $ ir run script.R
 $ ir run --with cli -e 'cli::cli_alert_success("hi")'
 $ ir run --exclude-newer 2024-01-15 script.R
 $ ir render --r-version 4.5 report.qmd --to html
+$ ir preview report.qmd
 $ rx btw --help
 $ ir tool run --from btw btw --help
 $ ir tool install btw

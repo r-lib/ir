@@ -1,0 +1,24 @@
+Preview a Quarto document or script
+
+Usage: ir preview [OPTIONS] <SOURCE> [QUARTO_ARGS]...
+
+Arguments:
+  <SOURCE>          Quarto document or script to preview
+  [QUARTO_ARGS]...  Arguments passed to `quarto preview`
+
+Options:
+      --with <PKG>                   Add a dependency for this preview; may be repeated
+      --r-version <SPEC>             Select the R version for this preview with rig
+      --rscript <RSCRIPT>            Select the Rscript executable
+      --exclude-newer <DATE>         Resolve packages from the Posit Package Manager snapshot at this date
+      --python-exclude-newer <DATE>  Resolve Python packages using this snapshot date
+      --isolated                     Disable the user library for this preview
+      --vanilla                      Pass --vanilla to the Rscript used by Quarto
+  -h, --help                         Print help
+
+Examples:
+  ir preview report.qmd
+  ir preview report.qmd --port 4321
+
+  ir preview --with ggplot2 report.qmd --no-browser
+      # --with is for ir; --no-browser is passed to quarto preview.

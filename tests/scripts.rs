@@ -543,6 +543,7 @@ fn cli_tests_do_not_use_global_e2e_lock() {
         "tests/resolver_lock.rs",
         "tests/rig_selection.rs",
         "tests/render.rs",
+        "tests/preview.rs",
         "tests/tool.rs",
         "tests/support/mod.rs",
     ]

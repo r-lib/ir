@@ -1,8 +1,8 @@
 ---
-title: Quarto Rendering
+title: Quarto
 ---
 
-`ir render` renders Quarto documents and Quarto-formatted R scripts with `quarto render`.
+`ir render` and `ir preview` run Quarto documents and Quarto-formatted R scripts with their declared runtime requirements.
 Runtime metadata lives under an `ir:` key in the source YAML.
 
 ```yaml
@@ -47,6 +47,17 @@ The `ir.packages` value follows the same rules as script `packages`: use a YAML 
 `ir` resolves the document packages into the same cached library model used for scripts, then launches `quarto render`.
 Arguments after the source path are passed to `quarto render`.
 
+Preview the document with the same runtime:
+
+```console
+$ ir preview report.qmd
+$ ir preview report.qmd --port 4321
+$ ir preview --with ggplot2 report.qmd --no-browser
+```
+
+`ir preview` launches `quarto preview`.
+Arguments after the source path are passed to `quarto preview`.
+
 Use `--vanilla` before the source path to pass `--vanilla` to the Rscript used by Quarto.
 Snapshot date precedence is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `ir.exclude-newer`.
 An empty `--exclude-newer` or `IR_EXCLUDE_NEWER` overrides frontmatter `ir.exclude-newer` and resolves latest packages.
@@ -59,11 +70,11 @@ Set `IR_QUARTO` to use a specific Quarto executable.
 
 ## Python environments
 
-Use `ir.python-packages` to ask `ir render` for a Python environment before launching Quarto.
+Use `ir.python-packages` to ask `ir render` or `ir preview` for a Python environment before launching Quarto.
 `ir` resolves the environment with `reticulate:::uv_get_or_create_env()` and injects `jupyter`.
 It passes the resulting Python executable to Quarto with `QUARTO_PYTHON` and to reticulate with `RETICULATE_PYTHON`.
 Python environment resolution uses `ir`'s private reticulate tooling.
-Declare render-time R dependencies with `ir.packages` and Python dependencies with `ir.python-packages`.
+Declare Quarto runtime R dependencies with `ir.packages` and Python dependencies with `ir.python-packages`.
 When Python metadata is present, `ir.exclude-newer` is also used during Python environment resolution unless `ir.python-exclude-newer` is set.
 Set `ir.python-exclude-newer` to `null` or `""` to use latest Python packages while keeping `ir.exclude-newer` for R.
 
@@ -83,7 +94,7 @@ ir:
 
 ## R package injection
 
-A Quarto render needs the `rmarkdown` package for the knitr engine.
+A Quarto render or preview needs the `rmarkdown` package for the knitr engine.
 `ir` appends `rmarkdown` to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
 
 Declare `rmarkdown` yourself under `ir.packages` - directly (for example, `rmarkdown@2.29`) or transitively through a package that imports it - to override the injected seed.
@@ -91,4 +102,4 @@ Declare `rmarkdown` yourself under `ir.packages` - directly (for example, `rmark
 Knitr-backed Quarto documents with Python chunks can use `reticulate` for Python execution.
 `ir` detects local Python chunks in `.Rmd` files and in `.qmd` files that select knitr or contain both R and Python chunks, then appends `reticulate` when the resolved package set does not already provide it.
 
-For Jupyter renders, declare `ir.python-packages` or `ir.python-version` when `ir render` should create the Python environment and inject `jupyter`.
+For Jupyter documents, declare `ir.python-packages` or `ir.python-version` when `ir` should create the Python environment and inject `jupyter`.

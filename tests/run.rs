@@ -175,6 +175,8 @@ fn help_outputs_match_snapshots() {
         ("run-help", &["run", "-h"]),
         ("render-help", &["render", "--help"]),
         ("render-help", &["render", "-h"]),
+        ("preview-help", &["preview", "--help"]),
+        ("preview-help", &["preview", "-h"]),
         ("quickstart-help", &["quickstart", "--help"]),
         ("quickstart-help", &["quickstart", "-h"]),
         ("tool-help", &["tool", "--help"]),
@@ -261,6 +263,7 @@ fn help_section_headings_are_colored() {
         &["--help"][..],
         &["run", "--help"],
         &["render", "--help"],
+        &["preview", "--help"],
         &["tool", "run", "--help"],
         &["tool", "install", "--help"],
     ] {
@@ -305,6 +308,11 @@ fn clap_reports_public_usage_errors() {
             "the following required arguments were not provided",
         ),
         (vec!["render", "-e", "1"], "unexpected argument '-e'"),
+        (
+            vec!["preview"],
+            "the following required arguments were not provided",
+        ),
+        (vec!["preview", "-e", "1"], "unexpected argument '-e'"),
         (
             vec!["tool", "run", "--from", "btw"],
             "`--from` requires a command",

@@ -6,7 +6,7 @@ use clap::builder::styling::{AnsiColor, Styles};
 use clap::builder::StyledStr;
 use clap::{Arg, ArgAction, ColorChoice, Command as ClapCommand};
 
-use crate::quarto::RenderSource;
+use crate::quarto::{QuartoCommand, QuartoSource};
 use crate::runtime::nonempty_env;
 use crate::script::RunSource;
 
@@ -26,11 +26,13 @@ pub(crate) fn root() -> ClapCommand {
         .after_help(examples_help(concat!(
             "  ir run script.R\n",
             "  ir render report.qmd\n",
+            "  ir preview report.qmd\n",
             "  ir tool run btw\n",
             "  ir cache dir",
         )))
         .subcommand(run_command())
         .subcommand(render_command())
+        .subcommand(preview_command())
         .subcommand(tool_command())
         .subcommand(quickstart_command())
         .subcommand(cache_command())
@@ -183,31 +185,56 @@ fn run_command() -> ClapCommand {
 }
 
 fn render_command() -> ClapCommand {
-    ClapCommand::new("render")
-        .about("Render a Quarto document or script")
-        .after_help(examples_help(concat!(
-            "  ir render report.qmd\n",
-            "  ir render report.qmd --to html\n\n",
-            "  ir render --with ggplot2 report.qmd --to html\n",
-            "      # --with is for ir; --to html is passed to quarto render.\n\n",
-            "  ir render --vanilla slides.qmd --output slides.html\n",
-            "      # --vanilla is passed to the Rscript used by Quarto.\n",
-            "      # --output slides.html is passed to quarto render.",
-        )))
+    quarto_command(QuartoCommand::Render)
+}
+
+fn preview_command() -> ClapCommand {
+    quarto_command(QuartoCommand::Preview)
+}
+
+fn quarto_command(command: QuartoCommand) -> ClapCommand {
+    let name = command.as_str();
+    let (about, examples) = match command {
+        QuartoCommand::Render => (
+            "Render a Quarto document or script",
+            concat!(
+                "  ir render report.qmd\n",
+                "  ir render report.qmd --to html\n\n",
+                "  ir render --with ggplot2 report.qmd --to html\n",
+                "      # --with is for ir; --to html is passed to quarto render.\n\n",
+                "  ir render --vanilla slides.qmd --output slides.html\n",
+                "      # --vanilla is passed to the Rscript used by Quarto.\n",
+                "      # --output slides.html is passed to quarto render.",
+            ),
+        ),
+        QuartoCommand::Preview => (
+            "Preview a Quarto document or script",
+            concat!(
+                "  ir preview report.qmd\n",
+                "  ir preview report.qmd --port 4321\n\n",
+                "  ir preview --with ggplot2 report.qmd --no-browser\n",
+                "      # --with is for ir; --no-browser is passed to quarto preview.",
+            ),
+        ),
+    };
+
+    ClapCommand::new(name)
+        .about(about)
+        .after_help(examples_help(examples))
         .arg(
             Arg::new("with")
                 .long("with")
                 .value_name("PKG")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a dependency for this render; may be repeated"),
+                .help(format!("Add a dependency for this {name}; may be repeated")),
         )
         .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
                 .num_args(1)
-                .help("Select the R version for this render with rig"),
+                .help(format!("Select the R version for this {name} with rig")),
         )
         .arg(
             Arg::new("rscript")
@@ -234,7 +261,7 @@ fn render_command() -> ClapCommand {
             Arg::new("isolated")
                 .long("isolated")
                 .action(ArgAction::SetTrue)
-                .help("Disable the user library for this render"),
+                .help(format!("Disable the user library for this {name}")),
         )
         .arg(
             Arg::new("vanilla")
@@ -246,7 +273,7 @@ fn render_command() -> ClapCommand {
             Arg::new("source")
                 .value_name("SOURCE")
                 .required(true)
-                .help("Quarto document or script to render"),
+                .help(format!("Quarto document or script to {name}")),
         )
         .arg(
             Arg::new("quarto-args")
@@ -254,7 +281,7 @@ fn render_command() -> ClapCommand {
                 .num_args(0..)
                 .allow_hyphen_values(true)
                 .trailing_var_arg(true)
-                .help("Arguments passed to `quarto render`"),
+                .help(format!("Arguments passed to `quarto {name}`")),
         )
 }
 
@@ -471,14 +498,14 @@ pub(crate) struct RunArgs {
     pub(crate) isolated: bool,
 }
 
-pub(crate) struct RenderArgs {
+pub(crate) struct QuartoArgs {
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
     pub(crate) python_exclude_newer: Option<String>,
-    pub(crate) source: RenderSource,
-    pub(crate) render_args: Vec<String>,
+    pub(crate) source: QuartoSource,
+    pub(crate) quarto_args: Vec<String>,
     pub(crate) isolated: bool,
     pub(crate) vanilla: bool,
 }
@@ -618,7 +645,21 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
 
 /// Parse `ir render`, which resolves metadata for a Quarto source and then
 /// forwards the source plus trailing args to `quarto render`.
-pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn Error>> {
+pub(crate) fn parse_render_args(args: Vec<String>) -> Result<QuartoArgs, Box<dyn Error>> {
+    parse_quarto_args(args, QuartoCommand::Render)
+}
+
+/// Parse `ir preview`, which resolves metadata for a Quarto source and then
+/// forwards the source plus trailing args to `quarto preview`.
+pub(crate) fn parse_preview_args(args: Vec<String>) -> Result<QuartoArgs, Box<dyn Error>> {
+    parse_quarto_args(args, QuartoCommand::Preview)
+}
+
+fn parse_quarto_args(
+    args: Vec<String>,
+    command: QuartoCommand,
+) -> Result<QuartoArgs, Box<dyn Error>> {
+    let name = command.as_str();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
@@ -635,37 +676,49 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
         } else if arg == "--from" || arg.starts_with("--from=") {
             return Err("`--from` is only supported by `ir tool run`".into());
         } else if arg == "--with" {
-            let value = iter
-                .next()
-                .ok_or("`--with` requires a package (try `ir render --with dplyr report.qmd`)")?;
+            let value = iter.next().ok_or_else(|| {
+                format!("`--with` requires a package (try `ir {name} --with dplyr report.qmd`)")
+            })?;
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
         } else if arg == "--r-version" {
-            let value = iter.next().ok_or(
-                "`--r-version` requires a version spec (try `ir render --r-version 4.5 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--r-version` requires a version spec \
+                     (try `ir {name} --r-version 4.5 report.qmd`)"
+                )
+            })?;
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
         } else if arg == "--rscript" {
-            let value = iter.next().ok_or(
-                "`--rscript` requires a path or command (try `ir render --rscript /path/to/Rscript report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--rscript` requires a path or command \
+                     (try `ir {name} --rscript /path/to/Rscript report.qmd`)"
+                )
+            })?;
             rscript = Some(value);
         } else if let Some(value) = arg.strip_prefix("--rscript=") {
             rscript = Some(value.to_string());
         } else if arg == "--exclude-newer" {
-            let value = iter.next().ok_or(
-                "`--exclude-newer` requires a date (try `ir render --exclude-newer 2024-06-01 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--exclude-newer` requires a date \
+                     (try `ir {name} --exclude-newer 2024-06-01 report.qmd`)"
+                )
+            })?;
             exclude_newer = Some(value);
         } else if let Some(value) = arg.strip_prefix("--exclude-newer=") {
             exclude_newer = Some(value.to_string());
         } else if arg == "--python-exclude-newer" {
-            let value = iter.next().ok_or(
-                "`--python-exclude-newer` requires a date (try `ir render --python-exclude-newer 2024-06-01 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--python-exclude-newer` requires a date \
+                     (try `ir {name} --python-exclude-newer 2024-06-01 report.qmd`)"
+                )
+            })?;
             python_exclude_newer = Some(value);
         } else if let Some(value) = arg.strip_prefix("--python-exclude-newer=") {
             python_exclude_newer = Some(value.to_string());
@@ -674,27 +727,28 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
         } else if arg == "--vanilla" {
             vanilla = true;
         } else if arg == "-" {
-            return Err("`ir render` requires a source path, not stdin".into());
+            return Err(format!("`ir {name}` requires a source path, not stdin").into());
         } else if arg.starts_with('-') {
-            return Err(format!("unexpected option `{arg}` before render source").into());
+            return Err(format!("unexpected option `{arg}` before {name} source").into());
         } else {
             positional = Some(arg);
             break;
         }
     }
 
-    let render_args: Vec<String> = iter.collect();
-    let source =
-        positional.ok_or("`ir render` requires a source path (try `ir render report.qmd`)")?;
+    let quarto_args: Vec<String> = iter.collect();
+    let source = positional.ok_or_else(|| {
+        format!("`ir {name}` requires a source path (try `ir {name} report.qmd`)")
+    })?;
 
-    Ok(RenderArgs {
+    Ok(QuartoArgs {
         with_deps,
         r_requirement,
         rscript,
         exclude_newer,
         python_exclude_newer,
-        source: RenderSource::from_source_arg(source)?,
-        render_args,
+        source: QuartoSource::from_source_arg(source)?,
+        quarto_args,
         isolated,
         vanilla,
     })
