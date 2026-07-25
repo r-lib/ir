@@ -2275,9 +2275,10 @@ fn tool_install_records_env_selected_r_version_in_recovery_command() {
 
 #[cfg(windows)]
 #[test]
-fn tool_install_quotes_windows_recovery_rscript() {
+fn tool_install_quotes_windows_recovery_paths() {
     let cache_dir = temp_dir("ir-tool-install-windows-rscript-cache");
-    let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin");
+    let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin").join("bin dir");
+    fs::create_dir_all(&bin_dir).unwrap();
     let library = temp_dir("ir-tool-install-windows-rscript-library");
     let rscript_dir = temp_dir("ir tool install windows rscript");
     let package = library.join("irfake");
@@ -2318,8 +2319,8 @@ fn tool_install_quotes_windows_recovery_rscript() {
     let selected = std::path::absolute(&rscript).unwrap();
     let selected_bin_dir = std::path::absolute(&bin_dir).unwrap();
     let reinstall = format!(
-        "ir tool install --force --bin-dir {} --rscript \"{}\" irfake",
-        selected_bin_dir.to_string_lossy(),
+        "ir tool install --force --bin-dir \"{}\" --rscript \"{}\" irfake",
+        selected_bin_dir.to_string_lossy().replace('"', "\"\""),
         selected.to_string_lossy().replace('"', "\"\"")
     );
     assert!(launcher.contains(&reinstall), "{launcher}");

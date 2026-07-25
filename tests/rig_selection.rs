@@ -670,21 +670,27 @@ fn real_rig_installs_private_cached_r_on_disposable_ci() {
             .args(["run", "--r-version", "oldrel/2"])
             .args([
                 "-e",
-                "cat(normalizePath(R.home(), winslash = '/', mustWork = TRUE), as.character(getRversion()), sep = '\\n')",
+                "cat('IR_REAL_R_HOME=', normalizePath(R.home(), winslash = '/', mustWork = TRUE), '\\nIR_REAL_R_VERSION=', as.character(getRversion()), '\\n', sep = '')",
             ])
             .output()
             .unwrap()
     };
     let installed = |output: &std::process::Output| {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut lines = stdout.lines();
-        let home = PathBuf::from(lines.next().expect("real R run did not report R.home()"));
-        let version = lines
-            .next()
-            .expect("real R run did not report its version")
-            .to_string();
-        assert!(lines.next().is_none(), "unexpected R output:\n{stdout}");
-        (fs::canonicalize(home).unwrap(), version)
+        let homes = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("IR_REAL_R_HOME="))
+            .collect::<Vec<_>>();
+        let versions = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("IR_REAL_R_VERSION="))
+            .collect::<Vec<_>>();
+        assert_eq!(homes.len(), 1, "unexpected R home output:\n{stdout}");
+        assert_eq!(versions.len(), 1, "unexpected R version output:\n{stdout}");
+        (
+            fs::canonicalize(PathBuf::from(homes[0])).unwrap(),
+            versions[0].to_string(),
+        )
     };
 
     let first = run();
