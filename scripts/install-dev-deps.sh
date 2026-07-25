@@ -18,7 +18,7 @@ SKIP_PYTHON=0
 SKIP_QUARTO=0
 SKIP_R_RELEASE=0
 SKIP_TEST_R=0
-RIG_LATEST_RELEASE_URL="https://github.com/r-lib/rig/releases/latest"
+RIG_SOURCE_URL="https://github.com/r-lib/rig"
 
 usage() {
   cat <<EOF
@@ -138,75 +138,6 @@ linux_quarto_arch() {
   esac
 }
 
-macos_rig_arch() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "<macos-arch>"
-    return 0
-  fi
-
-  case "$(uname -m)" in
-    arm64 | aarch64)
-      echo "arm64"
-      ;;
-    x86_64 | amd64)
-      echo "x86_64"
-      ;;
-    *)
-      die "unsupported architecture for rig: $(uname -m)"
-      ;;
-  esac
-}
-
-latest_rig_release_tag() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "<latest-rig-tag>"
-    return 0
-  fi
-
-  require_command curl
-  latest_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$RIG_LATEST_RELEASE_URL")"
-  rig_tag="${latest_url##*/}"
-  [ -n "$rig_tag" ] || die "could not resolve latest rig release tag"
-  [ "$rig_tag" != "latest" ] || die "could not resolve latest rig release tag"
-  echo "$rig_tag"
-}
-
-rig_version_from_tag() {
-  case "$1" in
-    "<latest-rig-tag>")
-      echo "<latest-rig-version>"
-      ;;
-    v*)
-      echo "${1#v}"
-      ;;
-    *)
-      echo "$1"
-      ;;
-  esac
-}
-
-install_macos_rig() {
-  require_command curl
-  require_command installer
-
-  rig_tag="$(latest_rig_release_tag)"
-  rig_version="$(rig_version_from_tag "$rig_tag")"
-  rig_arch="$(macos_rig_arch)"
-  rig_asset="rig-${rig_version}-macOS-${rig_arch}.pkg"
-  rig_url="https://github.com/r-lib/rig/releases/download/${rig_tag}/${rig_asset}"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    rig_pkg="/tmp/ir-rig.pkg"
-  else
-    rig_pkg="${TMPDIR:-/tmp}/ir-rig.$$.pkg"
-  fi
-
-  run curl -fsSL "$rig_url" -o "$rig_pkg"
-  run_root installer -pkg "$rig_pkg" -target /
-  if [ "$DRY_RUN" -eq 0 ]; then
-    rm -f "$rig_pkg"
-  fi
-}
-
 install_rust() {
   if have_command cargo; then
     echo "cargo already installed"
@@ -222,7 +153,7 @@ install_rust() {
     if [ "$DRY_RUN" -eq 0 ]; then
       rm -f "$rustup_tmp"
     fi
-    export PATH="${HOME}/.cargo/bin:${PATH}"
+    export PATH="${CARGO_HOME:-${HOME}/.cargo}/bin:${PATH}"
   fi
 
   if [ "$DRY_RUN" -eq 1 ] || have_command rustup; then
@@ -230,6 +161,26 @@ install_rust() {
     run rustup default stable
   elif have_command cargo; then
     echo "rustup not found; cargo is installed, skipping rustup-managed component install"
+  fi
+}
+
+rig_supports_user_mode() {
+  have_command rig && rig --user --version >/dev/null 2>&1
+}
+
+ensure_development_rig() {
+  if rig_supports_user_mode; then
+    echo "rig with user-mode support already installed"
+    return
+  fi
+
+  require_command cargo
+  cargo_install_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}"
+  run cargo install --git "$RIG_SOURCE_URL" --locked --force --root "$cargo_install_root" rig
+  if [ "$DRY_RUN" -eq 0 ]; then
+    export PATH="${cargo_install_root}/bin:${PATH}"
+    rig_supports_user_mode ||
+      die "development rig is not on PATH with public --user support after installation"
   fi
 }
 
@@ -250,10 +201,6 @@ install_macos() {
   if [ "$SKIP_PYTHON" -eq 0 ] && ! have_command python3; then
     require_command brew
     run brew install python
-  fi
-
-  if ! have_command rig; then
-    install_macos_rig
   fi
 
   if [ "$SKIP_QUARTO" -eq 0 ] && ! have_command quarto; then
@@ -285,25 +232,6 @@ install_linux_deb() {
     install_rust
   fi
 
-  if ! have_command rig; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      run curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o /tmp/ir-rig.gpg
-      run sudo install -m 0644 /tmp/ir-rig.gpg /etc/apt/trusted.gpg.d/rig.gpg
-      echo "+ write /tmp/ir-rig.list: deb http://rig.r-pkg.org/deb rig main"
-      run sudo install -m 0644 /tmp/ir-rig.list /etc/apt/sources.list.d/rig.list
-    else
-      rig_key="${TMPDIR:-/tmp}/ir-rig.$$".gpg
-      rig_list="${TMPDIR:-/tmp}/ir-rig.$$".list
-      run curl -fsSL https://rig.r-pkg.org/deb/rig.gpg -o "$rig_key"
-      printf '%s\n' "deb http://rig.r-pkg.org/deb rig main" >"$rig_list"
-      run_root install -m 0644 "$rig_key" /etc/apt/trusted.gpg.d/rig.gpg
-      run_root install -m 0644 "$rig_list" /etc/apt/sources.list.d/rig.list
-      rm -f "$rig_key" "$rig_list"
-    fi
-    run_root apt-get update
-    run_root apt-get install -y --no-install-recommends r-rig
-  fi
-
   if [ "$SKIP_QUARTO" -eq 0 ] && ! have_command quarto; then
     if [ "$DRY_RUN" -eq 1 ]; then
       quarto_deb="/tmp/ir-quarto.deb"
@@ -319,8 +247,8 @@ install_linux_deb() {
 }
 
 install_r_versions() {
-  if [ "$DRY_RUN" -eq 0 ] && ! have_command rig; then
-    die "rig is not on PATH after installation; restart the shell and rerun this script"
+  if [ "$DRY_RUN" -eq 0 ] && ! rig_supports_user_mode; then
+    die "development rig is not on PATH with public --user support after installation"
   fi
 
   if [ "$SKIP_R_RELEASE" -eq 0 ]; then
@@ -362,7 +290,7 @@ verify_install() {
   run cargo --version
   run rustc --version
   run python3 --version
-  run rig --version
+  run rig --user --version
   run Rscript --version
   if [ "$SKIP_TEST_R" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then
     run rig list --json
@@ -454,6 +382,7 @@ case "$PLATFORM" in
     ;;
 esac
 
+ensure_development_rig
 install_r_versions
 load_test_r_metadata
 verify_install

@@ -97,6 +97,7 @@ Installed tool libraries are persistent state, so `ir cache clean` does not remo
 
 Generated launchers keep the same resolved package ref, `--with` package additions, and R selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
+If the selected R executable or installed tool library is removed, the launcher reports the matching `ir tool install --force` command needed to recreate it.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.
 Plain `Rscript` package executables keep Rscript's normal startup package behavior unless launcher metadata explicitly sets `default-packages`.

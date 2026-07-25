@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use super::rig_client::InstalledR;
+use super::rig_client::{AvailableR, InstalledR};
 
 #[derive(Debug)]
 pub(crate) enum VersionRequirement {
@@ -19,6 +19,12 @@ pub(crate) enum VersionOp {
     Lt,
     Lte,
     Eq,
+}
+
+pub(crate) enum InstallRequest<'a> {
+    Direct(&'a str),
+    Resolve(&'a str),
+    Available,
 }
 
 pub(crate) fn parse_iso_date_field(key: &str, value: &str) -> Result<String, Box<dyn Error>> {
@@ -62,16 +68,56 @@ pub(crate) fn select_installed_r<'a>(
         .max_by(|a, b| compare_installed_r(a, b))
 }
 
-pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str> {
+pub(crate) fn select_available_r<'a>(
+    req: &str,
+    requirement: &VersionRequirement,
+    available: &'a [AvailableR],
+) -> Result<&'a AvailableR, Box<dyn Error>> {
+    available
+        .iter()
+        .filter(|candidate| !matches!(candidate.name.as_str(), "devel" | "next"))
+        .filter(|candidate| requirement.matches_candidate(&candidate.name, &candidate.version, &[]))
+        .max_by(|a, b| compare_versions(&a.version, &b.version))
+        .ok_or_else(|| format!("no R release available through rig matches `{req}`").into())
+}
+
+pub(crate) fn install_request(
+    requirement: &VersionRequirement,
+) -> Result<InstallRequest<'_>, Box<dyn Error>> {
     match requirement {
-        VersionRequirement::Bare(req) => Some(req),
+        VersionRequirement::Bare(req)
+            if parse_version(req).is_some_and(|version| version.len() == 1) =>
+        {
+            Ok(InstallRequest::Available)
+        }
+        VersionRequirement::Bare(req) if parse_version(req).is_some() => {
+            Ok(InstallRequest::Direct(req))
+        }
+        VersionRequirement::Bare(req) if matches!(req.as_str(), "release" | "oldrel") => {
+            Ok(InstallRequest::Resolve(req))
+        }
+        VersionRequirement::Bare(req) if is_numbered_oldrel(req) => {
+            Ok(InstallRequest::Resolve(req))
+        }
+        VersionRequirement::Bare(req) if matches!(req.as_str(), "devel" | "next") => {
+            Ok(InstallRequest::Direct(req))
+        }
+        VersionRequirement::Bare(req) => Err(format!(
+            "cannot automatically install unsupported `r-version` selector `{req}`; use a numeric version, `release`, `oldrel`, `oldrel/N`, `devel`, or `next`"
+        )
+        .into()),
         VersionRequirement::Comparison {
             op: VersionOp::Eq,
+            version,
             raw,
             ..
-        } => Some(raw),
-        VersionRequirement::Comparison { .. } => None,
+        } if version.len() > 1 => Ok(InstallRequest::Direct(raw)),
+        VersionRequirement::Comparison { .. } => Ok(InstallRequest::Available),
     }
+}
+
+pub(crate) fn is_numeric_version(value: &str) -> bool {
+    parse_version(value).is_some()
 }
 
 impl VersionRequirement {
@@ -145,6 +191,13 @@ fn parse_version(value: &str) -> Option<Vec<u64>> {
     } else {
         Some(parts)
     }
+}
+
+fn is_numbered_oldrel(value: &str) -> bool {
+    value
+        .strip_prefix("oldrel/")
+        .and_then(|number| number.parse::<u64>().ok())
+        .is_some_and(|number| number > 0)
 }
 
 fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {

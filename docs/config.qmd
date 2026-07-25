@@ -5,7 +5,7 @@ title: Install and Configuration
 ## Requirements
 
 - `R` / `Rscript` on `PATH`, `--rscript`, or `IR_RSCRIPT`, when R is not selected by frontmatter `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
-- `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
+- The development version of `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R. Missing R versions are installed in rig user mode under the `ir` cache without administrator privileges.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
@@ -36,9 +36,28 @@ The direct installers download the latest release archive and install `ir` and `
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
-If `rig` is not on `PATH`, the installers print platform-specific rig install guidance.
+If a rig build with user-mode support is not on `PATH`, the installers print guidance for installing the development version from source.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
+
+To install the development rig manually on Unix:
+
+```console
+$ rig_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-${HOME}/.cargo}}"
+$ cargo install --git https://github.com/r-lib/rig --locked --force --root "$rig_root" rig
+$ export PATH="$rig_root/bin:$PATH"
+```
+
+In PowerShell:
+
+```console
+> $rigRoot = if ($env:CARGO_INSTALL_ROOT) { $env:CARGO_INSTALL_ROOT } elseif ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }
+> cargo install --git https://github.com/r-lib/rig --locked --force --root $rigRoot rig
+> $rigBin = Join-Path $rigRoot "bin"
+> $env:PATH = "$rigBin;$env:PATH"
+```
+
+Keep that `bin` directory before any older rig installation on `PATH`.
 
 ## Environment
 
@@ -75,10 +94,14 @@ When Python metadata is present, the selected `exclude-newer` value is also used
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.
 R selection precedence is command line, then environment, then frontmatter `r-version`.
 Use `--rscript` or `IR_RSCRIPT` to select a specific Rscript executable.
-Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
+Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select R through `rig`.
+`ir` first reuses a matching rig-managed installation. If none exists, it installs a matching R under `<IR_CACHE_DIR>/rig/r` in rig user mode and reuses that cached installation on later runs.
+Automatic installation accepts numeric versions, numeric comparisons, `release`, `oldrel`, `oldrel/N`, `devel`, and `next`; other rig selectors can only select an installation that already exists.
+`release`, `oldrel`, and `oldrel/N` are resolved once per cache. Later runs reuse the resolved concrete version without contacting rig's resolver; `ir cache clean` removes that cached resolution.
+The R installation is cache-local and does not require administrator privileges. On macOS and Windows, rig user mode may also update its normal per-user RStudio, `PATH`, or registry integration state.
 Do not set both `--rscript` and `--r-version`, or both `IR_RSCRIPT` and `IR_R_VERSION`.
 Frontmatter `rscript` is rejected.
-When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date.
+When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date and installs it in the cache when needed.
 `--bin-dir <dir>` overrides the executable install directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected executable install directory to the user `Path`.

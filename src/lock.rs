@@ -8,16 +8,16 @@ pub(crate) struct FileLock {
 
 impl FileLock {
     pub(crate) fn acquire(path: &Path) -> Result<Self, Box<dyn Error>> {
-        fs::create_dir_all(path.parent().ok_or("resolver lock path has no parent")?)?;
+        fs::create_dir_all(path.parent().ok_or("cache lock path has no parent")?)?;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .open(path)
-            .map_err(|e| format!("failed to open resolver lock `{}`: {e}", path.display()))?;
+            .map_err(|e| format!("failed to open cache lock `{}`: {e}", path.display()))?;
         file.lock()
-            .map_err(|e| format!("failed to lock resolver cache `{}`: {e}", path.display()))?;
+            .map_err(|e| format!("failed to lock cache `{}`: {e}", path.display()))?;
 
         Ok(Self { _file: file })
     }
@@ -25,4 +25,8 @@ impl FileLock {
 
 pub(crate) fn resolver_lock_path(root: &Path) -> PathBuf {
     root.join("locks").join("resolver.lock")
+}
+
+pub(crate) fn r_install_lock_path(root: &Path) -> PathBuf {
+    root.join("locks").join("r-install.lock")
 }

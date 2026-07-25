@@ -5,10 +5,9 @@ mod support;
 use support::*;
 
 use std::fs;
-use time::OffsetDateTime;
-
-#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(unix)]
+use time::OffsetDateTime;
 
 #[test]
 fn rig_test_prerequisites_match_ir_test_r_version() {
@@ -133,6 +132,7 @@ fn path_with_bin_dir(bin_dir: &std::path::Path) -> std::ffi::OsString {
     .unwrap()
 }
 
+#[cfg(unix)]
 fn utc_today_string() -> String {
     let today = OffsetDateTime::now_utc().date();
     format!(
@@ -143,6 +143,7 @@ fn utc_today_string() -> String {
     )
 }
 
+#[cfg(unix)]
 fn assert_failure_contains(output: &std::process::Output, expected: &[&str]) {
     assert!(!output.status.success(), "{}", output_text(output));
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -151,6 +152,7 @@ fn assert_failure_contains(output: &std::process::Output, expected: &[&str]) {
     }
 }
 
+#[cfg(unix)]
 fn assert_stderr_lacks(output: &std::process::Output, unexpected: &str) {
     assert!(
         !String::from_utf8_lossy(&output.stderr).contains(unexpected),
@@ -205,7 +207,18 @@ fn run_with_installed_r_versions(
     write_executable(
         &bin_dir.join("rig"),
         &format!(
-            "#!/bin/sh\ncat <<'JSON'\n[\n{}\n]\nJSON\n",
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1\" in\n",
+                "  list)\n",
+                "    [ \"$2\" = \"--json\" ]\n",
+                "    cat <<'JSON'\n",
+                "[\n{}\n]\n",
+                "JSON\n",
+                "    ;;\n",
+                "  *) echo unexpected rig command >&2; exit 64 ;;\n",
+                "esac\n",
+            ),
             rows.join(",\n")
         ),
     );
@@ -219,6 +232,494 @@ fn run_with_installed_r_versions(
         .unwrap();
 
     out
+}
+
+#[cfg(unix)]
+fn run_with_private_r_install(
+    prefix: &str,
+    args: &[&str],
+    expected_install: &str,
+    installed: (&str, &str),
+    available_json: Option<&str>,
+    resolved: Option<(&str, &str)>,
+    runs: usize,
+) -> std::process::Output {
+    let cache_dir = temp_dir(&format!("{prefix}-cache"));
+    let bin_dir = temp_dir(&format!("{prefix}-bin"));
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "set -eu\n",
+            "if [ \"$1\" = \"--user\" ]; then shift; else [ \"${RIG_MODE:-}\" != \"user\" ]; fi\n",
+            "case \"$1\" in\n",
+            "  --version)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    echo 'rig 0.10.0'\n",
+            "    ;;\n",
+            "  list)\n",
+            "    [ \"$2\" = \"--json\" ]\n",
+            "    if [ \"${RIG_MODE:-}\" != \"user\" ] || [ ! -f \"$RIG_R_INSTALL_DIR/installed\" ]; then\n",
+            "      echo '[]'\n",
+            "      exit 0\n",
+            "    fi\n",
+            "    printf '[{\"name\":\"%s\",\"version\":\"%s\",\"aliases\":[],\"binary\":\"%s\"}]\\n' \"$IR_TEST_INSTALLED_NAME\" \"$IR_TEST_INSTALLED_VERSION\" \"$RIG_R_INSTALL_DIR/$IR_TEST_INSTALLED_VERSION/bin/R\"\n",
+            "    ;;\n",
+            "  available)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    [ \"$2\" = \"--all\" ]\n",
+            "    [ \"$3\" = \"--json\" ]\n",
+            "    [ -n \"${IR_TEST_AVAILABLE_JSON:-}\" ]\n",
+            "    printf '%s\\n' \"$IR_TEST_AVAILABLE_JSON\"\n",
+            "    ;;\n",
+            "  resolve)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    [ \"$2\" = \"--json\" ]\n",
+            "    [ \"$3\" = \"--\" ]\n",
+            "    [ \"$4\" = \"$IR_TEST_RESOLVE_SPEC\" ]\n",
+            "    [ ! -f \"$RIG_R_INSTALL_DIR/resolve-ran\" ]\n",
+            "    : > \"$RIG_R_INSTALL_DIR/resolve-ran\"\n",
+            "    printf '[{\"version\":\"%s\"}]\\n' \"$IR_TEST_RESOLVED_VERSION\"\n",
+            "    ;;\n",
+            "  add)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    [ \"$2\" = \"--without-pak\" ]\n",
+            "    [ \"$3\" = \"--without-repos\" ]\n",
+            "    [ \"$4\" = \"--\" ]\n",
+            "    [ \"$5\" = \"$IR_TEST_EXPECT_INSTALL\" ]\n",
+            "    [ ! -f \"$RIG_R_INSTALL_DIR/add-ran\" ]\n",
+            "    mkdir -p \"$RIG_R_INSTALL_DIR/$IR_TEST_INSTALLED_VERSION/bin\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/$IR_TEST_INSTALLED_VERSION/bin/R\"\n",
+            "    cat > \"$RIG_R_INSTALL_DIR/$IR_TEST_INSTALLED_VERSION/bin/Rscript\" <<'RSCRIPT'\n",
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=private-install\n",
+            "RSCRIPT\n",
+            "    chmod +x \"$RIG_R_INSTALL_DIR/$IR_TEST_INSTALLED_VERSION/bin/Rscript\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/add-ran\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/installed\"\n",
+            "    ;;\n",
+            "  *) exit 64 ;;\n",
+            "esac\n",
+        ),
+    );
+
+    let mut command = ir();
+    command
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env("IR_TEST_EXPECT_INSTALL", expected_install)
+        .env("IR_TEST_INSTALLED_NAME", installed.0)
+        .env("IR_TEST_INSTALLED_VERSION", installed.1)
+        .env_remove("IR_RSCRIPT")
+        .env_remove("RIG_MODE")
+        .env_remove("RIG_R_INSTALL_DIR")
+        .env_remove("RIG_BINARY_DIR")
+        .args(args);
+    if let Some(available_json) = available_json {
+        command.env("IR_TEST_AVAILABLE_JSON", available_json);
+    }
+    if let Some((spec, version)) = resolved {
+        command
+            .env("IR_TEST_RESOLVE_SPEC", spec)
+            .env("IR_TEST_RESOLVED_VERSION", version);
+    }
+    let mut output = None;
+    for run in 0..runs {
+        let current = command.output().unwrap();
+        if run + 1 < runs {
+            assert_success(&current);
+            assert_stdout_contains(&current, "selected=private-install");
+        }
+        output = Some(current);
+    }
+    output.expect("run_with_private_r_install needs at least one run")
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_missing_r_version_installs_and_reuses_private_cached_r() {
+    let cache_dir = temp_dir("ir-private-r-cache");
+    let bin_dir = temp_dir("ir-private-r-bin");
+    let rig_log = temp_path("ir-private-r-rig-log", "txt");
+    let expected_r_root = cache_dir.join("rig").join("r");
+    let expected_binary_dir = cache_dir.join("rig").join("bin");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "set -eu\n",
+            "if [ \"$1\" = \"--user\" ]; then shift; else [ \"${RIG_MODE:-}\" != \"user\" ]; fi\n",
+            "case \"$1\" in\n",
+            "  --version)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    echo 'rig 0.10.0'\n",
+            "    ;;\n",
+            "  list)\n",
+            "    [ \"$2\" = \"--json\" ]\n",
+            "    if [ \"${RIG_MODE:-}\" != \"user\" ]; then\n",
+            "      echo '[]'\n",
+            "      exit 0\n",
+            "    fi\n",
+            "    [ \"$RIG_R_INSTALL_DIR\" = \"$IR_TEST_EXPECT_R_ROOT\" ]\n",
+            "    [ \"$RIG_BINARY_DIR\" = \"$IR_TEST_EXPECT_BINARY_DIR\" ]\n",
+            "    [ \"${PATH%%:*}\" = \"$RIG_BINARY_DIR\" ]\n",
+            "    [ \"$HOME\" = \"$IR_TEST_EXPECT_HOME\" ]\n",
+            "    [ \"$TMPDIR\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ \"$TMP\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ \"$TEMP\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ -z \"${XDG_CONFIG_HOME:-}\" ]\n",
+            "    [ -z \"${XDG_DATA_HOME:-}\" ]\n",
+            "    [ -z \"${XDG_CACHE_HOME:-}\" ]\n",
+            "    [ -z \"${RIG_PLATFORM:-}\" ]\n",
+            "    [ -z \"${RIG_RTOOLS_INSTALL_DIR:-}\" ]\n",
+            "    if [ -f \"$RIG_R_INSTALL_DIR/installed\" ]; then\n",
+            "      printf '[{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[],\"binary\":\"%s\"}]\\n' \"$RIG_R_INSTALL_DIR/4.4.3/bin/R\"\n",
+            "    else\n",
+            "      echo '[]'\n",
+            "    fi\n",
+            "    ;;\n",
+            "  add)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    [ \"$RIG_R_INSTALL_DIR\" = \"$IR_TEST_EXPECT_R_ROOT\" ]\n",
+            "    [ \"$RIG_BINARY_DIR\" = \"$IR_TEST_EXPECT_BINARY_DIR\" ]\n",
+            "    [ \"${PATH%%:*}\" = \"$RIG_BINARY_DIR\" ]\n",
+            "    [ \"$HOME\" = \"$IR_TEST_EXPECT_HOME\" ]\n",
+            "    [ \"$TMPDIR\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ \"$TMP\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ \"$TEMP\" = \"$IR_TEST_EXPECT_TMP\" ]\n",
+            "    [ -z \"${XDG_CONFIG_HOME:-}\" ]\n",
+            "    [ -z \"${XDG_DATA_HOME:-}\" ]\n",
+            "    [ -z \"${XDG_CACHE_HOME:-}\" ]\n",
+            "    [ -z \"${RIG_PLATFORM:-}\" ]\n",
+            "    [ -z \"${RIG_RTOOLS_INSTALL_DIR:-}\" ]\n",
+            "    [ \"$2\" = \"--without-pak\" ]\n",
+            "    [ \"$3\" = \"--without-repos\" ]\n",
+            "    [ \"$4\" = \"--\" ]\n",
+            "    [ \"$5\" = \"4.4\" ]\n",
+            "    mkdir -p \"$RIG_R_INSTALL_DIR/4.4.3/bin\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/4.4.3/bin/R\"\n",
+            "    cat > \"$RIG_R_INSTALL_DIR/4.4.3/bin/Rscript\" <<'RSCRIPT'\n",
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=private-cache\n",
+            "RSCRIPT\n",
+            "    chmod +x \"$RIG_R_INSTALL_DIR/4.4.3/bin/Rscript\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/installed\"\n",
+            "    echo add >> \"$IR_TEST_RIG_LOG\"\n",
+            "    ;;\n",
+            "  *) exit 64 ;;\n",
+            "esac\n",
+        ),
+    );
+
+    for _ in 0..2 {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("PATH", path_with_bin_dir(&bin_dir))
+            .env("IR_TEST_EXPECT_R_ROOT", &expected_r_root)
+            .env("IR_TEST_EXPECT_BINARY_DIR", &expected_binary_dir)
+            .env("IR_TEST_EXPECT_HOME", cache_dir.join("rig").join("home"))
+            .env("IR_TEST_EXPECT_TMP", cache_dir.join("rig").join("tmp"))
+            .env("IR_TEST_RIG_LOG", &*rig_log)
+            .env("RIG_PLATFORM", "linux-ubuntu-24.04")
+            .env("RIG_RTOOLS_INSTALL_DIR", "/outside/rtools")
+            .env("XDG_CONFIG_HOME", "/outside/config")
+            .env("XDG_DATA_HOME", "/outside/data")
+            .env("XDG_CACHE_HOME", "/outside/cache")
+            .env_remove("IR_RSCRIPT")
+            .env_remove("RIG_MODE")
+            .env_remove("RIG_R_INSTALL_DIR")
+            .env_remove("RIG_BINARY_DIR")
+            .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=private-cache");
+    }
+
+    assert_eq!(fs::read_to_string(&*rig_log).unwrap(), "add\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn simultaneous_missing_r_runs_install_private_cached_r_once() {
+    let cache_dir = temp_dir("ir-concurrent-private-r-cache");
+    let bin_dir = temp_dir("ir-concurrent-private-r-bin");
+    let barrier_dir = temp_dir("ir-concurrent-private-r-barrier");
+    let rig_log = temp_path("ir-concurrent-private-r-rig-log", "txt");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "set -eu\n",
+            "if [ \"$1\" = \"--user\" ]; then shift; else [ \"${RIG_MODE:-}\" != \"user\" ]; fi\n",
+            "case \"$1\" in\n",
+            "  --version)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    : > \"$IR_TEST_BARRIER_DIR/$IR_TEST_RUN_ID.preflight\"\n",
+            "    echo 'rig 0.10.0'\n",
+            "    ;;\n",
+            "  list)\n",
+            "    [ \"$2\" = \"--json\" ]\n",
+            "    if [ \"${RIG_MODE:-}\" != \"user\" ]; then\n",
+            "      echo '[]'\n",
+            "      exit 0\n",
+            "    fi\n",
+            "    : > \"$IR_TEST_BARRIER_DIR/$IR_TEST_RUN_ID.private-list\"\n",
+            "    if [ -f \"$RIG_R_INSTALL_DIR/installed\" ]; then\n",
+            "      printf '[{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[],\"binary\":\"%s\"}]\\n' \"$RIG_R_INSTALL_DIR/4.4.3/bin/R\"\n",
+            "    else\n",
+            "      echo '[]'\n",
+            "    fi\n",
+            "    ;;\n",
+            "  add)\n",
+            "    [ \"${RIG_MODE:-}\" = \"user\" ]\n",
+            "    [ \"$2\" = \"--without-pak\" ]\n",
+            "    [ \"$3\" = \"--without-repos\" ]\n",
+            "    [ \"$4\" = \"--\" ]\n",
+            "    [ \"$5\" = \"4.4\" ]\n",
+            "    : > \"$IR_TEST_BARRIER_DIR/$IR_TEST_RUN_ID.add\"\n",
+            "    if [ \"$IR_TEST_RUN_ID\" = \"first\" ]; then\n",
+            "      barrier_wait=0\n",
+            "      while [ ! -f \"$IR_TEST_BARRIER_DIR/release-first-add\" ]; do\n",
+            "        [ \"$barrier_wait\" -lt 500 ] || exit 70\n",
+            "        barrier_wait=$((barrier_wait + 1))\n",
+            "        sleep 0.01\n",
+            "      done\n",
+            "    fi\n",
+            "    mkdir -p \"$RIG_R_INSTALL_DIR/4.4.3/bin\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/4.4.3/bin/R\"\n",
+            "    cat > \"$RIG_R_INSTALL_DIR/4.4.3/bin/Rscript\" <<'RSCRIPT'\n",
+            "#!/bin/sh\n",
+            "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo selected=private-cache\n",
+            "RSCRIPT\n",
+            "    chmod +x \"$RIG_R_INSTALL_DIR/4.4.3/bin/Rscript\"\n",
+            "    : > \"$RIG_R_INSTALL_DIR/installed\"\n",
+            "    echo add >> \"$IR_TEST_RIG_LOG\"\n",
+            "    ;;\n",
+            "  *) exit 64 ;;\n",
+            "esac\n",
+        ),
+    );
+
+    let spawn = |run_id: &str| {
+        ir().env("IR_CACHE_DIR", &cache_dir)
+            .env("PATH", path_with_bin_dir(&bin_dir))
+            .env("IR_TEST_BARRIER_DIR", &barrier_dir)
+            .env("IR_TEST_RUN_ID", run_id)
+            .env("IR_TEST_RIG_LOG", &*rig_log)
+            .env_remove("IR_RSCRIPT")
+            .env_remove("RIG_MODE")
+            .env_remove("RIG_R_INSTALL_DIR")
+            .env_remove("RIG_BINARY_DIR")
+            .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+
+    let mut first = spawn("first");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !barrier_dir.join("first.add").exists() {
+        if let Some(status) = first.try_wait().unwrap() {
+            panic!("first ir process exited before entering rig add with {status}");
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = first.kill();
+            panic!("first ir process did not enter rig add");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let mut second = spawn("second");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !barrier_dir.join("second.preflight").exists() {
+        if let Some(status) = second.try_wait().unwrap() {
+            fs::write(barrier_dir.join("release-first-add"), "").unwrap();
+            let _ = first.kill();
+            panic!("second ir process exited before its rig preflight with {status}");
+        }
+        if std::time::Instant::now() >= deadline {
+            fs::write(barrier_dir.join("release-first-add"), "").unwrap();
+            let _ = first.kill();
+            let _ = second.kill();
+            panic!("second ir process did not reach its rig preflight");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if barrier_dir.join("second.private-list").exists() || barrier_dir.join("second.add").exists() {
+        fs::write(barrier_dir.join("release-first-add"), "").unwrap();
+        let _ = first.kill();
+        let _ = second.kill();
+        panic!(
+            "the second ir process entered the private rig installation while the first add was blocked"
+        );
+    }
+    fs::write(barrier_dir.join("release-first-add"), "").unwrap();
+
+    let first = first.wait_with_output().unwrap();
+    let second = second.wait_with_output().unwrap();
+    for output in [&first, &second] {
+        assert_success(output);
+        assert_stdout_contains(output, "selected=private-cache");
+    }
+    assert_eq!(fs::read_to_string(&*rig_log).unwrap(), "add\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_r_with_old_rig_reports_development_version_requirement() {
+    let cache_dir = temp_dir("ir-old-rig-cache");
+    let bin_dir = temp_dir("ir-old-rig-bin");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"list\" ]; then\n",
+            "  echo '[]'\n",
+            "  exit 0\n",
+            "fi\n",
+            "echo \"error: unexpected argument '--user' found\" >&2\n",
+            "exit 2\n",
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &out,
+        &[
+            "development version of rig",
+            "cargo install --git https://github.com/r-lib/rig --locked --force rig",
+        ],
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_r_without_rig_reports_development_version_install_command() {
+    let cache_dir = temp_dir("ir-missing-rig-cache");
+    let bin_dir = temp_dir("ir-missing-rig-bin");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", &bin_dir)
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &out,
+        &[
+            "could not find `rig` on PATH",
+            "cargo install --git https://github.com/r-lib/rig --locked --force rig",
+        ],
+    );
+}
+
+#[test]
+fn real_rig_installs_private_cached_r_on_disposable_ci() {
+    if std::env::var("GITHUB_ACTIONS").ok().as_deref() != Some("true")
+        || std::env::var("RUNNER_ENVIRONMENT").ok().as_deref() != Some("github-hosted")
+    {
+        eprintln!(
+            "SKIP real_rig_installs_private_cached_r_on_disposable_ci: this real rig installation test only runs on disposable GitHub-hosted runners"
+        );
+        return;
+    }
+    let Some(target) = rig_test_r_version("real_rig_installs_private_cached_r_on_disposable_ci")
+    else {
+        return;
+    };
+    let cache_dir = temp_dir("ir-real-private-r-cache");
+    let empty_r_root = temp_dir("ir-real-empty-r-root");
+    let empty_binary_dir = temp_dir("ir-real-empty-r-bin");
+
+    let run = || {
+        ir().env("IR_CACHE_DIR", &cache_dir)
+            .env("RIG_MODE", "user")
+            .env("RIG_R_INSTALL_DIR", &empty_r_root)
+            .env("RIG_BINARY_DIR", &empty_binary_dir)
+            .env_remove("IR_RSCRIPT")
+            .args(["run", "--r-version", "oldrel/2"])
+            .args([
+                "-e",
+                "cat('IR_REAL_R_HOME=', normalizePath(R.home(), winslash = '/', mustWork = TRUE), '\\nIR_REAL_R_VERSION=', as.character(getRversion()), '\\n', sep = '')",
+            ])
+            .output()
+            .unwrap()
+    };
+    let installed = |output: &std::process::Output| {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let homes = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("IR_REAL_R_HOME="))
+            .collect::<Vec<_>>();
+        let versions = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("IR_REAL_R_VERSION="))
+            .collect::<Vec<_>>();
+        assert_eq!(homes.len(), 1, "unexpected R home output:\n{stdout}");
+        assert_eq!(versions.len(), 1, "unexpected R version output:\n{stdout}");
+        (
+            fs::canonicalize(PathBuf::from(homes[0])).unwrap(),
+            versions[0].to_string(),
+        )
+    };
+
+    let first = run();
+    assert_success(&first);
+    let (first_home, first_version) = installed(&first);
+    assert_eq!(first_version, target);
+    let private_r_root = fs::canonicalize(cache_dir.join("rig").join("r")).unwrap();
+    assert!(
+        first_home.starts_with(&private_r_root),
+        "selected R home `{}` is outside private cache root `{}`",
+        first_home.display(),
+        private_r_root.display()
+    );
+    assert_eq!(
+        fs::read_to_string(cache_dir.join("rig").join("resolutions").join("oldrel-2"))
+            .unwrap()
+            .trim(),
+        target
+    );
+
+    let sentinel = first_home.join("ir-cache-reuse-sentinel");
+    fs::write(&sentinel, "preserved").unwrap();
+
+    let second = run();
+    assert_success(&second);
+    let (second_home, second_version) = installed(&second);
+    assert_eq!(second_home, first_home);
+    assert_eq!(second_version, target);
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "preserved");
 }
 
 #[cfg(unix)]
@@ -434,111 +935,339 @@ fn run_with_exclude_newer_prefers_unsuffixed_rig_install_over_x86_64_on_arm_maco
 
 #[cfg(unix)]
 #[test]
-fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
-    let cache_dir = temp_dir("ir-exact-minor-missing-cache");
-    let bin_dir = temp_dir("ir-exact-minor-missing-bin");
-    let r43_dir = temp_dir("ir-exact-minor-missing-r43");
-    let r45_dir = temp_dir("ir-exact-minor-missing-r45");
+fn run_with_exact_minor_r_version_installs_latest_patch() {
+    let out = run_with_private_r_install(
+        "ir-exact-minor-install",
+        &["run", "--r-version", "== 4.4", "-e", "cat('ignored')"],
+        "4.4",
+        ("4.4.3", "4.4.3"),
+        None,
+        None,
+        1,
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=private-install");
+}
 
-    let r43_binary = selected_r_binary(&r43_dir, "r43");
-    let r45_binary = selected_r_binary(&r45_dir, "r45");
+#[cfg(unix)]
+#[test]
+fn run_with_exact_major_r_version_installs_highest_available_minor() {
+    let available = r#"[
+{"name":"3.6.3","version":"3.6.3"},
+{"name":"4.4.3","version":"4.4.3"},
+{"name":"4.5.1","version":"4.5.1"},
+{"name":"5.0.0","version":"5.0.0"}
+]"#;
+    let out = run_with_private_r_install(
+        "ir-exact-major-install",
+        &["run", "--r-version", "== 4", "-e", "cat('ignored')"],
+        "4.5.1",
+        ("4.5.1", "4.5.1"),
+        Some(available),
+        None,
+        1,
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=private-install");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_bare_major_r_version_installs_highest_available_minor() {
+    let available = r#"[
+{"name":"3.6.3","version":"3.6.3"},
+{"name":"4.4.3","version":"4.4.3"},
+{"name":"4.5.1","version":"4.5.1"},
+{"name":"5.0.0","version":"5.0.0"}
+]"#;
+    let out = run_with_private_r_install(
+        "ir-bare-major-install",
+        &["run", "--r-version", "4", "-e", "cat('ignored')"],
+        "4.5.1",
+        ("4.5.1", "4.5.1"),
+        Some(available),
+        None,
+        1,
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=private-install");
+}
+
+#[cfg(unix)]
+#[test]
+fn comparison_r_versions_install_at_each_boundary() {
+    for (label, selector, available, expected) in [
+        (
+            "gte",
+            ">= 4.4.0",
+            r#"[{"name":"4.3.9","version":"4.3.9"},{"name":"4.4.0","version":"4.4.0"},{"name":"devel","version":"4.7.0"}]"#,
+            "4.4.0",
+        ),
+        (
+            "gt",
+            "> 4.4.0",
+            r#"[{"name":"4.4.0","version":"4.4.0"},{"name":"4.4.1","version":"4.4.1"}]"#,
+            "4.4.1",
+        ),
+        (
+            "lte",
+            "<= 4.4.0",
+            r#"[{"name":"4.4.0","version":"4.4.0"},{"name":"4.4.1","version":"4.4.1"}]"#,
+            "4.4.0",
+        ),
+        (
+            "lt",
+            "< 4.4.0",
+            r#"[{"name":"4.3.9","version":"4.3.9"},{"name":"4.4.0","version":"4.4.0"}]"#,
+            "4.3.9",
+        ),
+    ] {
+        let prefix = format!("ir-r-version-{label}-boundary");
+        let out = run_with_private_r_install(
+            &prefix,
+            &["run", "--r-version", selector, "-e", "cat('ignored')"],
+            expected,
+            (expected, expected),
+            Some(available),
+            None,
+            1,
+        );
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=private-install");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn strict_comparison_r_versions_reject_equal_boundary() {
+    let available = r#"[{"name":"4.4.0","version":"4.4.0"}]"#;
+    for (label, selector) in [("gt", "> 4.4.0"), ("lt", "< 4.4.0")] {
+        let prefix = format!("ir-r-version-strict-{label}-boundary");
+        let out = run_with_private_r_install(
+            &prefix,
+            &["run", "--r-version", selector, "-e", "cat('ignored')"],
+            "not-installed",
+            ("4.4.0", "4.4.0"),
+            Some(available),
+            None,
+            1,
+        );
+        assert_failure_contains(
+            &out,
+            &["no R release available through rig matches", selector],
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn release_selectors_install_resolved_release_and_reuse_it() {
+    for (selector, version) in [
+        ("release", "4.6.1"),
+        ("oldrel", "4.5.2"),
+        ("oldrel/2", "4.4.3"),
+    ] {
+        let prefix = format!("ir-{}-install", selector.replace('/', "-"));
+        let out = run_with_private_r_install(
+            &prefix,
+            &["run", "--r-version", selector, "-e", "cat('ignored')"],
+            version,
+            (version, version),
+            None,
+            Some((selector, version)),
+            2,
+        );
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=private-install");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_release_resolution_wins_over_moved_ambient_alias() {
+    let cache_dir = temp_dir("ir-release-pin-cache");
+    let bin_dir = temp_dir("ir-release-pin-bin");
+    let pinned_dir = temp_dir("ir-release-pin-r");
+    let moved_dir = temp_dir("ir-release-moved-r");
+    let pinned_binary = selected_r_binary(&pinned_dir, "pinned-release");
+    let moved_binary = selected_r_binary(&moved_dir, "moved-release");
 
     write_executable(
         &bin_dir.join("rig"),
         &format!(
             concat!(
                 "#!/bin/sh\n",
-                "case \"$1 $2\" in\n",
-                "  \"list --json\")\n",
-                "    cat <<'JSON'\n",
-                r#"[
-{{"name":"4.3.3","version":"4.3.3","aliases":[],"binary":"{}"}},
-{{"name":"4.5.0","version":"4.5.0","aliases":[],"binary":"{}"}}
-]"#,
-                "\nJSON\n",
+                "set -eu\n",
+                "if [ \"$1\" = \"--user\" ]; then shift; else [ \"${{RIG_MODE:-}}\" != \"user\" ]; fi\n",
+                "case \"$1\" in\n",
+                "  --version) echo 'rig 0.10.0' ;;\n",
+                "  list)\n",
+                "    [ \"$2\" = \"--json\" ]\n",
+                "    if [ \"${{RIG_MODE:-}}\" = \"user\" ]; then\n",
+                "      echo '[]'\n",
+                "    elif [ \"$IR_TEST_RUN_ID\" = \"second\" ]; then\n",
+                "      printf '[{{\"name\":\"4.5.1\",\"version\":\"4.5.1\",\"aliases\":[],\"binary\":\"{}\"}},{{\"name\":\"4.6.0\",\"version\":\"4.6.0\",\"aliases\":[\"release\"],\"binary\":\"{}\"}}]\\n'\n",
+                "    else\n",
+                "      printf '[{{\"name\":\"4.5.1\",\"version\":\"4.5.1\",\"aliases\":[],\"binary\":\"{}\"}},{{\"name\":\"4.6.0\",\"version\":\"4.6.0\",\"aliases\":[],\"binary\":\"{}\"}}]\\n'\n",
+                "    fi\n",
                 "    ;;\n",
-                "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
+                "  resolve)\n",
+                "    [ \"$2\" = \"--json\" ]\n",
+                "    [ \"$3\" = \"--\" ]\n",
+                "    [ \"$4\" = \"release\" ]\n",
+                "    [ ! -f \"$RIG_R_INSTALL_DIR/resolve-ran\" ]\n",
+                "    : > \"$RIG_R_INSTALL_DIR/resolve-ran\"\n",
+                "    echo '[{{\"version\":\"4.5.1\"}}]'\n",
+                "    ;;\n",
+                "  add) echo unexpected add >&2; exit 65 ;;\n",
                 "  *) exit 64 ;;\n",
                 "esac\n",
             ),
-            r43_binary.display(),
-            r45_binary.display()
+            pinned_binary.display(),
+            moved_binary.display(),
+            pinned_binary.display(),
+            moved_binary.display()
         ),
     );
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("PATH", path_with_bin_dir(&bin_dir))
-        .env_remove("IR_RSCRIPT")
-        .args(["run", "--r-version", "== 4.4", "-e", "cat('ignored')"])
-        .output()
-        .unwrap();
+    for run_id in ["first", "second"] {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("PATH", path_with_bin_dir(&bin_dir))
+            .env("IR_TEST_RUN_ID", run_id)
+            .env_remove("IR_RSCRIPT")
+            .env_remove("RIG_MODE")
+            .args(["run", "--r-version", "release", "-e", "cat('ignored')"])
+            .output()
+            .unwrap();
 
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
-    assert_stderr_lacks(&out, "unexpected available");
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=pinned-release");
+        assert!(
+            !String::from_utf8_lossy(&out.stdout).contains("moved-release"),
+            "{}",
+            output_text(&out)
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(cache_dir.join("rig").join("resolutions").join("release")).unwrap(),
+        "4.5.1\n"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
-    let cache_dir = temp_dir("ir-exact-major-missing-cache");
-    let bin_dir = temp_dir("ir-exact-major-missing-bin");
-    let r3_dir = temp_dir("ir-exact-major-missing-r3");
-    let r5_dir = temp_dir("ir-exact-major-missing-r5");
+fn development_selectors_install_symbolic_r_and_reuse_it() {
+    for (selector, version) in [("devel", "4.7.0"), ("next", "4.6.2")] {
+        let prefix = format!("ir-{selector}-install");
+        let out = run_with_private_r_install(
+            &prefix,
+            &["run", "--r-version", selector, "-e", "cat('ignored')"],
+            selector,
+            (selector, version),
+            None,
+            None,
+            2,
+        );
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=private-install");
+    }
+}
 
-    let r3_binary = selected_r_binary(&r3_dir, "r3");
-    let r5_binary = selected_r_binary(&r5_dir, "r5");
+#[cfg(unix)]
+#[test]
+fn oldrel_selector_reuses_matching_ambient_r_after_resolution() {
+    let cache_dir = temp_dir("ir-oldrel-ambient-cache");
+    let bin_dir = temp_dir("ir-oldrel-ambient-bin");
+    let r_dir = temp_dir("ir-oldrel-ambient-r");
+    let binary = selected_r_binary(&r_dir, "ambient-oldrel");
 
     write_executable(
         &bin_dir.join("rig"),
         &format!(
             concat!(
                 "#!/bin/sh\n",
-                "case \"$1 $2\" in\n",
-                "  \"list --json\")\n",
-                "    cat <<'JSON'\n",
-                r#"[
-{{"name":"3.6.3","version":"3.6.3","aliases":[],"binary":"{}"}},
-{{"name":"5.0.0","version":"5.0.0","aliases":[],"binary":"{}"}}
-]"#,
-                "\nJSON\n",
+                "set -eu\n",
+                "if [ \"$1\" = \"--user\" ]; then shift; else [ \"${{RIG_MODE:-}}\" != \"user\" ]; fi\n",
+                "case \"$1\" in\n",
+                "  --version) echo 'rig 0.10.0' ;;\n",
+                "  list)\n",
+                "    if [ \"${{RIG_MODE:-}}\" = \"user\" ]; then\n",
+                "      echo '[]'\n",
+                "    else\n",
+                "      printf '[{{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[],\"binary\":\"{}\"}}]\\n'\n",
+                "    fi\n",
                 "    ;;\n",
-                "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
+                "  resolve)\n",
+                "    [ \"$2\" = \"--json\" ]\n",
+                "    [ \"$3\" = \"--\" ]\n",
+                "    [ \"$4\" = \"oldrel/2\" ]\n",
+                "    [ ! -f \"$RIG_R_INSTALL_DIR/resolve-ran\" ]\n",
+                "    : > \"$RIG_R_INSTALL_DIR/resolve-ran\"\n",
+                "    echo '[{{\"version\":\"4.4.3\"}}]'\n",
+                "    ;;\n",
+                "  add) echo unexpected add >&2; exit 65 ;;\n",
                 "  *) exit 64 ;;\n",
                 "esac\n",
             ),
-            r3_binary.display(),
-            r5_binary.display()
+            binary.display()
         ),
     );
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("PATH", path_with_bin_dir(&bin_dir))
-        .env_remove("IR_RSCRIPT")
-        .args(["run", "--r-version", "== 4", "-e", "cat('ignored')"])
-        .output()
-        .unwrap();
+    for _ in 0..2 {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("PATH", path_with_bin_dir(&bin_dir))
+            .env_remove("IR_RSCRIPT")
+            .env_remove("RIG_MODE")
+            .args(["run", "--r-version", "oldrel/2", "-e", "cat('ignored')"])
+            .output()
+            .unwrap();
 
-    assert_failure_contains(&out, &["R 4 is required", "Run `rig install 4`"]);
-    assert_stderr_lacks(&out, "unexpected available");
+        assert_success(&out);
+        assert_stdout_contains(&out, "selected=ambient-oldrel");
+    }
 }
 
 #[cfg(unix)]
 #[test]
-fn run_with_missing_r_version_does_not_query_available_releases() {
-    let cache_dir = temp_dir("ir-r-version-missing-cache");
-    let bin_dir = temp_dir("ir-r-version-missing-bin");
+fn unsupported_r_selectors_are_not_forwarded_to_rig_add() {
+    for selector in [
+        "https://example.invalid/R.pkg",
+        "--platform=linux-ubuntu-24.04",
+    ] {
+        let out = run_with_private_r_install(
+            "ir-unsupported-r-selector",
+            &["run", "--r-version", selector, "-e", "cat('ignored')"],
+            selector,
+            ("4.4.3", "4.4.3"),
+            None,
+            None,
+            1,
+        );
+        assert_failure_contains(&out, &["cannot automatically install", selector]);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unsupported_r_selector_can_select_existing_ambient_alias() {
+    let cache_dir = temp_dir("ir-custom-r-selector-cache");
+    let bin_dir = temp_dir("ir-custom-r-selector-bin");
+    let r_dir = temp_dir("ir-custom-r-selector-r");
+    let binary = selected_r_binary(&r_dir, "custom-alias");
 
     write_executable(
         &bin_dir.join("rig"),
-        concat!(
-            "#!/bin/sh\n",
-            "case \"$1 $2\" in\n",
-            "  \"list --json\") echo '[]' ;;\n",
-            "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
-            "  *) exit 64 ;;\n",
-            "esac\n",
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "set -eu\n",
+                "[ \"$1\" = \"list\" ]\n",
+                "[ \"$2\" = \"--json\" ]\n",
+                "printf '[{{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[\"custom\"],\"binary\":\"{}\"}}]\\n'\n",
+            ),
+            binary.display()
         ),
     );
 
@@ -546,23 +1275,12 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
         .env("IR_CACHE_DIR", &cache_dir)
         .env("PATH", path_with_bin_dir(&bin_dir))
         .env_remove("IR_RSCRIPT")
-        .args(["run", "--r-version", "4.4", "-e", "cat('ignored')"])
+        .args(["run", "--r-version", "custom", "-e", "cat('ignored')"])
         .output()
         .unwrap();
 
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
-    assert_stderr_lacks(&out, "unexpected available");
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("PATH", path_with_bin_dir(&bin_dir))
-        .env_remove("IR_RSCRIPT")
-        .args(["run", "--r-version", "== 4.4", "-e", "cat('ignored')"])
-        .output()
-        .unwrap();
-
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
-    assert_stderr_lacks(&out, "unexpected available");
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=custom-alias");
 }
 
 #[cfg(unix)]
@@ -671,10 +1389,9 @@ fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
 
 #[cfg(unix)]
 #[test]
-fn run_with_exclude_newer_requires_latest_available_minor_r() {
-    let out = run_with_installed_r_versions(
-        "ir-exclude-newer-missing-latest-minor",
-        &[("4.4.3", "r44")],
+fn run_with_exclude_newer_installs_latest_available_minor_r() {
+    let out = run_with_private_r_install(
+        "ir-exclude-newer-install-latest-minor",
         &[
             "run",
             "--exclude-newer",
@@ -682,15 +1399,14 @@ fn run_with_exclude_newer_requires_latest_available_minor_r() {
             "-e",
             "cat('ignored')",
         ],
+        "4.5",
+        ("4.5.3", "4.5.3"),
+        None,
+        None,
+        1,
     );
-    assert_failure_contains(
-        &out,
-        &[
-            "`exclude-newer` 2026-03-20 implies `r-version:",
-            "latest R minor version available on that date",
-            "Run `rig install",
-        ],
-    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=private-install");
 }
 
 #[cfg(unix)]
@@ -1157,27 +1873,10 @@ fn render_cli_rscript_sets_quarto_r() {
 
 #[cfg(unix)]
 #[test]
-fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_releases() {
-    let cache_dir = temp_dir("ir-exclude-newer-missing-r-cache");
-    let bin_dir = temp_dir("ir-exclude-newer-missing-r-bin");
-
-    write_executable(
-        &bin_dir.join("rig"),
-        concat!(
-            "#!/bin/sh\n",
-            "case \"$1\" in\n",
-            "  list) echo '[]' ;;\n",
-            "  available) echo unexpected available >&2; exit 65 ;;\n",
-            "  *) exit 64 ;;\n",
-            "esac\n",
-        ),
-    );
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("PATH", path_with_bin_dir(&bin_dir))
-        .env_remove("IR_RSCRIPT")
-        .args([
+fn exact_minor_r_version_with_exclude_newer_installs_without_available_query() {
+    let out = run_with_private_r_install(
+        "ir-exclude-newer-exact-minor-install",
+        &[
             "run",
             "--r-version",
             "== 4.4",
@@ -1185,18 +1884,15 @@ fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_rel
             "2024-06-20",
             "-e",
             "cat('ignored')",
-        ])
-        .output()
-        .unwrap();
-
-    assert_failure_contains(
-        &out,
-        &[
-            "R 4.4 is required but is not installed",
-            "Run `rig install 4.4`",
         ],
+        "4.4",
+        ("4.4.3", "4.4.3"),
+        None,
+        None,
+        1,
     );
-    assert_stderr_lacks(&out, "unexpected available");
+    assert_success(&out);
+    assert_stdout_contains(&out, "selected=private-install");
 }
 
 #[cfg(unix)]

@@ -16,7 +16,7 @@ $TestRVersion = $null
 $TestRExcludeNewer = $null
 $TestRscript = $null
 $RustupInitUrl = "https://win.rustup.rs"
-$RigLatestReleaseApi = "https://api.github.com/repos/r-lib/rig/releases/latest"
+$RigSourceUrl = "https://github.com/r-lib/rig"
 $SkipRust = $false
 $SkipPython = $false
 $SkipQuarto = $false
@@ -164,8 +164,26 @@ function Add-PathIfExists {
     }
 }
 
+function Set-PathFirst {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Test-Path $Path) {
+        $rest = @($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -ne $Path })
+        $env:PATH = (@($Path) + $rest) -join ([IO.Path]::PathSeparator)
+    }
+}
+
+function Get-CargoInstallRoot {
+    if ($env:CARGO_INSTALL_ROOT) {
+        return $env:CARGO_INSTALL_ROOT
+    }
+    if ($env:CARGO_HOME) {
+        return $env:CARGO_HOME
+    }
+    return (Join-Path $HOME ".cargo")
+}
+
 function Add-KnownInstallPaths {
-    Add-PathIfExists (Join-Path $HOME ".cargo\bin")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "Quarto\bin")
@@ -174,6 +192,15 @@ function Add-KnownInstallPaths {
     Add-PathIfExists (Join-Path $env:ProgramFiles "rig\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "R\rig\bin")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\R\rig\bin")
+    if ($env:RIG_BINARY_DIR) {
+        Set-PathFirst $env:RIG_BINARY_DIR
+    }
+    else {
+        Set-PathFirst (Join-Path $env:USERPROFILE ".local\bin")
+    }
+    $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }
+    Set-PathFirst (Join-Path $cargoHome "bin")
+    Set-PathFirst (Join-Path (Get-CargoInstallRoot) "bin")
 }
 
 function Install-WingetPackage {
@@ -190,127 +217,23 @@ function Install-WingetPackage {
     )
 }
 
-function Get-RigWindowsArch {
-    $arch = $env:PROCESSOR_ARCHITEW6432
-    if (-not $arch) {
-        $arch = $env:PROCESSOR_ARCHITECTURE
+function Test-RigUserMode {
+    if ($DryRun -or -not (Test-Tool "rig")) {
+        return $false
     }
 
-    switch ($arch) {
-        "ARM64" { return "arm64" }
-        "AMD64" { return "x86_64" }
-        "x86_64" { return "x86_64" }
-        default { throw "unsupported architecture for rig: $arch" }
-    }
+    & rig --user --version *> $null
+    return $LASTEXITCODE -eq 0
 }
 
-function Get-GitHubApiHeaders {
-    $token = $env:GITHUB_TOKEN
-    if (-not $token) {
-        $token = $env:GITHUB_PAT
-    }
-    if (-not $token) {
-        return $null
-    }
+function Install-DevelopmentRig {
+    Require-Tool "cargo"
+    $cargoInstallRoot = Get-CargoInstallRoot
+    Invoke-Step "cargo" @("install", "--git", $RigSourceUrl, "--locked", "--force", "--root", $cargoInstallRoot, "rig")
+    Set-PathFirst (Join-Path $cargoInstallRoot "bin")
 
-    return @{
-        "Accept" = "application/vnd.github+json"
-        "Authorization" = "Bearer $token"
-        "X-GitHub-Api-Version" = "2022-11-28"
-    }
-}
-
-function Get-LatestRigReleaseTag {
-    $headers = Get-GitHubApiHeaders
-    if ($DryRun) {
-        if ($headers) {
-            Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi -Headers <github-token>"
-        }
-        else {
-            Write-Host "+ Invoke-RestMethod -Uri $RigLatestReleaseApi"
-        }
-        return "<latest-rig-tag>"
-    }
-
-    if ($headers) {
-        $release = Invoke-RestMethod -Uri $RigLatestReleaseApi -Headers $headers
-    }
-    else {
-        $release = Invoke-RestMethod -Uri $RigLatestReleaseApi
-    }
-    $tag = [string]$release.tag_name
-    if (-not $tag) {
-        throw "could not resolve latest rig release tag"
-    }
-    return $tag
-}
-
-function Get-RigVersionFromTag {
-    param([Parameter(Mandatory = $true)][string]$Tag)
-
-    if ($Tag -eq "<latest-rig-tag>") {
-        return "<latest-rig-version>"
-    }
-    if ($Tag.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $Tag.Substring(1)
-    }
-    return $Tag
-}
-
-function Invoke-InstallerStep {
-    param(
-        [Parameter(Mandatory = $true)][string]$File,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
-    )
-
-    Write-Step $File $Arguments
-    if (-not $DryRun) {
-        $process = Start-Process -FilePath $File -ArgumentList $Arguments -Wait -PassThru
-        if ($process.ExitCode -ne 0) {
-            throw "$File exited with code $($process.ExitCode)"
-        }
-    }
-}
-
-function Install-RigFromGitHubRelease {
-    $tag = Get-LatestRigReleaseTag
-    $version = Get-RigVersionFromTag $tag
-    $arch = Get-RigWindowsArch
-    if ($arch -eq "arm64") {
-        $asset = "rig-windows-arm64-$version.exe"
-    }
-    else {
-        $asset = "rig-windows-$version.exe"
-    }
-    $url = "https://github.com/r-lib/rig/releases/download/$tag/$asset"
-    if ($DryRun) {
-        $installer = Join-Path ([System.IO.Path]::GetTempPath()) "ir-rig-installer.exe"
-    }
-    else {
-        $installer = Join-Path ([System.IO.Path]::GetTempPath()) "ir-rig-installer-$([System.Guid]::NewGuid().ToString('N')).exe"
-    }
-
-    Write-Host "+ Invoke-WebRequest -Uri $url -OutFile $installer"
-    if (-not $DryRun) {
-        Invoke-WebRequest -Uri $url -OutFile $installer
-    }
-
-    try {
-        Invoke-InstallerStep $installer @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
-    }
-    finally {
-        if (-not $DryRun) {
-            Remove-Item $installer -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-function Install-Rig {
-    if ($env:GITHUB_ACTIONS -eq "true") {
-        Install-RigFromGitHubRelease
-    }
-    else {
-        Install-WingetPackage "posit.rig"
+    if (-not $DryRun -and -not (Test-RigUserMode)) {
+        throw "development rig is not on PATH with public --user support after installation"
     }
 }
 
@@ -363,9 +286,8 @@ if (-not $SkipPython -and -not (Test-AnyRunnableTool @("python", "python3"))) {
     Add-KnownInstallPaths
 }
 
-if (-not (Test-Tool "rig")) {
-    Install-Rig
-    Add-KnownInstallPaths
+if (-not (Test-RigUserMode)) {
+    Install-DevelopmentRig
 }
 
 if (-not $SkipQuarto -and -not (Test-Tool "quarto")) {
@@ -373,9 +295,14 @@ if (-not $SkipQuarto -and -not (Test-Tool "quarto")) {
     Add-KnownInstallPaths
 }
 
-if (-not $DryRun -and -not (Test-Tool "rig")) {
-    throw "rig is not on PATH after installation; restart PowerShell and rerun this script"
+if (-not $DryRun -and -not (Test-RigUserMode)) {
+    throw "development rig is not on PATH with public --user support after installation"
 }
+
+if (-not $env:RIG_BINARY_DIR) {
+    $env:RIG_BINARY_DIR = Join-Path $env:USERPROFILE ".local\bin"
+}
+$env:RIG_MODE = "user"
 
 if (-not $SkipRRelease) {
     Invoke-Step "rig" @("add", "release")
@@ -384,12 +311,13 @@ if (-not $SkipTestR) {
     Invoke-Step "rig" @("add", $TestRSpec)
 }
 
+Add-KnownInstallPaths
 Set-TestRMetadata
 
 Invoke-Step "cargo" @("--version")
 Invoke-Step "rustc" @("--version")
 Invoke-Step (Get-PythonTool) @("--version")
-Invoke-Step "rig" @("--version")
+Invoke-Step "rig" @("--user", "--version")
 Invoke-Step "Rscript" @("--version")
 if (-not $SkipTestR) {
     if (-not $TestRName) {
@@ -400,6 +328,8 @@ if (-not $SkipTestR) {
 Invoke-Step "quarto" @("--version")
 
 if (-not $SkipTestR -and -not $DryRun -and $env:GITHUB_ENV) {
+    Add-Content -Path $env:GITHUB_ENV -Value "RIG_MODE=user"
+    Add-Content -Path $env:GITHUB_ENV -Value "RIG_BINARY_DIR=$env:RIG_BINARY_DIR"
     Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_VERSION=$TestRVersion"
     Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"
     Add-Content -Path $env:GITHUB_ENV -Value "IR_TEST_RSCRIPT=$TestRscript"
@@ -412,6 +342,8 @@ if ($SkipTestR) {
 }
 Write-Host "To enable the version-selection tests in this PowerShell session, run:"
 Write-Host ""
+Write-Host "  `$env:RIG_MODE='user'"
+Write-Host "  `$env:RIG_BINARY_DIR='$env:RIG_BINARY_DIR'"
 Write-Host "  `$env:IR_TEST_R_VERSION=$TestRVersion"
 Write-Host "  `$env:IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"
 Write-Host "  `$env:IR_TEST_RSCRIPT='$TestRscript'"

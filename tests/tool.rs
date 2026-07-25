@@ -506,6 +506,75 @@ fn tool_install_materializes_exec_and_bin_tools_in_tool_store() {
 
 #[cfg(unix)]
 #[test]
+fn direct_tool_launcher_reports_recovery_after_cached_r_is_cleaned() {
+    let cache_dir = temp_dir("ir-tool-direct-missing-r-cache");
+    let store_dir = temp_dir("ir-tool-direct-missing-r-store");
+    let bin_dir = temp_dir("ir-tool-direct-missing-r-bin");
+    let rig_bin_dir = temp_dir("ir-tool-direct-missing-r-rig");
+    let cached_r_bin = cache_dir.join("rig").join("r").join("4.4.3").join("bin");
+    fs::create_dir_all(&cached_r_bin).unwrap();
+    let rscript = write_fake_tool_store_resolver(&cached_r_bin, "irstorepkg");
+    let r_binary = cached_r_bin.join("R");
+    fs::write(&r_binary, "").unwrap();
+
+    write_executable(
+        &rig_bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "set -eu\n",
+            "[ \"$1\" = \"list\" ]\n",
+            "[ \"$2\" = \"--json\" ]\n",
+            "printf '[{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[],\"binary\":\"%s\"}]\\n' \"$IR_TEST_R_BINARY\"\n",
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TOOL_STORE_DIR", &store_dir)
+        .env("IR_TEST_R_BINARY", &r_binary)
+        .env("PATH", path_with_bin_dir(&rig_bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--r-version", "4.4", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irstorepkg")
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let launcher = launcher_path(&bin_dir, "native");
+    let out = Command::new(&launcher).output().unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "tool.location=bin");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["cache", "clean"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let out = Command::new(&launcher).output().unwrap();
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("missing selected R executable"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        stderr.contains(&rscript.to_string_lossy().into_owned()),
+        "{}",
+        output_text(&out)
+    );
+    let reinstall = format!(
+        "ir tool install --force --bin-dir {} --r-version 4.4 irstorepkg",
+        std::path::absolute(&bin_dir).unwrap().to_string_lossy()
+    );
+    assert!(stderr.contains(&reinstall), "{}", output_text(&out));
+}
+
+#[cfg(unix)]
+#[test]
 fn tool_run_materializes_package_tools_in_cache() {
     let cache_dir = temp_dir("ir-tool-store-run-cache");
     let store_dir = temp_dir("ir-tool-store-run-store");
@@ -2070,8 +2139,10 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     assert_stdout_contains(&out, "Installed");
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = fs::canonicalize(&rscript).unwrap();
+    let selected_bin_dir = std::path::absolute(&bin_dir).unwrap();
     let reinstall = format!(
-        "ir tool install --force --rscript {} irfake",
+        "ir tool install --force --bin-dir {} --rscript {} irfake",
+        selected_bin_dir.to_string_lossy(),
         selected.to_string_lossy()
     );
     assert!(
@@ -2079,6 +2150,27 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
         "{launcher}"
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
+
+    fs::remove_file(&rscript).unwrap();
+    let missing_runtime = Command::new(launcher_path(&bin_dir, "hello"))
+        .output()
+        .unwrap();
+    assert!(
+        !missing_runtime.status.success(),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    let stderr = String::from_utf8_lossy(&missing_runtime.stderr);
+    assert!(
+        stderr.contains("missing selected R executable"),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    assert!(
+        stderr.contains(&reinstall),
+        "{}",
+        output_text(&missing_runtime)
+    );
 }
 
 #[cfg(unix)]
@@ -2105,18 +2197,88 @@ fn tool_install_records_env_selected_rscript_in_recovery_command() {
     assert_success(&out);
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = std::path::absolute(&rscript).unwrap();
+    let selected_bin_dir = std::path::absolute(&bin_dir).unwrap();
     let reinstall = format!(
-        "ir tool install --force --rscript {} irfake",
+        "ir tool install --force --bin-dir {} --rscript {} irfake",
+        selected_bin_dir.to_string_lossy(),
         selected.to_string_lossy()
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
 }
 
+#[cfg(unix)]
+#[test]
+fn tool_install_records_env_selected_r_version_in_recovery_command() {
+    let cache_dir = temp_dir("ir-tool-install-env-r-version-cache");
+    let bin_dir = temp_dir("ir-tool-install-env-r-version-bin");
+    let rig_bin_dir = temp_dir("ir-tool-install-env-r-version-rig");
+    let (library, _rscript_dir, rscript) = fake_tool_package_with_rscript(
+        "ir-tool-install-env-r-version",
+        "Rscript",
+        "selected=env-r-version",
+    );
+
+    write_executable(
+        &rig_bin_dir.join("rig"),
+        concat!(
+            "#!/bin/sh\n",
+            "set -eu\n",
+            "[ \"$1\" = \"list\" ]\n",
+            "[ \"$2\" = \"--json\" ]\n",
+            "printf '[{\"name\":\"4.4.3\",\"version\":\"4.4.3\",\"aliases\":[],\"binary\":\"%s\"}]\\n' \"$IR_TEST_R_BINARY\"\n",
+        ),
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_R_BINARY", rscript.with_file_name("R"))
+        .env("IR_R_VERSION", "4.4")
+        .env("PATH", path_with_bin_dir(&rig_bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["tool", "install", "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("irfake")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let launcher_path = launcher_path(&bin_dir, "hello");
+    let launcher = fs::read_to_string(&launcher_path).unwrap();
+    let selected_bin_dir = std::path::absolute(&bin_dir).unwrap();
+    let reinstall = format!(
+        "ir tool install --force --bin-dir {} --r-version 4.4 irfake",
+        selected_bin_dir.to_string_lossy()
+    );
+    assert!(launcher.contains(&reinstall), "{launcher}");
+    assert!(!launcher.contains("--rscript"), "{launcher}");
+
+    fs::remove_file(&rscript).unwrap();
+    let missing_runtime = Command::new(launcher_path).output().unwrap();
+    assert!(
+        !missing_runtime.status.success(),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    let stderr = String::from_utf8_lossy(&missing_runtime.stderr);
+    assert!(
+        stderr.contains("missing selected R executable"),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    assert!(
+        stderr.contains(&reinstall),
+        "{}",
+        output_text(&missing_runtime)
+    );
+}
+
 #[cfg(windows)]
 #[test]
-fn tool_install_quotes_windows_recovery_rscript() {
+fn tool_install_quotes_windows_recovery_paths() {
     let cache_dir = temp_dir("ir-tool-install-windows-rscript-cache");
-    let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin");
+    let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin").join("bin dir");
+    fs::create_dir_all(&bin_dir).unwrap();
     let library = temp_dir("ir-tool-install-windows-rscript-library");
     let rscript_dir = temp_dir("ir tool install windows rscript");
     let package = library.join("irfake");
@@ -2155,14 +2317,37 @@ fn tool_install_quotes_windows_recovery_rscript() {
     assert_success(&out);
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = std::path::absolute(&rscript).unwrap();
+    let selected_bin_dir = std::path::absolute(&bin_dir).unwrap();
     let reinstall = format!(
-        "ir tool install --force --rscript \"{}\" irfake",
+        "ir tool install --force --bin-dir \"{}\" --rscript \"{}\" irfake",
+        selected_bin_dir.to_string_lossy().replace('"', "\"\""),
         selected.to_string_lossy().replace('"', "\"\"")
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
     assert!(
         !launcher.contains("--rscript '"),
         "Windows recovery command should not use POSIX quoting:\n{launcher}"
+    );
+
+    fs::remove_file(&rscript).unwrap();
+    let missing_runtime = Command::new(launcher_path(&bin_dir, "hello"))
+        .output()
+        .unwrap();
+    assert!(
+        !missing_runtime.status.success(),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    let stderr = String::from_utf8_lossy(&missing_runtime.stderr);
+    assert!(
+        stderr.contains("missing selected R executable"),
+        "{}",
+        output_text(&missing_runtime)
+    );
+    assert!(
+        stderr.contains(&reinstall),
+        "{}",
+        output_text(&missing_runtime)
     );
 }
 
