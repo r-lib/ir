@@ -111,6 +111,7 @@ fn selected_r_binary(dir: &std::path::Path, label: &str) -> std::path::PathBuf {
             concat!(
                 "#!/bin/sh\n",
                 "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
                 "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
                 "  exit 0\n",
                 "fi\n",
