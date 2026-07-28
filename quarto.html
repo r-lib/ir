@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.38">
+<meta name="generator" content="quarto-1.10.18">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -12,10 +12,13 @@
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
 */
-code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
 div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
 ul.task-list{list-style: none;}
 ul.task-list li input[type="checkbox"] {
@@ -74,14 +77,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="site_libs/quarto-html/anchor.min.js"></script>
 <link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-dark-0a6b7249c26820e032cb0bd839ff02b1.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-15634bcf2e68342d4ad2dfa704d543f6.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-64a204ab8560d761af7679ceaba22944.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-dark-b85bc7c33db8c58e0ec93c3465666fed.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-64a204ab8560d761af7679ceaba22944.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-4d08de4580803706af5889ce055dab9a.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="site_libs/bootstrap/bootstrap-dark-e6dd9997ba118c68ba13f581a7417351.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="site_libs/bootstrap/bootstrap-4d08de4580803706af5889ce055dab9a.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-953b800d9952cad34f3dacfb44715a02.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-dark-4ed19646e448f51b124ecd4727e6ff6b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="site_libs/bootstrap/bootstrap-953b800d9952cad34f3dacfb44715a02.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -371,23 +374,23 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">title</span><span class="kw">:</span><span class="at"> My report</span></span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ir</span><span class="kw">:</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">packages</span><span class="kw">:</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> dplyr&gt;=1.0</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> gt@1.0</span></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">r-version</span><span class="kw">:</span><span class="at"> </span><span class="st">"&gt;= 4.0"</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> dplyr</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> gt==0.10.1</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">r-version</span><span class="kw">:</span><span class="at"> </span><span class="st">"&gt;= 4.3"</span></span>
 <span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">isolated</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">exclude-newer</span><span class="kw">:</span><span class="at"> 2024-01-15</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">exclude-newer</span><span class="kw">:</span><span class="at"> 2024-02-01</span></span>
 <span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Render the document with the <code>render</code> subcommand:</p>
 <pre class="console"><code>$ ir render report.qmd
 $ ir render report.qmd --to pdf
-$ ir render --exclude-newer 2024-01-15 report.qmd
+$ ir render --exclude-newer 2024-02-01 report.qmd
 $ ir render --vanilla report.qmd</code></pre>
 <p>Quarto R scripts use Quarto’s knitr script header syntax:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">#' ---</span></span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="co">#' title: "My report"</span></span>
 <span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co">#' ir:</span></span>
 <span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co">#'   packages:</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="co">#'     - dplyr&gt;=1.0</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="co">#'     - dplyr</span></span>
 <span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="co">#' ---</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <pre class="console"><code>$ ir render report.R</code></pre>
 <p>The <code>ir.packages</code> value follows the same rules as script <code>packages</code>: use a YAML sequence where each entry is one package ref, or omit it, set it to <code>[]</code>, or set it to <code>null</code> for no dependencies.</p>
@@ -397,7 +400,7 @@ $ ir render --vanilla report.qmd</code></pre>
 $ ir preview report.qmd --port 4321
 $ ir preview --with ggplot2 report.qmd --no-browser</code></pre>
 <p><code>ir preview</code> launches <code>quarto preview</code>. Arguments after the source path are passed to <code>quarto preview</code>.</p>
-<p>Use <code>--vanilla</code> before the source path to pass <code>--vanilla</code> to the Rscript used by Quarto. Snapshot date precedence is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>ir.exclude-newer</code>. An empty <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> overrides frontmatter <code>ir.exclude-newer</code> and resolves latest packages. Future snapshot dates also resolve latest packages.</p>
+<p>Use <code>--vanilla</code> before the source path to pass <code>--vanilla</code> to the Rscript used by Quarto. Snapshot date precedence is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>ir.exclude-newer</code>. An empty <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> overrides frontmatter <code>ir.exclude-newer</code> and resolves latest packages. Future snapshot dates also resolve latest packages. When <code>r-version</code> can match more than one R minor, the snapshot date limits selection to minor versions released by that date. An exact R version or explicit Rscript selection remains authoritative.</p>
 <p>When <code>ir</code> selects an R executable by <code>--rscript</code>, <code>IR_RSCRIPT</code>, <code>--r-version</code>, <code>IR_R_VERSION</code>, frontmatter <code>ir.r-version</code>, or date-only <code>exclude-newer</code>, it sets <code>QUARTO_R</code> so Quarto renders with that R. Frontmatter <code>ir.rscript</code> is rejected.</p>
 <p>Set <code>IR_QUARTO</code> to use a specific Quarto executable.</p>
 <section id="python-environments" class="level2">
