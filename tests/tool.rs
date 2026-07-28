@@ -566,8 +566,15 @@ fn tool_run_and_install_treat_bin_executables_opaquely() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_REPOSITORIES", "https://r-hub.r-universe.dev")
         .env_remove("IR_RSCRIPT")
-        .args(["tool", "run", "--rscript"])
+        .args([
+            "tool",
+            "run",
+            "--repo",
+            "https://r-hub.r-universe.dev",
+            "--rscript",
+        ])
         .arg(&rscript)
         .args(["--from", "iropaquebin", "native.exe", "run", "arg"])
         .output()
@@ -2004,6 +2011,11 @@ fn fake_tool_package_with_rscript(
             concat!(
                 "#!/bin/sh\n",
                 "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  if [ -n \"${{IR_TEST_REPOSITORIES:-}}\" ]; then\n",
+                "    test -n \"${{IR_REPOSITORIES_FILE:-}}\" || exit 41\n",
+                "    test \"$(cat \"$IR_REPOSITORIES_FILE\")\" = ",
+                "\"$IR_TEST_REPOSITORIES\" || exit 41\n",
+                "  fi\n",
                 "  cat >/dev/null\n",
                 "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
                 "  printf '%s\\n' irfake > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
@@ -2057,9 +2069,17 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_REPOSITORIES", "https://r-hub.r-universe.dev")
         .env("PATH", path_with_bin_dir(&rscript_dir))
         .env_remove("IR_RSCRIPT")
-        .args(["tool", "install", "--rscript", rscript_name])
+        .args([
+            "tool",
+            "install",
+            "--repo",
+            "https://r-hub.r-universe.dev",
+            "--rscript",
+            rscript_name,
+        ])
         .args(["--bin-dir"])
         .arg(&bin_dir)
         .arg("irfake")
@@ -2071,7 +2091,7 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = fs::canonicalize(&rscript).unwrap();
     let reinstall = format!(
-        "ir tool install --force --rscript {} irfake",
+        "ir tool install --force --repo https://r-hub.r-universe.dev --rscript {} irfake",
         selected.to_string_lossy()
     );
     assert!(
@@ -2278,6 +2298,11 @@ fn write_fake_tool_resolver(rscript_dir: &Path, package: &str, arch: &str) -> Pa
             concat!(
                 "#!/bin/sh\n",
                 "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  if [ -n \"${{IR_TEST_REPOSITORIES:-}}\" ]; then\n",
+                "    test -n \"${{IR_REPOSITORIES_FILE:-}}\" || exit 41\n",
+                "    test \"$(cat \"$IR_REPOSITORIES_FILE\")\" = ",
+                "\"$IR_TEST_REPOSITORIES\" || exit 41\n",
+                "  fi\n",
                 "  cat >/dev/null\n",
                 "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
                 "  printf '%s\\n' {} > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",

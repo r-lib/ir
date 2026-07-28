@@ -8,6 +8,7 @@ Arguments:
 
 Options:
       --with <PKG>                   Add a dependency for this render; may be repeated
+      --repo <REPO>                  Add a package repository for this render; may be repeated
       --r-version <SPEC>             Select the R version for this render with rig
       --rscript <RSCRIPT>            Select the Rscript executable
       --exclude-newer <DATE>         Resolve packages from the Posit Package Manager snapshot at this date

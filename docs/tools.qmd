@@ -31,6 +31,7 @@ Tool runs support the same dependency and R selection flags as script runs:
 $ rx --with cli --from btw btw
 $ rx -w cli --from btw btw
 $ rx --from 'btw>=0.1.0' btw
+$ rx --repo https://example.r-universe.dev --from owner/pkg tool
 $ rx --r-version 4.5 --from btw btw
 $ rx --rscript /path/to/Rscript --from btw btw
 ```
@@ -88,6 +89,7 @@ $ ir tool install github::r-lib/Rapp
 $ ir tool install --bin-dir ~/.local/bin btw
 $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw
+$ ir tool install --repo https://example.r-universe.dev owner/pkg
 $ ir tool install --rscript /path/to/Rscript btw
 ```
 
@@ -95,7 +97,7 @@ The tool store is configured with `IR_TOOL_STORE_DIR`.
 By default, it is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix and macOS, and `%LOCALAPPDATA%\Programs\R\ir\tools` or `%USERPROFILE%\AppData\Local\Programs\R\ir\tools` on Windows.
 Installed tool libraries are persistent state, so `ir cache clean` does not remove them.
 
-Generated launchers keep the same resolved package ref, `--with` package additions, and R selection that were used at install time.
+Generated launchers keep the same resolved package ref, `--with` package additions, `--repo` repositories, and R selection that were used at install time.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.

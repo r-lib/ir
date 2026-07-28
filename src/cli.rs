@@ -146,6 +146,14 @@ fn run_command() -> ClapCommand {
                 .help("Add a dependency for this run; may be repeated"),
         )
         .arg(
+            Arg::new("repo")
+                .long("repo")
+                .value_name("REPO")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Add a package repository for this run; may be repeated"),
+        )
+        .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
@@ -228,6 +236,16 @@ fn quarto_command(command: QuartoCommand) -> ClapCommand {
                 .num_args(1)
                 .action(ArgAction::Append)
                 .help(format!("Add a dependency for this {name}; may be repeated")),
+        )
+        .arg(
+            Arg::new("repo")
+                .long("repo")
+                .value_name("REPO")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help(format!(
+                    "Add a package repository for this {name}; may be repeated"
+                )),
         )
         .arg(
             Arg::new("r-version")
@@ -380,6 +398,14 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .help("Add a dependency for this tool run; may be repeated"),
         )
         .arg(
+            Arg::new("repo")
+                .long("repo")
+                .value_name("REPO")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Add a package repository for this tool run; may be repeated"),
+        )
+        .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
@@ -419,6 +445,14 @@ fn tool_install_command() -> ClapCommand {
                 .num_args(1)
                 .action(ArgAction::Append)
                 .help("Add a dependency for installed tools; may be repeated"),
+        )
+        .arg(
+            Arg::new("repo")
+                .long("repo")
+                .value_name("REPO")
+                .num_args(1)
+                .action(ArgAction::Append)
+                .help("Add a package repository for installed tools; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
@@ -489,6 +523,7 @@ pub(crate) struct PackageExecTarget {
 pub(crate) struct RunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
+    pub(crate) repositories: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
@@ -500,6 +535,7 @@ pub(crate) struct RunArgs {
 
 pub(crate) struct QuartoArgs {
     pub(crate) with_deps: Vec<String>,
+    pub(crate) repositories: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
@@ -513,6 +549,7 @@ pub(crate) struct QuartoArgs {
 pub(crate) struct ToolRunArgs {
     pub(crate) rscript_args: Vec<String>,
     pub(crate) with_deps: Vec<String>,
+    pub(crate) repositories: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) target: PackageExecTarget,
@@ -522,6 +559,7 @@ pub(crate) struct ToolRunArgs {
 pub(crate) struct ToolInstallArgs {
     pub(crate) package_ref: String,
     pub(crate) with_deps: Vec<String>,
+    pub(crate) repositories: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) bin_dir: PathBuf,
@@ -534,16 +572,18 @@ pub(crate) struct ToolInstallArgs {
 /// and the program source, with everything after the source treated as program
 /// args.
 ///
-/// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--rscript <path>`,
-/// `--exclude-newer <date>`, `--python-exclude-newer <date>` and `--isolated`
-/// are `ir`-level flags handled here. Any other `-...` argument is an Rscript
-/// option, forwarded verbatim to the user-code
+/// `-e <expr>`, `--with <spec>`, `--repo <spec>`, `--r-version <spec>`,
+/// `--rscript <path>`, `--exclude-newer <date>`,
+/// `--python-exclude-newer <date>` and `--isolated` are `ir`-level flags
+/// handled here. Any other `-...` argument is an Rscript option, forwarded
+/// verbatim to the user-code
 /// phase. Scanning stops at the script path unless `-e` was given, in which case
 /// scanning stops after the last `-e <expr>` pair. Everything after the source
 /// boundary is passed to user code as program args.
 pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
+    let mut repositories = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
     let mut exclude_newer = None;
@@ -574,6 +614,13 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--repo" {
+            let value = iter
+                .next()
+                .ok_or("`--repo` requires a repository (try `ir run --repo https://r-universe.dev script.R`)")?;
+            push_repository(&mut repositories, &value, "ir run")?;
+        } else if let Some(value) = arg.strip_prefix("--repo=") {
+            push_repository(&mut repositories, value, "ir run")?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir run --r-version 4.5 script.R`)",
@@ -633,6 +680,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     Ok(RunArgs {
         rscript_args,
         with_deps,
+        repositories,
         r_requirement,
         rscript,
         exclude_newer,
@@ -661,6 +709,7 @@ fn parse_quarto_args(
 ) -> Result<QuartoArgs, Box<dyn Error>> {
     let name = command.as_str();
     let mut with_deps = Vec::new();
+    let mut repositories = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
     let mut exclude_newer = None;
@@ -682,6 +731,16 @@ fn parse_quarto_args(
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--repo" {
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--repo` requires a repository \
+                     (try `ir {name} --repo https://r-universe.dev report.qmd`)"
+                )
+            })?;
+            push_repository(&mut repositories, &value, &format!("ir {name}"))?;
+        } else if let Some(value) = arg.strip_prefix("--repo=") {
+            push_repository(&mut repositories, value, &format!("ir {name}"))?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or_else(|| {
                 format!(
@@ -743,6 +802,7 @@ fn parse_quarto_args(
 
     Ok(QuartoArgs {
         with_deps,
+        repositories,
         r_requirement,
         rscript,
         exclude_newer,
@@ -815,6 +875,7 @@ pub(crate) fn parse_tool_run_args(
 ) -> Result<ToolRunArgs, Box<dyn Error>> {
     let mut rscript_args = Vec::new();
     let mut with_deps = Vec::new();
+    let mut repositories = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
     let mut from = None;
@@ -845,6 +906,16 @@ pub(crate) fn parse_tool_run_args(
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--repo" {
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--repo` requires a repository (try `{} --repo https://r-universe.dev btw`)",
+                    invocation.command()
+                )
+            })?;
+            push_repository(&mut repositories, &value, invocation.command())?;
+        } else if let Some(value) = arg.strip_prefix("--repo=") {
+            push_repository(&mut repositories, value, invocation.command())?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or_else(|| {
                 format!(
@@ -906,6 +977,7 @@ pub(crate) fn parse_tool_run_args(
     Ok(ToolRunArgs {
         rscript_args,
         with_deps,
+        repositories,
         r_requirement,
         rscript,
         target,
@@ -917,6 +989,7 @@ pub(crate) fn parse_tool_install_args(
     args: Vec<String>,
 ) -> Result<ToolInstallArgs, Box<dyn Error>> {
     let mut with_deps = Vec::new();
+    let mut repositories = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
     let mut bin_dir = None;
@@ -932,6 +1005,13 @@ pub(crate) fn parse_tool_install_args(
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
+        } else if arg == "--repo" {
+            let value = iter.next().ok_or(
+                "`--repo` requires a repository (try `ir tool install --repo https://r-universe.dev btw`)",
+            )?;
+            push_repository(&mut repositories, &value, "ir tool install")?;
+        } else if let Some(value) = arg.strip_prefix("--repo=") {
+            push_repository(&mut repositories, value, "ir tool install")?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir tool install --r-version 4.5 btw`)",
@@ -980,6 +1060,7 @@ pub(crate) fn parse_tool_install_args(
     Ok(ToolInstallArgs {
         package_ref: package_arg,
         with_deps,
+        repositories,
         r_requirement,
         rscript,
         bin_dir: bin_dir.unwrap_or(tool_install_bin_dir()?),
@@ -997,6 +1078,19 @@ fn push_with_deps(with_deps: &mut Vec<String>, value: &str) {
             with_deps.push(dep.to_string());
         }
     }
+}
+
+fn push_repository(
+    repositories: &mut Vec<String>,
+    value: &str,
+    command: &str,
+) -> Result<(), Box<dyn Error>> {
+    let value = value.trim();
+    if value.is_empty() || value.contains(['\r', '\n']) {
+        return Err(format!("`--repo` for `{command}` must be a non-empty single line").into());
+    }
+    repositories.push(value.to_string());
+    Ok(())
 }
 
 fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {

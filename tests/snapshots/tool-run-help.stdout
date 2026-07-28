@@ -8,6 +8,7 @@ Arguments:
 Options:
       --from <PKG_REF>     Resolve a package ref and run <command> from that package
   -w, --with <PKG>         Add a dependency for this tool run; may be repeated
+      --repo <REPO>        Add a package repository for this tool run; may be repeated
       --r-version <SPEC>   Select the R version for this tool run with rig
       --rscript <RSCRIPT>  Select the Rscript executable
   -h, --help               Print help

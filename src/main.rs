@@ -67,7 +67,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_run(
                 &run.source,
                 &run.rscript_args,
-                &run.with_deps,
+                runtime::DependencyArgs {
+                    with_deps: &run.with_deps,
+                    repositories: &run.repositories,
+                },
                 runtime::RSelectionArgs {
                     r_requirement: run.r_requirement.as_deref(),
                     rscript: run.rscript.as_deref(),
@@ -85,7 +88,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_quarto(
                 quarto::QuartoCommand::Render,
                 &render.source,
-                &render.with_deps,
+                runtime::DependencyArgs {
+                    with_deps: &render.with_deps,
+                    repositories: &render.repositories,
+                },
                 runtime::RSelectionArgs {
                     r_requirement: render.r_requirement.as_deref(),
                     rscript: render.rscript.as_deref(),
@@ -106,7 +112,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_quarto(
                 quarto::QuartoCommand::Preview,
                 &preview.source,
-                &preview.with_deps,
+                runtime::DependencyArgs {
+                    with_deps: &preview.with_deps,
+                    repositories: &preview.repositories,
+                },
                 runtime::RSelectionArgs {
                     r_requirement: preview.r_requirement.as_deref(),
                     rscript: preview.rscript.as_deref(),

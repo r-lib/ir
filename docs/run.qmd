@@ -36,6 +36,7 @@ $ ./script.R
 The script frontmatter supports:
 
 - `packages`: package refs resolved with pak.
+- `repos`: optional package repository specs used before the default repository.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig. Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 - `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
 - `python-version`: an optional Python version requirement.
@@ -60,6 +61,32 @@ Local packages may be written as `local::path`, as a bare file-system path in pa
 `packages` must be a YAML sequence; each sequence entry is one package ref.
 Omit `packages`, use `packages: []`, or use `packages: null` when no package refs are needed.
 Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.
+
+## Package repositories
+
+Use `repos` when a package or one of its dependencies is published outside CRAN:
+
+```r
+#!/usr/bin/env -S ir run
+#| packages:
+#|   - r-xla/anvl
+#| repos:
+#|   - https://r-xla.r-universe.dev
+
+library(anvl)
+```
+
+`repos` must be a YAML sequence of repository specs accepted by pak.
+Repositories supplied with repeatable `--repo` options are placed first, followed by frontmatter `repos`, then the default CRAN or PPM repository.
+Repeated repository specs are removed while preserving that order.
+
+```console
+$ ir run --repo https://r-xla.r-universe.dev --with r-xla/anvl -e 'library(anvl)'
+```
+
+`exclude-newer` selects a dated snapshot for the default PPM repository.
+Repositories supplied through `repos` or `--repo` are used as provided and may contain newer packages.
+Because those repositories may change, resolutions that use them expire like latest-package resolutions even when `exclude-newer` is set.
 
 ## Python environments
 

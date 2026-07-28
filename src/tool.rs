@@ -21,6 +21,7 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
     deps.extend(run.with_deps.iter().cloned());
     let spec = RuntimeSpec {
         dependencies: deps,
+        repositories: run.repositories.clone(),
         ..RuntimeSpec::default()
     };
 
@@ -56,6 +57,7 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
 pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn Error>> {
     let mut spec = RuntimeSpec {
         dependencies: vec![install.package_ref.clone()],
+        repositories: install.repositories.clone(),
         ..RuntimeSpec::default()
     };
     spec.dependencies.extend(install.with_deps.iter().cloned());
@@ -1399,6 +1401,10 @@ fn tool_install_recovery_command(install: &ToolInstallArgs, rscript: &OsStr) -> 
     for dep in &install.with_deps {
         words.push("--with".to_string());
         words.push(recovery_command_word(dep));
+    }
+    for repository in &install.repositories {
+        words.push("--repo".to_string());
+        words.push(recovery_command_word(repository));
     }
     if let Some(req) = &install.r_requirement {
         words.push("--r-version".to_string());

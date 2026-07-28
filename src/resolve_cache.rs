@@ -24,6 +24,12 @@ pub(crate) struct CachedResolution {
     pub(crate) primary_package: Option<String>,
 }
 
+pub(crate) struct ResolutionInputs<'a> {
+    pub(crate) dependencies: &'a [String],
+    pub(crate) repositories: &'a [String],
+    pub(crate) exclude_newer: Option<&'a str>,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct QuartoCacheFlags {
     pub(crate) render: bool,
@@ -34,12 +40,12 @@ pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
     rscript_args: &[String],
-    dependencies: &[String],
-    exclude_newer: Option<&str>,
+    inputs: ResolutionInputs<'_>,
     quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
-    if !dependencies
+    if !inputs
+        .dependencies
         .iter()
         .all(|dependency| is_standard_ref(dependency))
     {
@@ -50,15 +56,17 @@ pub(crate) fn paths(
         return Ok(None);
     };
 
-    let latest_max_age_seconds = if exclude_newer.is_none() {
-        Some(latest_max_age_seconds()?)
-    } else {
-        None
-    };
-    let source = resolution_cache_source(exclude_newer)?;
+    let latest_max_age_seconds =
+        if inputs.exclude_newer.is_none() || !inputs.repositories.is_empty() {
+            Some(latest_max_age_seconds()?)
+        } else {
+            None
+        };
+    let source = resolution_cache_source(inputs.exclude_newer, inputs.repositories)?;
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
-        dependencies,
-        exclude_newer,
+        inputs.dependencies,
+        inputs.repositories,
+        inputs.exclude_newer,
         quarto,
         &rscript_identity,
         rscript_args,
@@ -68,7 +76,7 @@ pub(crate) fn paths(
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or("resolution cache marker path is not valid UTF-8")?;
-    let package_marker = dependencies.first().map(|primary_ref| {
+    let package_marker = inputs.dependencies.first().map(|primary_ref| {
         marker.with_file_name(format!("{marker_name}-primary-{}", sha256_hex(primary_ref)))
     });
 
@@ -130,6 +138,7 @@ pub(crate) fn read(
 
 fn resolution_cache_key(
     dependencies: &[String],
+    repositories: &[String],
     exclude_newer: Option<&str>,
     quarto: QuartoCacheFlags,
     rscript_identity: &str,
@@ -142,6 +151,9 @@ fn resolution_cache_key(
     let mut parts = dependencies.to_vec();
     parts.sort();
     parts.push(source_key);
+    for repository in repositories {
+        parts.push(format!("repo: {repository}"));
+    }
     if quarto.render {
         parts.push("quarto".to_string());
     }
@@ -199,11 +211,14 @@ fn is_package_name(name: &str) -> bool {
             .is_some_and(|ch| ch.is_ascii_alphanumeric())
 }
 
-fn resolution_cache_source(exclude_newer: Option<&str>) -> Result<String, Box<dyn Error>> {
-    Ok(match exclude_newer {
-        Some(date) => format!("exclude-newer: {date}"),
-        None => format!("latest: {}", current_utc_seconds()?),
-    })
+fn resolution_cache_source(
+    exclude_newer: Option<&str>,
+    repositories: &[String],
+) -> Result<String, Box<dyn Error>> {
+    match exclude_newer {
+        Some(date) if repositories.is_empty() => Ok(format!("exclude-newer: {date}")),
+        _ => Ok(format!("latest: {}", current_utc_seconds()?)),
+    }
 }
 
 fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>> {
@@ -438,8 +453,11 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            &dependencies,
-            None,
+            ResolutionInputs {
+                dependencies: &dependencies,
+                repositories: &[],
+                exclude_newer: None,
+            },
             default_quarto_flags(),
             None,
         )
@@ -452,8 +470,11 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            &dependencies,
-            None,
+            ResolutionInputs {
+                dependencies: &dependencies,
+                repositories: &[],
+                exclude_newer: None,
+            },
             default_quarto_flags(),
             None,
         )
@@ -467,8 +488,11 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            &dependencies,
-            None,
+            ResolutionInputs {
+                dependencies: &dependencies,
+                repositories: &[],
+                exclude_newer: None,
+            },
             default_quarto_flags(),
             None,
         )
@@ -494,8 +518,11 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            &dependencies,
-            Some("2026-06-01"),
+            ResolutionInputs {
+                dependencies: &dependencies,
+                repositories: &[],
+                exclude_newer: Some("2026-06-01"),
+            },
             default_quarto_flags(),
             None,
         )
@@ -506,8 +533,11 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            &dependencies,
-            Some("2026-06-01"),
+            ResolutionInputs {
+                dependencies: &dependencies,
+                repositories: &[],
+                exclude_newer: Some("2026-06-01"),
+            },
             default_quarto_flags(),
             Some(&dir.join("tool-store")),
         )
@@ -543,8 +573,11 @@ mod tests {
                     &cache_dir,
                     rscript.as_os_str(),
                     &[],
-                    &dependencies,
-                    Some("2026-06-01"),
+                    ResolutionInputs {
+                        dependencies: &dependencies,
+                        repositories: &[],
+                        exclude_newer: Some("2026-06-01"),
+                    },
                     default_quarto_flags(),
                     None
                 )
@@ -571,8 +604,11 @@ mod tests {
                     &cache_dir,
                     rscript.as_os_str(),
                     &[],
-                    &dependencies,
-                    Some("2026-06-01"),
+                    ResolutionInputs {
+                        dependencies: &dependencies,
+                        repositories: &[],
+                        exclude_newer: Some("2026-06-01"),
+                    },
                     default_quarto_flags(),
                     None
                 )

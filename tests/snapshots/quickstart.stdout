@@ -41,6 +41,13 @@ Python:
   and `ir preview` add it for knitr-backed Quarto documents with Python chunks.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
+Package repositories:
+  Add `repos` as a YAML sequence when packages are published outside CRAN.
+  In Quarto, put `repos` under `ir:`. Use repeatable `--repo` options for
+  command-line dependencies. Explicit repositories come before the default.
+  `exclude-newer` dates the default PPM repository only; explicit repositories
+  remain live and may contain newer packages.
+
 Isolation:
   By default, the resolved R library is first on `.libPaths()` and ambient user
   libraries remain available. With `isolated: true` or `--isolated`, ambient
@@ -76,6 +83,7 @@ Commands:
   ir render report.qmd
   ir preview report.qmd
   ir run --with cli -e 'cli::cli_alert_success("ok")'
+  ir run --repo https://r-xla.r-universe.dev --with r-xla/anvl -e 'library(anvl)'
   ir tool run btw --help
   rx btw --help
   rx --from btw btw --help

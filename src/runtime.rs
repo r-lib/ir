@@ -34,7 +34,7 @@ const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
 pub(crate) fn cmd_run(
     source: &RunSource,
     rscript_args: &[String],
-    with_deps: &[String],
+    dependencies: DependencyArgs<'_>,
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
     script_args: &[String],
@@ -46,7 +46,11 @@ pub(crate) fn cmd_run(
         snapshots.exclude_newer,
         snapshots.python_exclude_newer,
     )?;
-    spec.dependencies.extend(with_deps.iter().cloned());
+    spec.dependencies
+        .extend(dependencies.with_deps.iter().cloned());
+    let mut selected_repositories = dependencies.repositories.to_vec();
+    selected_repositories.append(&mut spec.repositories);
+    spec.repositories = selected_repositories;
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
@@ -71,7 +75,7 @@ pub(crate) fn cmd_run(
 pub(crate) fn cmd_quarto(
     command: QuartoCommand,
     source: &QuartoSource,
-    with_deps: &[String],
+    dependencies: DependencyArgs<'_>,
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
     quarto_args: &[String],
@@ -83,7 +87,11 @@ pub(crate) fn cmd_quarto(
         snapshots.exclude_newer,
         snapshots.python_exclude_newer,
     )?;
-    spec.dependencies.extend(with_deps.iter().cloned());
+    spec.dependencies
+        .extend(dependencies.with_deps.iter().cloned());
+    let mut selected_repositories = dependencies.repositories.to_vec();
+    selected_repositories.append(&mut spec.repositories);
+    spec.repositories = selected_repositories;
     spec.quarto_render = true;
     let options = QuartoOptions {
         isolated: options.isolated || spec.isolated,
@@ -112,6 +120,11 @@ enum RSelection {
 pub(crate) struct RSelectionArgs<'a> {
     pub(crate) r_requirement: Option<&'a str>,
     pub(crate) rscript: Option<&'a str>,
+}
+
+pub(crate) struct DependencyArgs<'a> {
+    pub(crate) with_deps: &'a [String],
+    pub(crate) repositories: &'a [String],
 }
 
 pub(crate) struct SnapshotArgs<'a> {
@@ -351,12 +364,16 @@ fn resolve_library_inner(
     library_root: Option<&Path>,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let dependencies = normalized_dependencies(&spec.dependencies);
+    let repositories = normalized_repositories(&spec.repositories);
     let resolution_cache_paths = resolve_cache::paths(
         cache_dir,
         rscript,
         rscript_args,
-        &dependencies,
-        spec.exclude_newer.as_deref(),
+        resolve_cache::ResolutionInputs {
+            dependencies: &dependencies,
+            repositories: &repositories,
+            exclude_newer: spec.exclude_newer.as_deref(),
+        },
         resolve_cache::QuartoCacheFlags {
             render: spec.quarto_render,
             reticulate: spec.quarto_reticulate,
@@ -416,6 +433,15 @@ fn resolve_library_inner(
     } else {
         None
     };
+    let repositories_file = if resolve_r && !repositories.is_empty() {
+        let path = unique_path(&tmp, "ir-repositories", "txt");
+        Some(PrivateTempFile::write(
+            path,
+            &(repositories.join("\n") + "\n"),
+        )?)
+    } else {
+        None
+    };
     let restart_file = unique_path(&tmp, "ir-tooling-restart", "txt");
 
     let mut retried_tooling_restart = false;
@@ -453,6 +479,7 @@ fn resolve_library_inner(
             .env_remove("IR_QUARTO_RENDER")
             .env_remove("IR_QUARTO_RETICULATE")
             .env_remove("IR_EXCLUDE_NEWER")
+            .env_remove("IR_REPOSITORIES_FILE")
             .env_remove("IR_PYTHON_RESULT_FILE")
             .env_remove("IR_PYTHON_PACKAGES_FILE")
             .env_remove("IR_PYTHON_VERSION")
@@ -484,6 +511,9 @@ fn resolve_library_inner(
             }
             if let Some(exclude_newer) = &spec.exclude_newer {
                 cmd.env("IR_EXCLUDE_NEWER", exclude_newer);
+            }
+            if let Some(repositories_file) = &repositories_file {
+                cmd.env("IR_REPOSITORIES_FILE", repositories_file.path());
             }
             if spec.quarto_render {
                 // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
@@ -564,6 +594,7 @@ fn resolve_library_inner(
         })
         .unwrap_or_default();
     drop(python_packages_file);
+    drop(repositories_file);
 
     if !status.success() {
         return Err("dependency resolution failed".into());
@@ -660,6 +691,17 @@ fn normalized_dependencies(dependencies: &[String]) -> Vec<String> {
         .iter()
         .map(|dependency| dependency_to_ref(dependency))
         .collect()
+}
+
+fn normalized_repositories(repositories: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for repository in repositories {
+        let repository = repository.trim();
+        if !normalized.iter().any(|item| item == repository) {
+            normalized.push(repository.to_string());
+        }
+    }
+    normalized
 }
 
 fn dependency_to_ref(dependency: &str) -> String {

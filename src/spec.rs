@@ -6,6 +6,7 @@ use saphyr_parser::Parser;
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeSpec {
     pub(crate) dependencies: Vec<String>,
+    pub(crate) repositories: Vec<String>,
     pub(crate) exclude_newer: Option<String>,
     pub(crate) isolated: bool,
     pub(crate) r_requirement: Option<String>,
@@ -78,6 +79,7 @@ fn runtime_spec_from_yaml_mapping(
 
     Ok(RuntimeSpec {
         dependencies: frontmatter_dependencies(doc)?,
+        repositories: frontmatter_repositories(doc, key_prefix)?,
         exclude_newer: frontmatter_optional_string(doc, "exclude-newer")?,
         isolated: frontmatter_optional_bool(doc, "isolated")?.unwrap_or(false),
         r_requirement: frontmatter_optional_string(doc, "r-version")?,
@@ -127,6 +129,46 @@ fn frontmatter_dependencies(doc: &Yaml<'_>) -> Result<Vec<String>, Box<dyn Error
         push_dependency_entry(&mut dependencies, item)?;
     }
     Ok(dependencies)
+}
+
+fn frontmatter_repositories(
+    doc: &Yaml<'_>,
+    key_prefix: &str,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    let Some(value) = doc.as_mapping_get("repos") else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let Some(seq) = value.as_vec() else {
+        return Err(format!(
+            "frontmatter `{}` must be a YAML sequence",
+            frontmatter_key(key_prefix, "repos")
+        )
+        .into());
+    };
+    let mut repositories = Vec::new();
+    for item in seq {
+        let Some(value) = item.as_str() else {
+            return Err(format!(
+                "frontmatter `{}` entries must be strings",
+                frontmatter_key(key_prefix, "repos")
+            )
+            .into());
+        };
+        let value = value.trim();
+        if value.is_empty() || value.contains(['\r', '\n']) {
+            return Err(format!(
+                "frontmatter `{}` entries must be non-empty single-line strings",
+                frontmatter_key(key_prefix, "repos")
+            )
+            .into());
+        }
+        repositories.push(value.to_owned());
+    }
+    Ok(repositories)
 }
 
 fn frontmatter_python_spec(

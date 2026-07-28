@@ -5,7 +5,8 @@
 #   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
 # Responsibilities (steps 1-4 of the `ir` pipeline):
-#   1. Consume package refs from stdin, one ref per line.
+#   1. Consume package refs from stdin and explicit repository specs from
+#      IR_REPOSITORIES_FILE.
 #   2. Resolve dependencies with pak.
 #   3. Hash the install refs to derive a content-addressed library path under
 #      <cache_dir>.
@@ -103,6 +104,21 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
   repos
 }
 
+ir_resolve_repositories <- function(specs) {
+  stopifnot(is.character(specs), all(nzchar(specs)))
+  if (!length(specs)) return(character())
+
+  repositories <- vapply(
+    specs,
+    function(spec) unname(ir_repo_resolve(spec)[[1L]]),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  repositories <- unique(repositories)
+  names(repositories) <- paste0("IR", seq_along(repositories))
+  repositories
+}
+
 ## --- resolution cache -------------------------------------------------------
 
 # Legacy fallback key identifying a resolution request when Rust does not pass
@@ -110,6 +126,7 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
 # caches can return before this R resolver is launched. Latest resolution keeps
 # a stable key and stores the creation time in the marker value.
 ir_input_key <- function(deps,
+                         repositories = character(),
                          rversion      = getRversion(),
                          platform      = R.version$platform,
                          exclude_newer = NULL,
@@ -126,6 +143,7 @@ ir_input_key <- function(deps,
   # Omitting the marker for non-Quarto runs keeps their existing keys stable.
   secretbase::sha256(paste(c(sort(deps),
                              source_key,
+                             paste0("repo: ", repositories),
                              if (quarto) "quarto" else NULL,
                              if (quarto_reticulate)
                                "quarto-reticulate" else NULL,
@@ -150,16 +168,19 @@ ir_latest_resolution_max_age_seconds <- function() {
 }
 
 ir_marker_source <- function(exclude_newer,
+                             repositories = character(),
                              created_at = ir_current_utc_seconds()) {
-  if (is.null(exclude_newer))
+  if (is.null(exclude_newer) || length(repositories))
     sprintf("latest: %.0f", floor(created_at))
   else
     sprintf("exclude-newer: %s", exclude_newer)
 }
 
-ir_marker_source_current <- function(source, exclude_newer) {
-  if (!is.null(exclude_newer))
-    return(identical(source, ir_marker_source(exclude_newer)))
+ir_marker_source_current <- function(source,
+                                     exclude_newer,
+                                     repositories = character()) {
+  if (!is.null(exclude_newer) && !length(repositories))
+    return(identical(source, ir_marker_source(exclude_newer, repositories)))
 
   if (!startsWith(source, "latest: ")) return(FALSE)
   created_at <- suppressWarnings(as.numeric(sub("^latest: ", "", source)))
@@ -224,7 +245,15 @@ ir_resolve_main <- function() {
     ## 0. Bootstrap pak before repository normalization. On Linux PPM URLs are
     ## resolved through pak::repo_resolve(), so pak must be available first.
     ir_ensure_tooling(packages = "pak", cache_dir = cache_dir)
-    repos <- ir_repos(exclude_newer)
+    repositories_file <- ir_env_optional("IR_REPOSITORIES_FILE")
+    repository_specs <- if (is.null(repositories_file))
+      character()
+    else
+      readLines(repositories_file, warn = FALSE)
+    stopifnot(all(nzchar(repository_specs)))
+
+    repositories <- ir_resolve_repositories(repository_specs)
+    repos <- unique(c(repositories, ir_repos(exclude_newer)))
     options(repos = repos)
 
     ## Ensure the rest of the resolver's own tooling is available before any
@@ -264,7 +293,9 @@ ir_resolve_main <- function() {
   marker <- ir_env_optional("IR_RESOLUTION_MARKER")
   if (is.null(marker) && cache_resolution) {
     marker <- file.path(cache_dir, "resolutions",
-                        ir_input_key(deps, exclude_newer = exclude_newer,
+                        ir_input_key(deps,
+                                     repositories = repository_specs,
+                                     exclude_newer = exclude_newer,
                                      quarto = quarto,
                                      quarto_reticulate = quarto_reticulate,
                                      library_root = library_root))
@@ -281,7 +312,8 @@ ir_resolve_main <- function() {
   if (!is.null(marker) && file.exists(marker)) {
     cached <- readLines(marker, n = 2L, warn = FALSE)
     if (length(cached) >= 2L &&
-        ir_marker_source_current(cached[[1L]], exclude_newer) &&
+        ir_marker_source_current(cached[[1L]], exclude_newer,
+                                 repository_specs) &&
         nzchar(cached[[2L]]) &&
         dir.exists(cached[[2L]])) {
       if (!is.null(package_result_file) &&
@@ -353,7 +385,10 @@ ir_resolve_main <- function() {
   ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
+  # Explicit repositories also distinguish packages that share a name and
+  # version but contain different builds.
   key <- paste(c(install_specs,
+                 paste0("repo: ", repository_specs),
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
@@ -385,7 +420,9 @@ ir_resolve_main <- function() {
   ## 4b. Record the resolution so an identical request skips pak.
   if (!is.null(marker)) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
+    writeLines(c(ir_marker_source(exclude_newer, repository_specs),
+                 library_path),
+               marker)
   }
   if (!is.null(primary_package) && !is.null(package_marker)) {
     writeLines(primary_package, package_marker)
