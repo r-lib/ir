@@ -299,7 +299,6 @@ ir_resolve_python_env <- function(packages,
   ir_reset_tooling_namespace("reticulate")
   ir_ensure_tooling(
     packages = c("pak", "reticulate"),
-    refs = c(reticulate = "reticulate@>=1.41.0"),
     min_versions = c(reticulate = "1.41.0")
   )
   if (!exists("uv_get_or_create_env", asNamespace("reticulate"),
