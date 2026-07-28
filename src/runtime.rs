@@ -5,6 +5,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use time::macros::format_description;
@@ -437,7 +438,7 @@ fn resolve_library_inner(
         cmd.args(rscript_args)
             .arg(&driver)
             .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .env("IR_CACHE_DIR", cache_dir)
             // pak suppresses progress in noninteractive Rscript unless this is set.
@@ -509,6 +510,13 @@ fn resolve_library_inner(
         }
 
         let mut child = cmd.spawn().map_err(|e| spawn_error(rscript, e))?;
+        let stdout_handle = child.stdout.take().map(|stdout| {
+            thread::spawn(move || {
+                let mut stdout = stdout;
+                let mut stderr = io::stderr();
+                let _ = io::copy(&mut stdout, &mut stderr);
+            })
+        });
         let stdin_result = (|| -> Result<(), Box<dyn Error>> {
             let mut stdin = child.stdin.take().ok_or("failed to open resolver stdin")?;
             for dependency in &dependencies {
@@ -519,6 +527,9 @@ fn resolve_library_inner(
         let current_status = child
             .wait()
             .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
+        if let Some(handle) = stdout_handle {
+            let _ = handle.join();
+        }
 
         if tooling_restart_requested(&current_status, &restart_file) {
             if !retried_tooling_restart {
