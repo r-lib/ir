@@ -30,9 +30,14 @@ pub fn resolve_rscript(req: &str, exclude_newer: Option<&str>) -> Result<OsStrin
         return installed.rscript();
     }
 
-    if r_selection::has_matching_devel(&requirement, &installed) {
+    if let Some(alias) = r_selection::matching_unreleased_alias(&requirement, &installed) {
+        let label = match alias {
+            "devel" => "R-devel",
+            "next" => "R-next",
+            _ => unreachable!("unexpected unreleased R alias"),
+        };
         return Err(format!(
-            "`r-version: {req}` matches only installed R-devel. Requirements that can match more than one R minor select released versions. Install a matching release with `rig install`, or opt into R-devel with `r-version: devel` or `--r-version devel`."
+            "`r-version: {req}` matches only installed {label}. Requirements that can match more than one R minor select released versions. Install a matching release with `rig install`, or opt into {label} with `r-version: {alias}` or `--r-version {alias}`."
         )
         .into());
     }

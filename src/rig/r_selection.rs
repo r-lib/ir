@@ -79,13 +79,18 @@ pub(crate) fn select_installed_r_through_minor<'a>(
         .max_by(|a, b| compare_installed_r(a, b))
 }
 
-pub(crate) fn has_matching_devel(
+pub(crate) fn matching_unreleased_alias<'a>(
     requirement: &VersionRequirement,
-    installed: &[InstalledR],
-) -> bool {
-    installed.iter().any(|version| {
-        version.aliases.iter().any(|alias| alias == "devel")
-            && requirement.matches_candidate(&version.name, &version.version, &version.aliases)
+    installed: &'a [InstalledR],
+) -> Option<&'a str> {
+    installed.iter().find_map(|version| {
+        let alias = version
+            .aliases
+            .iter()
+            .find(|alias| is_unreleased_alias(alias))?;
+        requirement
+            .matches_candidate(&version.name, &version.version, &version.aliases)
+            .then_some(alias.as_str())
     })
 }
 
@@ -103,9 +108,14 @@ pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str>
 
 impl VersionRequirement {
     fn matches_installed(&self, installed: &InstalledR) -> bool {
-        // Broad requirements select released R versions. R-devel remains
-        // available through its alias or exact numeric version.
-        if installed.aliases.iter().any(|alias| alias == "devel") && self.is_broad() {
+        // Broad requirements select released R versions. R-devel and R-next
+        // remain available through their aliases or exact numeric versions.
+        if installed
+            .aliases
+            .iter()
+            .any(|alias| is_unreleased_alias(alias))
+            && self.is_broad()
+        {
             return false;
         }
 
@@ -162,6 +172,10 @@ impl VersionRequirement {
             }
         }
     }
+}
+
+fn is_unreleased_alias(alias: &str) -> bool {
+    matches!(alias, "devel" | "next")
 }
 
 fn version_minor_is_at_most(candidate: &str, latest_minor: &[u64]) -> bool {

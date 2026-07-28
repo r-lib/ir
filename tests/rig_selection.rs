@@ -354,6 +354,82 @@ fn run_with_r_version_range_does_not_select_devel() {
 
 #[cfg(unix)]
 #[test]
+fn run_with_r_version_range_does_not_select_next() {
+    let cache_dir = temp_dir("ir-r-version-range-next-cache");
+    let bin_dir = temp_dir("ir-r-version-range-next-bin");
+    let release_dir = temp_dir("ir-r-version-range-next-r46");
+    let next_dir = temp_dir("ir-r-version-range-next-r47");
+    let release_binary = selected_r_binary(&release_dir, "release");
+    let next_binary = selected_r_binary(&next_dir, "next");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}},
+{{"name":"4.7","version":"4.7.0","aliases":["next"],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            release_binary.display(),
+            next_binary.display()
+        ),
+    );
+
+    let ranged = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&ranged);
+    assert_stdout_contains(&ranged, "selected=release");
+
+    let explicit = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "next", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&explicit);
+    assert_stdout_contains(&explicit, "selected=next");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.7","version":"4.7.0","aliases":["next"],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            next_binary.display()
+        ),
+    );
+
+    let only_next = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &only_next,
+        &["matches only installed R-next", "--r-version next"],
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn run_frontmatter_r_version_range_and_exclude_newer_selects_compatible_minor() {
     let cache_dir = temp_dir("ir-r-version-range-date-cache");
     let bin_dir = temp_dir("ir-r-version-range-date-bin");
