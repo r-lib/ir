@@ -224,6 +224,50 @@ ir_install_specs <- function(res) {
                      character(1))))
 }
 
+ir_nonempty_scalar <- function(value) {
+  if (length(value) != 1L || is.na(value) || !nzchar(value)) return(NULL)
+  as.character(value)
+}
+
+ir_resolved_content_id <- function(res, i) {
+  stopifnot(is.data.frame(res), length(i) == 1L, i >= 1L, i <= nrow(res))
+
+  # Prefer immutable identities supplied by pak. Fall back to source URLs for
+  # remote types where the resolved record exposes no digest.
+  for (field in c("sha256", "md5sum")) {
+    if (field %in% names(res)) {
+      value <- ir_nonempty_scalar(res[[field]][[i]])
+      if (!is.null(value)) return(paste0(field, ":", value))
+    }
+  }
+
+  if ("metadata" %in% names(res)) {
+    metadata <- res$metadata[[i]]
+    if (!is.null(names(metadata)) && "RemoteSha" %in% names(metadata)) {
+      value <- ir_nonempty_scalar(unname(metadata[["RemoteSha"]]))
+      if (!is.null(value)) return(paste0("remote-sha:", value))
+    }
+  }
+
+  if ("sources" %in% names(res)) {
+    sources <- sort(unique(as.character(res$sources[[i]])))
+    sources <- sources[!is.na(sources) & nzchar(sources)]
+    if (length(sources)) return(paste0("source:", paste(sources, collapse = "|")))
+  }
+
+  "no-content-id"
+}
+
+ir_resolved_content_specs <- function(res) {
+  sort(unique(vapply(
+    seq_len(nrow(res)),
+    function(i) paste(ir_install_spec(res, i),
+                      ir_resolved_content_id(res, i),
+                      sep = " | "),
+    character(1)
+  )))
+}
+
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
@@ -372,6 +416,7 @@ ir_resolve_main <- function() {
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
+    content_specs <- character()
     has_source_ref <- FALSE
   } else {
     # Drop base / recommended packages: those are supplied by R itself.
@@ -379,15 +424,16 @@ ir_resolve_main <- function() {
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
     install_specs <- ir_install_specs(res)
+    content_specs <- ir_resolved_content_specs(res)
     has_source_ref <- any(!ir_is_standard_resolved_ref(res))
   }
 
-  ## 3. Hash install specs -> content-addressed library path
+  ## 3. Hash resolved content identities -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
   # Explicit repositories also distinguish packages that share a name and
   # version but contain different builds.
-  key <- paste(c(install_specs,
+  key <- paste(c(content_specs,
                  paste0("repo: ", repository_specs),
                  as.character(getRversion()),
                  R.version$platform),

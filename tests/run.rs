@@ -2554,6 +2554,8 @@ cat("ir.fixture=transitive-source\n")
 fn run_frontmatter_uses_explicit_repository() {
     let cache_dir = temp_dir("ir-explicit-repository-cache");
     let renv_cache = temp_cache("ir-explicit-repository-renv-cache");
+    let first_user_cache = temp_cache("ir-explicit-repository-first-user-cache");
+    let rebuilt_user_cache = temp_cache("ir-explicit-repository-rebuilt-user-cache");
     let package_dir = temp_dir("ir-explicit-repository-packages");
     let repository = temp_dir("ir-explicit-repository");
     let default_package_dir = temp_dir("ir-default-repository-packages");
@@ -2663,11 +2665,11 @@ loaded <- normalizePath(
   mustWork = TRUE
 )
 stopifnot(
-  identical(loaded, expected),
-  identical(repository_origin(), Sys.getenv("IR_TEST_EXPECTED_ORIGIN"))
+  identical(loaded, expected)
 )
 cat("ir.fixture=explicit-repository\n")
 cat("repository.origin=", repository_origin(), "\n", sep = "")
+cat("library.path=", lib, "\n", sep = "")
 "#,
             renviron_path(&parent_tarball),
             repository_url
@@ -2678,8 +2680,8 @@ cat("repository.origin=", repository_origin(), "\n", sep = "")
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &first_user_cache)
         .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_EXPECTED_ORIGIN", "explicit")
         .args(["run", "--isolated", "--no-environ", "--no-site-file"])
         .arg(&script)
         .output()
@@ -2688,6 +2690,51 @@ cat("repository.origin=", repository_origin(), "\n", sep = "")
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=explicit-repository");
     assert_stdout_contains(&out, "repository.origin=explicit");
+    let first_library = stdout(&out)
+        .lines()
+        .find_map(|line| line.strip_prefix("library.path="))
+        .expect("first run should report its library path")
+        .to_string();
+
+    fs::write(
+        dep.join("R").join("ok.R"),
+        "repository_origin <- function() \"explicit-rebuilt\"\n",
+    )
+    .unwrap();
+    let description_path = dep.join("DESCRIPTION");
+    let description = fs::read_to_string(&description_path).unwrap();
+    fs::write(
+        &description_path,
+        description.replace("RemoteSha: explicit", "RemoteSha: explicit-rebuilt"),
+    )
+    .unwrap();
+    fs::remove_file(&tarball).unwrap();
+    let out = Command::new(rscript())
+        .args(["--vanilla", "-e", r_expr])
+        .arg(&dep)
+        .arg(&tarball)
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--isolated", "--no-environ", "--no-site-file"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "repository.origin=explicit-rebuilt");
+    let rebuilt_library = stdout(&out)
+        .lines()
+        .find_map(|line| line.strip_prefix("library.path="))
+        .expect("rebuilt repository run should report its library path")
+        .to_string();
+    assert_ne!(rebuilt_library, first_library);
 
     let script_contents = fs::read_to_string(&script).unwrap();
     fs::write(
@@ -2698,8 +2745,8 @@ cat("repository.origin=", repository_origin(), "\n", sep = "")
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
         .env("R_PROFILE_USER", &profile)
-        .env("IR_TEST_EXPECTED_ORIGIN", "default")
         .args(["run", "--isolated", "--no-environ", "--no-site-file"])
         .arg(&script)
         .output()
