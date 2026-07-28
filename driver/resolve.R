@@ -297,7 +297,8 @@ ir_resolve_main <- function() {
     stopifnot(all(nzchar(repository_specs)))
 
     repositories <- ir_resolve_repositories(repository_specs)
-    repos <- unique(c(repositories, ir_repos(exclude_newer)))
+    repos <- c(repositories, ir_repos(exclude_newer))
+    repos <- repos[!duplicated(repos)]
     options(repos = repos)
 
     ## Ensure the rest of the resolver's own tooling is available before any

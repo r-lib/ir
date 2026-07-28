@@ -480,6 +480,7 @@ fn resolve_library_inner(
             .env_remove("IR_QUARTO_RETICULATE")
             .env_remove("IR_EXCLUDE_NEWER")
             .env_remove("IR_REPOSITORIES_FILE")
+            .env_remove("RENV_CONFIG_REPOS_OVERRIDE")
             .env_remove("IR_PYTHON_RESULT_FILE")
             .env_remove("IR_PYTHON_PACKAGES_FILE")
             .env_remove("IR_PYTHON_VERSION")
