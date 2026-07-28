@@ -169,8 +169,8 @@ renv::install(
 )
 EOF
 
-rig add oldrel/2
-mapfile -t test_r_metadata < <(python3 scripts/resolve-test-r.py oldrel/2)
+rig add 4.3
+mapfile -t test_r_metadata < <(python3 scripts/resolve-test-r.py 4.3)
 rig_name="${test_r_metadata[0]}"
 test_r_version="${test_r_metadata[1]}"
 test_r_exclude_newer="${test_r_metadata[2]}"
@@ -191,6 +191,15 @@ renv::install(
   c("jsonlite", "knitr", "rmarkdown"),
   library = prefetch_lib,
   repos = c(CRAN = "https://packagemanager.posit.co/cran/${test_r_exclude_newer}"),
+  prompt = FALSE,
+  rebuild = FALSE
+)
+docs_example_lib <- file.path(prefetch_lib, "docs-2024-02-01")
+dir.create(docs_example_lib, recursive = TRUE, showWarnings = FALSE)
+renv::install(
+  c("dplyr", "tidyr@1.3.1", "gt@0.10.1", "rmarkdown"),
+  library = docs_example_lib,
+  repos = c(CRAN = "https://packagemanager.posit.co/cran/2024-02-01"),
   prompt = FALSE,
   rebuild = FALSE
 )

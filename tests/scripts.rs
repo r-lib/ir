@@ -166,10 +166,10 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
-    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
-    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-4.3-version>");
+    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-4.3>");
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
         "{}",
@@ -197,7 +197,7 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_stdout_contains(&out, "installer -pkg /tmp/ir-rig.pkg -target /");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("brew tap r-lib/rig"), "{stdout}");
@@ -233,7 +233,7 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("https://sh.rustup.rs"), "{stdout}");
@@ -250,7 +250,7 @@ fn install_dev_deps_sh_can_skip_test_r() {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("rig add oldrel/2"), "{stdout}");
+    assert!(!stdout.contains("rig add 4.3"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_VERSION"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_EXCLUDE_NEWER"), "{stdout}");
 }
@@ -272,6 +272,9 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(!workflow.contains("IR_TEST_R_EXCLUDE_NEWER=2025-02-28"));
     assert!(workflow.contains("any::bookdown"));
     assert!(workflow.contains("any::xfun"));
+    assert!(workflow.contains("${cran%/latest}/2024-02-01"));
+    assert!(workflow.contains("tidyr@1.3.1"));
+    assert!(workflow.contains("gt@0.10.1"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(!workflow
         .lines()
@@ -502,7 +505,7 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
     let sh_path = repo_root().join("scripts/install-dev-deps.sh");
     let sh = fs::read_to_string(&sh_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
-    assert!(sh.contains("TEST_R_SPEC=\"oldrel/2\""));
+    assert!(sh.contains("TEST_R_SPEC=\"4.3\""));
     assert!(sh.contains("scripts/resolve-test-r.py \"$TEST_R_SPEC\""));
     assert!(sh.contains("sed -n '4p' \"$metadata_file\""));
     assert!(sh.contains("IR_TEST_R_EXCLUDE_NEWER"));
@@ -515,7 +518,7 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
     let ps1_path = repo_root().join("scripts/install-dev-deps.ps1");
     let ps1 = fs::read_to_string(&ps1_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
-    assert!(ps1.contains("$TestRSpec = \"oldrel/2\""));
+    assert!(ps1.contains("$TestRSpec = \"4.3\""));
     assert!(ps1.contains("scripts/resolve-test-r.py\" $TestRSpec"));
     assert!(ps1.contains("$fields = @($metadata)"));
     assert!(!ps1.contains(r#"-split "\s+""#));
@@ -557,6 +560,7 @@ fn install_dev_deps_scripts_install_rig_from_upstream_release_without_pinned_ver
 #[test]
 fn cli_tests_do_not_use_global_e2e_lock() {
     let tests = [
+        "tests/docs_examples.rs",
         "tests/run.rs",
         "tests/resolver_lock.rs",
         "tests/rig_selection.rs",
@@ -667,15 +671,15 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "winget install --id posit.rig");
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
         "{}",
         output_text(&out)
     );
-    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
-    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
-    assert_stdout_contains(&out, "IR_TEST_RSCRIPT='<Rscript-for-oldrel/2>'");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-4.3-version>");
+    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-4.3>");
+    assert_stdout_contains(&out, "IR_TEST_RSCRIPT='<Rscript-for-4.3>'");
 }
 
 #[cfg(windows)]
@@ -707,7 +711,7 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
         &out,
         "ir-rig-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
     );
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("choco install rig"), "{stdout}");
     assert!(
@@ -736,7 +740,7 @@ fn install_dev_deps_ps1_can_skip_test_r() {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("rig add oldrel/2"), "{stdout}");
+    assert!(!stdout.contains("rig add 4.3"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_VERSION"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_EXCLUDE_NEWER"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_RSCRIPT"), "{stdout}");
@@ -773,7 +777,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(!script.contains(r#"Test-AnyTool @("python", "python3")"#));
     assert!(!script.contains(r#"@("python", "python3", "py")"#));
     assert!(script.contains("R\\bin"));
-    assert!(script.contains("$TestRSpec = \"oldrel/2\""));
+    assert!(script.contains("$TestRSpec = \"4.3\""));
     assert!(script.contains("IR_TEST_R_VERSION=$TestRVersion"));
     assert!(script.contains("IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"));
     assert!(
@@ -846,8 +850,13 @@ fn universal_setup_uses_resolved_test_r_snapshot_date() {
     let script = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
+    assert!(script.contains("rig add 4.3"));
+    assert!(script.contains("scripts/resolve-test-r.py 4.3"));
     assert!(script.contains("test_r_exclude_newer=\"${test_r_metadata[2]}\""));
     assert!(script.contains("https://packagemanager.posit.co/cran/${test_r_exclude_newer}"));
+    assert!(script.contains("https://packagemanager.posit.co/cran/2024-02-01"));
+    assert!(script.contains("\"tidyr@1.3.1\""));
+    assert!(script.contains("\"gt@0.10.1\""));
     assert!(!script.contains("https://packagemanager.posit.co/cran/2026-06-01"));
 }
 

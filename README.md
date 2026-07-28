@@ -8,16 +8,13 @@ Put the packages and R version next to the code, then run the file.
 ```r
 #!/usr/bin/env -S ir run
 #| packages:
-#|   - dplyr>=1.0
-#|   - tidyr
-#| r-version: ">= 4.0"
+#|   - dplyr
+#|   - tidyr==1.3.1
+#| r-version: ">= 4.3"
 #| isolated: true
-#| exclude-newer: "2024-01-15"
+#| exclude-newer: "2024-02-01"
 
-library(dplyr)
-library(tidyr)
-
-1 + 1
+airquality |> tidyr::drop_na(Ozone) |> dplyr::count(Month)
 ```
 
 ```sh
@@ -25,13 +22,17 @@ ir run script.R
 ./script.R
 ```
 
+This records a last-known-good environment: tidyr is pinned to the version
+tested with the script, while the snapshot date selects dplyr and the
+transitive dependencies.
+
 Full documentation: <https://r-lib.github.io/ir/>
 
 ## Why use it?
 
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
+- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. Without another R selector, the date selects the latest R minor released by then. When `r-version` can match more than one R minor, the date limits selection to minor versions released by then.
 - **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
 
@@ -45,8 +46,8 @@ ir run --vanilla script.R
 ir render report.qmd --to html
 ir preview report.qmd
 ir run --with cli -e 'cli::cli_alert_success("works")'
-ir run --r-version 4.5 script.R
-ir run --exclude-newer 2024-01-15 script.R
+ir run --r-version 4.3 script.R
+ir run --exclude-newer 2024-02-01 script.R
 rx btw --help
 ir tool run --from btw btw --help
 ir tool install btw
@@ -105,10 +106,10 @@ On Windows PowerShell, run:
 .\scripts\install-dev-deps.ps1
 ```
 
-The setup scripts install Rust, Python, rig, the current R release, rig's
-`oldrel/2` R for the version-selection tests, and Quarto. They do not run tests
-or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to
-inspect the plan.
+The setup scripts install Rust, Python, rig, the current R release, R 4.3 for
+the version-selection and documentation example tests, and Quarto. They do not
+run tests or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on
+Windows to inspect the plan.
 
 ## Requirements
 

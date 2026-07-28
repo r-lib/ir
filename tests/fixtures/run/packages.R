@@ -1,6 +1,6 @@
 #!/usr/bin/env -S ir run
 #| packages:
-#|   - dplyr>=1.0
+#|   - dplyr
 #|   - tidyr
 #|   - glue
 #|   - jsonlite

@@ -6,14 +6,13 @@
 //! ```r
 //! #!/usr/bin/env -S ir run
 //! #| packages:
-//! #|   - dplyr>=1.0
-//! #|   - tidyr
-//! #| r-version: ">= 4.0"
+//! #|   - dplyr
+//! #|   - tidyr==1.3.1
+//! #| r-version: ">= 4.3"
 //! #| isolated: true
-//! #| exclude-newer: "2024-01-15"
+//! #| exclude-newer: "2024-02-01"
 //!
-//! library(dplyr)
-//! 1 + 1
+//! airquality |> tidyr::drop_na(Ozone) |> dplyr::count(Month)
 //! ```
 //!
 //! The pipeline has two phases:

@@ -45,7 +45,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | Variable | Used by | Default |
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
-| `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also selects R when no explicit R selector is set | unset |
+| `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also chooses the R minor when no R selector is set and limits multi-minor `r-version` requirements by date | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
@@ -76,9 +76,12 @@ Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontma
 R selection precedence is command line, then environment, then frontmatter `r-version`.
 Use `--rscript` or `IR_RSCRIPT` to select a specific Rscript executable.
 Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
+Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 Do not set both `--rscript` and `--r-version`, or both `IR_RSCRIPT` and `IR_R_VERSION`.
 Frontmatter `rscript` is rejected.
-When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date.
+When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version released by that date.
+When `r-version` can match more than one R minor, `exclude-newer` limits selection to minor versions released by that date.
+An exact `r-version` or explicit Rscript selection remains authoritative.
 `--bin-dir <dir>` overrides the executable install directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected executable install directory to the user `Path`.

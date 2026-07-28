@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$TestRSpec = "oldrel/2"
+$TestRSpec = "4.3"
 $TestRName = $null
 $TestRVersion = $null
 $TestRExcludeNewer = $null
