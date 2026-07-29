@@ -36,7 +36,7 @@ $ ./script.R
 The script frontmatter supports:
 
 - `packages`: package refs resolved with pak.
-- `repos`: optional package repository specs used before the default repository.
+- `repos`: optional CRAN-like R package repository specs used before the default repository.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig. Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 - `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
 - `python-version`: an optional Python version requirement.
@@ -64,7 +64,9 @@ Unknown keys are ignored after YAML parsing, so future metadata such as `sys-req
 
 ## Package repositories
 
-Use `repos` when a package or one of its dependencies is published outside CRAN:
+Use `repos` when a package or one of its dependencies is published outside CRAN.
+Here, a repository means a CRAN-like R package repository, such as an R-universe repository, not a Git repository.
+For a package hosted in Git, put a pak package ref under `packages` or pass it to `--with`.
 
 ```r
 #!/usr/bin/env -S ir run
@@ -76,7 +78,7 @@ Use `repos` when a package or one of its dependencies is published outside CRAN:
 library(anvl)
 ```
 
-`repos` must be a YAML sequence of repository specs accepted by pak.
+`repos` must be a YAML sequence of CRAN-like repository specs accepted by pak.
 Repositories supplied with repeatable `--repo` options are placed first, followed by frontmatter `repos`, then the default CRAN or PPM repository.
 Repeated repository specs are removed while preserving that order.
 

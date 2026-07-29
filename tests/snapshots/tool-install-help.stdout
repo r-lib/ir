@@ -7,7 +7,7 @@ Arguments:
 
 Options:
       --with <PKG>         Add a dependency for installed tools; may be repeated
-      --repo <REPO>        Add a package repository for installed tools; may be repeated
+      --repo <REPO>        Add a CRAN-like R package repository for installed tools; may be repeated
       --r-version <SPEC>   Select the R version for installed tools with rig
       --rscript <RSCRIPT>  Select the Rscript executable
       --bin-dir <DIR>      Directory where executables are installed

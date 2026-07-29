@@ -151,7 +151,7 @@ fn run_command() -> ClapCommand {
                 .value_name("REPO")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a package repository for this run; may be repeated"),
+                .help("Add a CRAN-like R package repository for this run; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
@@ -244,7 +244,7 @@ fn quarto_command(command: QuartoCommand) -> ClapCommand {
                 .num_args(1)
                 .action(ArgAction::Append)
                 .help(format!(
-                    "Add a package repository for this {name}; may be repeated"
+                    "Add a CRAN-like R package repository for this {name}; may be repeated"
                 )),
         )
         .arg(
@@ -403,7 +403,7 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .value_name("REPO")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a package repository for this tool run; may be repeated"),
+                .help("Add a CRAN-like R package repository for this tool run; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
@@ -452,7 +452,7 @@ fn tool_install_command() -> ClapCommand {
                 .value_name("REPO")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a package repository for installed tools; may be repeated"),
+                .help("Add a CRAN-like R package repository for installed tools; may be repeated"),
         )
         .arg(
             Arg::new("r-version")

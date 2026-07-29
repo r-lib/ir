@@ -55,6 +55,9 @@ ir tool install btw
 ir cache dir
 ```
 
+`--repo` adds a CRAN-like R package repository, such as an R-universe repository, not a Git repository.
+Use pak package refs such as `github::owner/repo` with `--with` or `--from` for packages hosted in Git.
+
 ## Install
 
 Install a pre-built binary on Linux or macOS:

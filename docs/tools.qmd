@@ -38,6 +38,8 @@ $ rx --rscript /path/to/Rscript --from btw btw
 
 Package refs use pak syntax.
 Quote refs when the shell would otherwise interpret characters such as `>`.
+`--repo` accepts CRAN-like R package repository specs, such as R-universe URLs, not Git repositories.
+For packages hosted in Git, use a pak package ref with `--from` or `--with`.
 
 ## Write package tools
 

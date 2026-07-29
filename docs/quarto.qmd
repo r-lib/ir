@@ -43,7 +43,8 @@ $ ir render report.R
 ```
 
 The `ir.packages` value follows the same rules as script `packages`: use a YAML sequence where each entry is one package ref, or omit it, set it to `[]`, or set it to `null` for no dependencies.
-`ir.repos` is a YAML sequence of package repository specs.
+`ir.repos` is a YAML sequence of CRAN-like R package repository specs, such as R-universe URLs, not Git repositories.
+For a package hosted in Git, put a pak package ref under `ir.packages` or pass it to `--with`.
 Repeatable `--repo` values come first, followed by `ir.repos`, then the default repository.
 
 `ir` resolves the document packages into the same cached library model used for scripts, then launches `quarto render`.

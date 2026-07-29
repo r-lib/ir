@@ -42,7 +42,9 @@ Python:
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Package repositories:
-  Add `repos` as a YAML sequence when packages are published outside CRAN.
+  Add `repos` as a YAML sequence of CRAN-like R package repositories when
+  packages are published outside CRAN. These are package indexes such as
+  R-universe repositories, not Git repositories.
   In Quarto, put `repos` under `ir:`. Use repeatable `--repo` options for
   command-line dependencies. Explicit repositories come before the default.
   `exclude-newer` dates the default PPM repository only; explicit repositories
