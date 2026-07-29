@@ -98,6 +98,7 @@ By default, it is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix
 Installed tool libraries are persistent state, so `ir cache clean` does not remove them.
 
 Generated launchers keep the same resolved package ref, `--with` package additions, `--repo` repositories, and R selection that were used at install time.
+Recovery commands embedded in launchers omit HTTP repository userinfo, query strings, and fragments so they do not persist repository credentials.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.
 If there is no `launcher.name`, top-level `#| name:` is used for the launcher name when present.

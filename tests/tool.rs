@@ -2060,6 +2060,10 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let cache_dir = temp_dir("ir-tool-install-cli-rscript-cache");
     let bin_dir = temp_dir("ir-tool-install-cli-rscript-bin");
     let rscript_name = "Rscript-ir-tool-install-cli-rscript";
+    let repository = concat!(
+        "https://repository-user:repository-password@repo.example.test/packages",
+        "?token=repository-token#repository-fragment"
+    );
     let (library, rscript_dir, rscript) = fake_tool_package_with_rscript(
         "ir-tool-install-cli-rscript",
         rscript_name,
@@ -2069,14 +2073,14 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
-        .env("IR_TEST_REPOSITORIES", "https://r-hub.r-universe.dev")
+        .env("IR_TEST_REPOSITORIES", repository)
         .env("PATH", path_with_bin_dir(&rscript_dir))
         .env_remove("IR_RSCRIPT")
         .args([
             "tool",
             "install",
             "--repo",
-            "https://r-hub.r-universe.dev",
+            repository,
             "--rscript",
             rscript_name,
         ])
@@ -2091,7 +2095,7 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = fs::canonicalize(&rscript).unwrap();
     let reinstall = format!(
-        "ir tool install --force --repo https://r-hub.r-universe.dev --rscript {} irfake",
+        "ir tool install --force --repo https://repo.example.test/packages --rscript {} irfake",
         selected.to_string_lossy()
     );
     assert!(
@@ -2099,6 +2103,10 @@ fn tool_install_accepts_cli_rscript_and_records_recovery_command() {
         "{launcher}"
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
+    assert!(!launcher.contains("repository-user"), "{launcher}");
+    assert!(!launcher.contains("repository-password"), "{launcher}");
+    assert!(!launcher.contains("repository-token"), "{launcher}");
+    assert!(!launcher.contains("repository-fragment"), "{launcher}");
 }
 
 #[cfg(unix)]

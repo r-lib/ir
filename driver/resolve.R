@@ -273,6 +273,10 @@ ir_resolved_content_specs <- function(res) {
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
+  # R startup files can restore this after the parent process removes it.
+  # The repositories selected by IR must also remain authoritative for renv.
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+
   cache_dir <- ir_cache_dir()
   library_root <- ir_env_optional("IR_LIBRARY_ROOT")
   ir_configure_child_tempdir()

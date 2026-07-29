@@ -2621,6 +2621,12 @@ fn run_frontmatter_uses_explicit_repository() {
     } else {
         format!("file:///{default_repository_path}")
     };
+    let renviron = temp_path("ir-explicit-repository", "Renviron");
+    fs::write(
+        &renviron,
+        format!("RENV_CONFIG_REPOS_OVERRIDE={default_repository_url}\n"),
+    )
+    .unwrap();
     let profile = temp_path("ir-explicit-repository", "Rprofile");
     fs::write(
         &profile,
@@ -2681,9 +2687,9 @@ cat("library.path=", lib, "\n", sep = "")
         .env("IR_CACHE_DIR", &cache_dir)
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &first_user_cache)
+        .env("R_ENVIRON_USER", &renviron)
         .env("R_PROFILE_USER", &profile)
-        .env("RENV_CONFIG_REPOS_OVERRIDE", &default_repository_url)
-        .args(["run", "--isolated", "--no-environ", "--no-site-file"])
+        .args(["run", "--isolated", "--no-site-file"])
         .arg(&script)
         .output()
         .unwrap();
@@ -2722,9 +2728,9 @@ cat("library.path=", lib, "\n", sep = "")
         .env("IR_CACHE_DIR", &cache_dir)
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
+        .env("R_ENVIRON_USER", &renviron)
         .env("R_PROFILE_USER", &profile)
-        .env("RENV_CONFIG_REPOS_OVERRIDE", &default_repository_url)
-        .args(["run", "--isolated", "--no-environ", "--no-site-file"])
+        .args(["run", "--isolated", "--no-site-file"])
         .arg(&script)
         .output()
         .unwrap();
@@ -2748,9 +2754,9 @@ cat("library.path=", lib, "\n", sep = "")
         .env("IR_CACHE_DIR", &cache_dir)
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
+        .env("R_ENVIRON_USER", &renviron)
         .env("R_PROFILE_USER", &profile)
-        .env("RENV_CONFIG_REPOS_OVERRIDE", &default_repository_url)
-        .args(["run", "--isolated", "--no-environ", "--no-site-file"])
+        .args(["run", "--isolated", "--no-site-file"])
         .arg(&script)
         .output()
         .unwrap();

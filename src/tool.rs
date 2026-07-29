@@ -1391,6 +1391,30 @@ fn launcher_target_path(bin_dir: &Path, name: &str) -> PathBuf {
     }
 }
 
+fn repository_recovery_spec(repository: &str) -> String {
+    let Some(scheme_end) = repository.find("://") else {
+        return repository.to_string();
+    };
+    let scheme = &repository[..scheme_end];
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return repository.to_string();
+    }
+
+    let prefix_end = scheme_end + "://".len();
+    let prefix = &repository[..prefix_end];
+    let remainder = &repository[prefix_end..];
+    let remainder_end = remainder.find(['?', '#']).unwrap_or(remainder.len());
+    let remainder = &remainder[..remainder_end];
+    let (authority, path) = remainder
+        .find('/')
+        .map_or((remainder, ""), |index| remainder.split_at(index));
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+
+    format!("{prefix}{authority}{path}")
+}
+
 fn tool_install_recovery_command(install: &ToolInstallArgs, rscript: &OsStr) -> String {
     let mut words = vec![
         "ir".to_string(),
@@ -1404,7 +1428,7 @@ fn tool_install_recovery_command(install: &ToolInstallArgs, rscript: &OsStr) -> 
     }
     for repository in &install.repositories {
         words.push("--repo".to_string());
-        words.push(recovery_command_word(repository));
+        words.push(recovery_command_word(&repository_recovery_spec(repository)));
     }
     if let Some(req) = &install.r_requirement {
         words.push("--r-version".to_string());
