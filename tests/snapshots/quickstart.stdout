@@ -41,6 +41,10 @@ Python:
   and `ir preview` add it for knitr-backed Quarto documents with Python chunks.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
+Bioconductor:
+  Use bare package names; pak selects the release compatible with the selected
+  R. `exclude-newer` dates the default CRAN and Bioconductor repositories.
+
 Isolation:
   By default, the resolved R library is first on `.libPaths()` and ambient user
   libraries remain available. With `isolated: true` or `--isolated`, ambient
@@ -61,7 +65,7 @@ Package tools:
 
 Workflow:
   Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
-  Use `exclude-newer` for reproducible CRAN state.
+  Use `exclude-newer` for reproducible CRAN and Bioconductor state.
   Write ordinary R after the metadata. Do not embed package-manager ceremony.
 
 System requirements:
@@ -76,6 +80,7 @@ Commands:
   ir render report.qmd
   ir preview report.qmd
   ir run --with cli -e 'cli::cli_alert_success("ok")'
+  ir run --with BiocGenerics -e 'library(BiocGenerics)'
   ir tool run btw --help
   rx btw --help
   rx --from btw btw --help

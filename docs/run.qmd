@@ -41,7 +41,7 @@ The script frontmatter supports:
 - `python-version`: an optional Python version requirement.
 - `python-exclude-newer`: an optional Python package snapshot date.
 - `isolated`: `true` disables the user library for the run.
-- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When no R selector is set, it also selects the latest R major.minor version released by that date. When `r-version` can match more than one R minor, it limits selection to minor versions released by that date.
+- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves the default CRAN and Bioconductor repositories from Posit Package Manager snapshots for that date. When no R selector is set, it also selects the latest R major.minor version released by that date. When `r-version` can match more than one R minor, it limits selection to minor versions released by that date.
 
 Snapshot date precedence is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 R selection precedence is command line, then environment, then frontmatter `r-version`.
@@ -60,6 +60,15 @@ Local packages may be written as `local::path`, as a bare file-system path in pa
 `packages` must be a YAML sequence; each sequence entry is one package ref.
 Omit `packages`, use `packages: []`, or use `packages: null` when no package refs are needed.
 Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.
+
+## Bioconductor packages
+
+Bioconductor packages use their bare package names.
+pak selects the Bioconductor release compatible with the selected R.
+
+```console
+$ ir run --with BiocGenerics -e 'library(BiocGenerics)'
+```
 
 ## Python environments
 

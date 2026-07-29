@@ -50,7 +50,6 @@ fn r_tooling_lib(cache_dir: &Path) -> std::path::PathBuf {
     Path::new(stdout(&out).trim()).to_path_buf()
 }
 
-#[cfg(target_os = "linux")]
 fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str) {
     let source_root = temp_dir(&format!("ir-fake-{name}-source"));
     let package = source_root.join(name);
@@ -76,6 +75,41 @@ fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str)
         .output()
         .unwrap();
     assert_success(&out);
+}
+
+fn r_repository_url(path: &Path) -> String {
+    let path = renviron_path(path);
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
+}
+
+fn write_r_repository_package(package: &Path, contrib: &Path) {
+    fs::create_dir_all(contrib).unwrap();
+    let package_name = package.file_name().unwrap().to_string_lossy();
+    let tarball = contrib.join(format!("{package_name}_0.0.1.tar.gz"));
+    let r_expr = concat!(
+        "args <- commandArgs(TRUE); ",
+        "old <- setwd(dirname(args[[1]])); ",
+        "on.exit(setwd(old)); ",
+        "utils::tar(args[[2]], basename(args[[1]]), compression = 'gzip'); ",
+        "tools::write_PACKAGES(dirname(args[[2]]), type = 'source')"
+    );
+    let out = Command::new(rscript())
+        .args(["--vanilla", "-e", r_expr])
+        .arg(package)
+        .arg(tarball)
+        .output()
+        .unwrap();
+    assert_success(&out);
+}
+
+fn write_empty_r_repository(repository: &Path) {
+    let contrib = repository.join("src").join("contrib");
+    fs::create_dir_all(&contrib).unwrap();
+    fs::write(contrib.join("PACKAGES"), "").unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -2079,6 +2113,242 @@ fn run_plain_ppm_latest_profile_resolves_with_real_pak_binary_repo() {
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=real-pak-ppm-latest");
+}
+
+#[test]
+fn run_installs_bare_package_from_bioconductor_repositories() {
+    let cache_dir = temp_dir("ir-bioconductor-cache");
+    let renv_cache = temp_cache("ir-bioconductor-renv-cache");
+    let user_cache = temp_cache("ir-bioconductor-user-cache");
+    let package_dir = temp_dir("ir-bioconductor-packages");
+    let bioc_repository = temp_dir("ir-bioconductor-repository");
+    let cran_repository = temp_dir("ir-bioconductor-cran-repository");
+    let profile = temp_path("ir-bioconductor-profile", "R");
+    let script = temp_path("ir-bioconductor", "R");
+    let bioc_version = "99.99";
+
+    let package = write_r_source_package(&package_dir, "irbiocfixture", &[]);
+    let bioc_root = bioc_repository.join("packages").join(bioc_version);
+    write_r_repository_package(
+        &package,
+        &bioc_root.join("bioc").join("src").join("contrib"),
+    );
+    for repository in [
+        bioc_root.join("data").join("annotation"),
+        bioc_root.join("data").join("experiment"),
+        bioc_root.join("workflows"),
+        bioc_root.join("books"),
+    ] {
+        write_empty_r_repository(&repository);
+    }
+    write_empty_r_repository(&cran_repository);
+
+    fs::write(
+        &profile,
+        format!(
+            "options(repos = c(CRAN = {}))\n",
+            serde_json::to_string(&r_repository_url(&cran_repository)).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &script,
+        r#"#| packages:
+#|   - irbiocfixture
+
+library(irbiocfixture)
+stopifnot(irbiocfixture::ok())
+cat("ir.fixture=bioconductor-repository\n")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &user_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env(
+            "RENV_CONFIG_REPOS_OVERRIDE",
+            r_repository_url(&cran_repository),
+        )
+        .env("R_BIOC_MIRROR", r_repository_url(&bioc_repository))
+        .env("R_BIOC_VERSION", bioc_version)
+        .env("PKG_USE_BIOCONDUCTOR", "true")
+        .env_remove("RENV_CONFIG_PAK_ENABLED")
+        .args(["run", "--isolated", "--no-environ", "--no-site-file"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=bioconductor-repository");
+}
+
+#[test]
+fn run_materializes_with_complete_dated_repository_set() {
+    let cache_dir = temp_dir("ir-dated-repositories-cache");
+    let fake_library = temp_dir("ir-dated-repositories-tooling");
+    let effective_repositories = temp_path("ir-dated-repositories", "txt");
+    let profile = temp_path("ir-dated-repositories-profile", "R");
+    let renviron = temp_path("ir-dated-repositories-renviron", "");
+
+    install_fake_r_package(
+        &fake_library,
+        "pak",
+        "export(pkg_deps)\nexport(repo_get)\nexport(repo_resolve)\n",
+        r#"
+load_private_cli <- function() TRUE
+
+repo_resolve <- function(spec) {
+  if (startsWith(spec, "PPM@")) {
+    date <- sub("^PPM@", "", spec)
+    return(c(
+      CRAN = paste0("https://packagemanager.posit.co/cran/", date)
+    ))
+  }
+  stop("unexpected repository spec: ", spec)
+}
+
+repo_get <- function(...) {
+  repos <- getOption("repos")
+  mirror <- getOption("BioC_mirror")
+  bioc <- c(
+    BioCsoft = paste0(mirror, "/packages/3.99/bioc"),
+    BioCann = paste0(mirror, "/packages/3.99/data/annotation"),
+    BioCexp = paste0(mirror, "/packages/3.99/data/experiment"),
+    BioCworkflows = paste0(mirror, "/packages/3.99/workflows"),
+    BioCbooks = paste0(mirror, "/packages/3.99/books")
+  )
+  data.frame(
+    name = c(names(repos), names(bioc)),
+    url = unname(c(repos, bioc)),
+    stringsAsFactors = FALSE
+  )
+}
+
+pkg_deps <- function(refs, ...) {
+  data.frame(
+    ref = refs[[1L]],
+    status = "OK",
+    package = "irdatedfixture",
+    version = "1.0.0",
+    type = "standard",
+    priority = NA_character_,
+    direct = TRUE,
+    stringsAsFactors = FALSE
+  )
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "renv",
+        "export(use)\n",
+        r#"
+use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
+  lines <- c(
+    paste(names(repos), repos, sep = "="),
+    paste0(
+      "renv.config.pak.enabled=",
+      as.character(getOption("renv.config.pak.enabled", NA))
+    )
+  )
+  writeLines(lines, Sys.getenv("IR_TEST_EFFECTIVE_REPOSITORIES"))
+
+  specs <- unlist(list(...), use.names = FALSE)
+  for (spec in specs) {
+    package <- sub("@.*$", "", spec)
+    dir.create(file.path(library, package),
+               recursive = TRUE, showWarnings = FALSE)
+  }
+  invisible(TRUE)
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "secretbase",
+        "export(sha256)\n",
+        "sha256 <- function(x) 'dated-repositories-key'\n",
+    );
+    fs::write(
+        &profile,
+        format!(
+            ".libPaths(c({}, .libPaths()))\n",
+            serde_json::to_string(&renviron_path(&fake_library)).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(&renviron, "").unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .env("R_LIBS_USER", &fake_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("R_ENVIRON_USER", &renviron)
+        .env("RENV_CONFIG_PAK_ENABLED", "TRUE")
+        .env("IR_TEST_EFFECTIVE_REPOSITORIES", &effective_repositories)
+        .args([
+            "run",
+            "--isolated",
+            "--exclude-newer",
+            "2026-06-01",
+            "--with",
+            "irdatedfixture",
+            "-e",
+            "cat('ir.fixture=dated-repositories\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=dated-repositories");
+    assert_eq!(
+        fs::read_to_string(effective_repositories)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        [
+            "CRAN=https://packagemanager.posit.co/cran/2026-06-01",
+            "BioCsoft=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/bioc",
+            "BioCann=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/data/annotation",
+            "BioCexp=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/data/experiment",
+            "BioCworkflows=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/workflows",
+            "BioCbooks=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/books",
+            "renv.config.pak.enabled=FALSE",
+        ]
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn run_installs_real_bioconductor_package() {
+    let cache_dir = temp_dir("ir-real-bioconductor-cache");
+    let renv_cache = temp_cache("ir-real-bioconductor-renv-cache");
+    let user_cache = temp_cache("ir-real-bioconductor-user-cache");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &user_cache)
+        .env_remove("R_BIOC_MIRROR")
+        .env_remove("R_BIOC_VERSION")
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "--with",
+            "BiocGenerics",
+            "-e",
+            "library(BiocGenerics); cat('ir.fixture=real-bioconductor\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=real-bioconductor");
 }
 
 #[test]

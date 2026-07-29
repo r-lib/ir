@@ -106,11 +106,19 @@ fn render_quarto_installs_missing_reticulate_with_plain_pak_ref() {
     install_fake_r_package(
         &user_library,
         "pak",
-        "export(pkg_deps)\nexport(pkg_install)\nexport(repo_resolve)\n",
+        "export(pkg_deps)\nexport(pkg_install)\nexport(repo_get)\nexport(repo_resolve)\n",
         r#"
 load_private_cli <- function() TRUE
 repo_resolve <- function(spec) {
   list(CRAN = "https://packagemanager.posit.co/cran/latest")
+}
+repo_get <- function(...) {
+  repos <- getOption("repos")
+  data.frame(
+    name = names(repos),
+    url = unname(repos),
+    stringsAsFactors = FALSE
+  )
 }
 pkg_deps <- function(refs, ...) {
   stopifnot(identical(refs, "rmarkdown"))
