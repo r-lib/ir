@@ -1,6 +1,6 @@
 [package]
 name = "ir"
-version = "0.2.0"
+version = "0.2.0+dev"
 edition = "2021"
 description = "Run standalone R scripts from embedded dependency metadata."
 license = "MIT"
