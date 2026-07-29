@@ -11,7 +11,7 @@ Options:
       --repo <REPO>                  Add a CRAN-like R package repository for this render; may be repeated
       --r-version <SPEC>             Select the R version for this render with rig
       --rscript <RSCRIPT>            Select the Rscript executable
-      --exclude-newer <DATE>         Resolve packages from the Posit Package Manager snapshot at this date
+      --exclude-newer <DATE>         Use this date for default CRAN and Bioconductor PPM snapshots
       --python-exclude-newer <DATE>  Resolve Python packages using this snapshot date
       --isolated                     Disable the user library for this render
       --vanilla                      Pass --vanilla to the Rscript used by Quarto

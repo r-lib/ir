@@ -45,7 +45,7 @@ $ ir render report.R
 The `ir.packages` value follows the same rules as script `packages`: use a YAML sequence where each entry is one package ref, or omit it, set it to `[]`, or set it to `null` for no dependencies.
 `ir.repos` is a YAML sequence of CRAN-like R package repository specs, such as R-universe URLs, not Git repositories.
 For a package hosted in Git, put a pak package ref under `ir.packages` or pass it to `--with`.
-Repeatable `--repo` values come first, followed by `ir.repos`, then the default repository.
+Repeatable `--repo` values come first, followed by `ir.repos`, the default CRAN or PPM repository, then the Bioconductor repositories selected by pak for the selected R.
 
 `ir` resolves the document packages into the same cached library model used for scripts, then launches `quarto render`.
 Arguments after the source path are passed to `quarto render`.
@@ -67,7 +67,7 @@ An empty `--exclude-newer` or `IR_EXCLUDE_NEWER` overrides frontmatter `ir.exclu
 Future snapshot dates also resolve latest packages.
 When `r-version` can match more than one R minor, the snapshot date limits selection to minor versions released by that date.
 An exact R version or explicit Rscript selection remains authoritative.
-`exclude-newer` applies to the default PPM repository only.
+`exclude-newer` dates the default CRAN and Bioconductor repositories with PPM snapshots.
 Repositories supplied through `ir.repos` or `--repo` remain live and may contain newer packages.
 
 When `ir` selects an R executable by `--rscript`, `IR_RSCRIPT`, `--r-version`, `IR_R_VERSION`, frontmatter `ir.r-version`, or date-only `exclude-newer`, it sets `QUARTO_R` so Quarto renders with that R.

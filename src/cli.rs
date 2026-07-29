@@ -172,7 +172,7 @@ fn run_command() -> ClapCommand {
                 .long("exclude-newer")
                 .value_name("DATE")
                 .num_args(1)
-                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
+                .help("Use this date for default CRAN and Bioconductor PPM snapshots"),
         )
         .arg(
             Arg::new("python-exclude-newer")
@@ -266,7 +266,7 @@ fn quarto_command(command: QuartoCommand) -> ClapCommand {
                 .long("exclude-newer")
                 .value_name("DATE")
                 .num_args(1)
-                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
+                .help("Use this date for default CRAN and Bioconductor PPM snapshots"),
         )
         .arg(
             Arg::new("python-exclude-newer")

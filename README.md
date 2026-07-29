@@ -32,7 +32,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
 - **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve the default PPM repository as of a specific date. Without another R selector, the date selects the latest R minor released by then. When `r-version` can match more than one R minor, the date limits selection to minor versions released by then.
+- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve the default CRAN and Bioconductor repositories from Posit Package Manager snapshots as of a specific date. Without another R selector, the date selects the latest R minor released by then. When `r-version` can match more than one R minor, the date limits selection to minor versions released by then.
 - **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
 
@@ -46,6 +46,7 @@ ir run --vanilla script.R
 ir render report.qmd --to html
 ir preview report.qmd
 ir run --with cli -e 'cli::cli_alert_success("works")'
+ir run --with BiocGenerics -e 'library(BiocGenerics)'
 ir run --repo https://r-xla.r-universe.dev --with r-xla/anvl -e 'library(anvl)'
 ir run --r-version 4.3 script.R
 ir run --exclude-newer 2024-02-01 script.R
@@ -54,6 +55,10 @@ ir tool run --from btw btw --help
 ir tool install btw
 ir cache dir
 ```
+
+Bioconductor packages use their bare package names.
+pak selects the Bioconductor release compatible with the selected R.
+`--exclude-newer` dates the default CRAN and Bioconductor repositories; repositories supplied through `--repo` or frontmatter `repos` remain live.
 
 `--repo` adds a CRAN-like R package repository, such as an R-universe repository, not a Git repository.
 Use pak package refs such as `github::owner/repo` with `--with` or `--from` for packages hosted in Git.

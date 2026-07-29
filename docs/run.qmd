@@ -36,13 +36,13 @@ $ ./script.R
 The script frontmatter supports:
 
 - `packages`: package refs resolved with pak.
-- `repos`: optional CRAN-like R package repository specs used before the default repository.
+- `repos`: optional CRAN-like R package repository specs used before the default repositories.
 - `r-version`: an optional R version requirement selected from installed versions reported by rig. Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 - `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
 - `python-version`: an optional Python version requirement.
 - `python-exclude-newer`: an optional Python package snapshot date.
 - `isolated`: `true` disables the user library for the run.
-- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves CRAN from the Posit Package Manager snapshot for that date. When no R selector is set, it also selects the latest R major.minor version released by that date. When `r-version` can match more than one R minor, it limits selection to minor versions released by that date.
+- `exclude-newer`: an optional `YYYY-MM-DD` date that resolves the default CRAN and Bioconductor repositories from Posit Package Manager snapshots for that date. When no R selector is set, it also selects the latest R major.minor version released by that date. When `r-version` can match more than one R minor, it limits selection to minor versions released by that date.
 
 Snapshot date precedence is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 R selection precedence is command line, then environment, then frontmatter `r-version`.
@@ -64,7 +64,7 @@ Unknown keys are ignored after YAML parsing, so future metadata such as `sys-req
 
 ## Package repositories
 
-Use `repos` when a package or one of its dependencies is published outside CRAN.
+Use `repos` when a package or one of its dependencies is published outside CRAN and Bioconductor.
 Here, a repository means a CRAN-like R package repository, such as an R-universe repository, not a Git repository.
 For a package hosted in Git, put a pak package ref under `packages` or pass it to `--with`.
 
@@ -79,14 +79,17 @@ library(anvl)
 ```
 
 `repos` must be a YAML sequence of CRAN-like repository specs accepted by pak.
-Repositories supplied with repeatable `--repo` options are placed first, followed by frontmatter `repos`, then the default CRAN or PPM repository.
-Repeated repository specs are removed while preserving that order.
+Repositories supplied with repeatable `--repo` options are placed first, followed by frontmatter `repos`, the default CRAN or PPM repository, then the Bioconductor repositories selected by pak.
+pak selects the Bioconductor release compatible with the selected R.
+Repeated repository URLs are removed while preserving their first occurrence.
 
 ```console
+$ ir run --with BiocGenerics -e 'library(BiocGenerics)'
 $ ir run --repo https://r-xla.r-universe.dev --with r-xla/anvl -e 'library(anvl)'
 ```
 
-`exclude-newer` selects a dated snapshot for the default PPM repository.
+Bioconductor packages use their bare package names and do not need `repos` or `--repo`.
+`exclude-newer` selects dated PPM snapshots for the default CRAN and Bioconductor repositories.
 Repositories supplied through `repos` or `--repo` are used as provided and may contain newer packages.
 Because those repositories may change, resolutions that use them expire like latest-package resolutions even when `exclude-newer` is set.
 
