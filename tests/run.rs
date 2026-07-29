@@ -2796,7 +2796,7 @@ cat("ir.fixture=transitive-source\n")
 }
 
 #[test]
-fn run_frontmatter_uses_explicit_repository() {
+fn run_frontmatter_refreshes_same_version_rebuild_from_explicit_repository() {
     let cache_dir = temp_dir("ir-explicit-repository-cache");
     let renv_cache = temp_cache("ir-explicit-repository-renv-cache");
     let first_user_cache = temp_cache("ir-explicit-repository-first-user-cache");
@@ -2808,7 +2808,7 @@ fn run_frontmatter_uses_explicit_repository() {
     let dep = write_r_source_package(
         &package_dir,
         "iradditionaldep",
-        &["RemoteSha: explicit".to_string()],
+        &["Repository: explicit".to_string()],
     );
     fs::write(
         dep.join("R").join("ok.R"),
@@ -2883,13 +2883,6 @@ cat("library.path=", lib, "\n", sep = "")
     fs::write(
         dep.join("R").join("ok.R"),
         "repository_origin <- function() \"explicit-rebuilt\"\n",
-    )
-    .unwrap();
-    let description_path = dep.join("DESCRIPTION");
-    let description = fs::read_to_string(&description_path).unwrap();
-    fs::write(
-        description_path,
-        description.replace("RemoteSha: explicit", "RemoteSha: explicit-rebuilt"),
     )
     .unwrap();
     fs::remove_file(&tarball).unwrap();

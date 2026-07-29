@@ -275,12 +275,12 @@ ir_install_specs <- function(res) {
                      character(1))))
 }
 
-ir_install_request <- function(res, i) {
+ir_install_request <- function(res, i, bind_content = FALSE) {
   if (!ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
     return(res$ref[[i]])
 
   metadata <- ir_sanitize_repository_fields(res$metadata[[i]])
-  c(
+  request <- c(
     list(
       Package = res$package[[i]],
       Version = res$version[[i]],
@@ -288,13 +288,18 @@ ir_install_request <- function(res, i) {
     ),
     as.list(metadata)
   )
+  # renv otherwise aliases same-version repository rebuilds in its shared cache.
+  if (bind_content)
+    request$Hash <- substr(secretbase::sha256(ir_resolved_content_id(res, i)),
+                           1L, 32L)
+  request
 }
 
-ir_install_requests <- function(res) {
+ir_install_requests <- function(res, bind_content = FALSE) {
   specs <- vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
                   character(1))
   indices <- match(sort(unique(specs)), specs)
-  lapply(indices, function(i) ir_install_request(res, i))
+  lapply(indices, function(i) ir_install_request(res, i, bind_content))
 }
 
 ir_nonempty_scalar <- function(value) {
@@ -520,8 +525,9 @@ ir_resolve_main <- function() {
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
     install_specs <- ir_install_specs(res)
-    install_requests <- ir_install_requests(res)
-    library_specs <- if (length(repository_specs))
+    bind_repository_content <- length(repository_specs) > 0L
+    install_requests <- ir_install_requests(res, bind_repository_content)
+    library_specs <- if (bind_repository_content)
       ir_resolved_content_specs(res)
     else
       install_specs
@@ -551,9 +557,9 @@ ir_resolve_main <- function() {
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
     effective_repositories <- ir_effective_repositories()
-    # pak records the repository that supplied each standard package. Pass
-    # that metadata without URL credentials so renv can authenticate downloads
-    # without writing secrets into the installed package or shared cache.
+    # Pass pak's standard-package records without URL credentials. For live
+    # repositories, the record's Hash also prevents renv from linking an older
+    # same-version artifact from its shared cache.
     do.call(renv::use, c(
       install_requests,
       list(
