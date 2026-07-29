@@ -233,6 +233,10 @@ ir_install_specs <- function(res) {
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
+  # R startup files can set this after the parent process launches R.
+  # pak's effective repository set is authoritative for renv.
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+
   # renv currently drops exact package versions when its pak integration is
   # enabled: https://github.com/rstudio/renv/issues/2341
   options(renv.config.pak.enabled = FALSE)

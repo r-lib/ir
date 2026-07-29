@@ -2168,6 +2168,10 @@ cat("ir.fixture=bioconductor-repository\n")
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &user_cache)
         .env("R_PROFILE_USER", &profile)
+        .env(
+            "RENV_CONFIG_REPOS_OVERRIDE",
+            r_repository_url(&cran_repository),
+        )
         .env("R_BIOC_MIRROR", r_repository_url(&bioc_repository))
         .env("R_BIOC_VERSION", bioc_version)
         .env("PKG_USE_BIOCONDUCTOR", "true")
