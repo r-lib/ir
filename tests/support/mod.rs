@@ -7,8 +7,9 @@ pub(crate) use temp_path::{temp_cache, temp_dir, temp_path, TempPath};
 
 use std::ffi::OsString;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -299,6 +300,124 @@ pub(crate) fn write_r_source_package(
     fs::write(source.join("R").join("ok.R"), "ok <- function() TRUE\n").unwrap();
 
     source
+}
+
+pub(crate) fn write_r_repository_package(package: &Path, contrib: &Path) {
+    fs::create_dir_all(contrib).unwrap();
+    let package_name = package.file_name().unwrap().to_string_lossy();
+    let tarball = contrib.join(format!("{package_name}_0.0.1.tar.gz"));
+    let r_expr = concat!(
+        "args <- commandArgs(TRUE); ",
+        "old <- setwd(dirname(args[[1]])); ",
+        "on.exit(setwd(old)); ",
+        "utils::tar(args[[2]], basename(args[[1]]), compression = 'gzip'); ",
+        "tools::write_PACKAGES(dirname(args[[2]]), type = 'source')"
+    );
+    let out = Command::new(rscript())
+        .args(["--vanilla", "-e", r_expr])
+        .arg(package)
+        .arg(tarball)
+        .output()
+        .unwrap();
+    assert_success(&out);
+}
+
+pub(crate) struct AuthenticatedRepository {
+    child: Child,
+    url: String,
+    public_url: String,
+}
+
+impl AuthenticatedRepository {
+    pub(crate) fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub(crate) fn public_url(&self) -> &str {
+        &self.public_url
+    }
+}
+
+impl Drop for AuthenticatedRepository {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+pub(crate) fn serve_authenticated_repository(
+    root: &Path,
+    username: &str,
+    password: &str,
+    token: &str,
+) -> AuthenticatedRepository {
+    let server = r#"
+import base64
+import http.server
+import sys
+import urllib.parse
+
+root, username, password, token = sys.argv[1:]
+expected = "Basic " + base64.b64encode(
+    f"{username}:{password}".encode()
+).decode()
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=root, **kwargs)
+
+    def authorize(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        prefix = f"token={token}"
+        if (
+            self.headers.get("Authorization") == expected
+            and parsed.query.startswith(prefix)
+        ):
+            suffix = parsed.query[len(prefix):]
+            if not suffix or suffix.startswith("/"):
+                self.path = parsed.path.rstrip("/") + suffix or "/"
+                return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="ir"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
+
+    def do_GET(self):
+        if self.authorize():
+            super().do_GET()
+
+    def do_HEAD(self):
+        if self.authorize():
+            super().do_HEAD()
+
+    def log_message(self, format, *args):
+        pass
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+print(server.server_address[1], flush=True)
+server.serve_forever()
+"#;
+    let mut child = Command::new(python_executable())
+        .args(["-u", "-c", server])
+        .arg(root)
+        .args([username, password, token])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut port = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut port)
+        .unwrap();
+    let port = port.trim().parse::<u16>().unwrap();
+
+    let public_url = format!("http://127.0.0.1:{port}");
+    AuthenticatedRepository {
+        child,
+        url: format!("http://{username}:{password}@127.0.0.1:{port}?token={token}"),
+        public_url,
+    }
 }
 
 pub(crate) fn output_text(output: &Output) -> String {

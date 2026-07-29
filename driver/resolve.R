@@ -146,6 +146,30 @@ ir_effective_repositories <- function() {
            as.character(repositories$name))
 }
 
+ir_credential_free_repository <- function(repository) {
+  stopifnot(is.character(repository), length(repository) == 1L,
+            !is.na(repository), nzchar(repository))
+
+  if (!grepl("^https?://", repository, ignore.case = TRUE))
+    return(repository)
+
+  repository <- sub("[?#].*$", "", repository)
+  sub("^(https?://)[^/]*@", "\\1", repository, ignore.case = TRUE)
+}
+
+ir_sanitize_repository_fields <- function(metadata) {
+  fields <- intersect(c("Repository", "RemoteRepos"), names(metadata))
+  for (field in fields) {
+    values <- metadata[[field]]
+    keep <- !is.na(values) & nzchar(values)
+    values[keep] <- vapply(values[keep],
+                           ir_credential_free_repository,
+                           character(1))
+    metadata[[field]] <- values
+  }
+  metadata
+}
+
 ## --- resolution cache -------------------------------------------------------
 
 # Legacy fallback key identifying a resolution request when Rust does not pass
@@ -249,6 +273,28 @@ ir_install_spec <- function(res, i) {
 ir_install_specs <- function(res) {
   sort(unique(vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
                      character(1))))
+}
+
+ir_install_request <- function(res, i) {
+  if (!ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
+    return(res$ref[[i]])
+
+  metadata <- ir_sanitize_repository_fields(res$metadata[[i]])
+  c(
+    list(
+      Package = res$package[[i]],
+      Version = res$version[[i]],
+      Source = "Repository"
+    ),
+    as.list(metadata)
+  )
+}
+
+ir_install_requests <- function(res) {
+  specs <- vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
+                  character(1))
+  indices <- match(sort(unique(specs)), specs)
+  lapply(indices, function(i) ir_install_request(res, i))
 }
 
 ir_nonempty_scalar <- function(value) {
@@ -465,6 +511,7 @@ ir_resolve_main <- function() {
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
+    install_requests <- list()
     library_specs <- character()
     has_source_ref <- FALSE
   } else {
@@ -473,6 +520,7 @@ ir_resolve_main <- function() {
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
     install_specs <- ir_install_specs(res)
+    install_requests <- ir_install_requests(res)
     library_specs <- if (length(repository_specs))
       ir_resolved_content_specs(res)
     else
@@ -503,8 +551,11 @@ ir_resolve_main <- function() {
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
     effective_repositories <- ir_effective_repositories()
+    # pak records the repository that supplied each standard package. Pass
+    # that metadata without URL credentials so renv can authenticate downloads
+    # without writing secrets into the installed package or shared cache.
     do.call(renv::use, c(
-      as.list(install_specs),
+      install_requests,
       list(
         library = library_path,
         repos   = effective_repositories,

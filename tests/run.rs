@@ -86,26 +86,6 @@ fn r_repository_url(path: &Path) -> String {
     }
 }
 
-fn write_r_repository_package(package: &Path, contrib: &Path) {
-    fs::create_dir_all(contrib).unwrap();
-    let package_name = package.file_name().unwrap().to_string_lossy();
-    let tarball = contrib.join(format!("{package_name}_0.0.1.tar.gz"));
-    let r_expr = concat!(
-        "args <- commandArgs(TRUE); ",
-        "old <- setwd(dirname(args[[1]])); ",
-        "on.exit(setwd(old)); ",
-        "utils::tar(args[[2]], basename(args[[1]]), compression = 'gzip'); ",
-        "tools::write_PACKAGES(dirname(args[[2]]), type = 'source')"
-    );
-    let out = Command::new(rscript())
-        .args(["--vanilla", "-e", r_expr])
-        .arg(package)
-        .arg(tarball)
-        .output()
-        .unwrap();
-    assert_success(&out);
-}
-
 fn write_empty_r_repository(repository: &Path) {
     let contrib = repository.join("src").join("contrib");
     fs::create_dir_all(&contrib).unwrap();

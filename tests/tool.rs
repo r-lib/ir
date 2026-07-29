@@ -338,6 +338,86 @@ fn tool_install_installs_real_package_entrypoint() {
 }
 
 #[test]
+fn tool_install_does_not_persist_repository_credentials_in_package_metadata() {
+    let cache_dir = temp_dir("ir-tool-credentials-cache");
+    let renv_cache = temp_cache("ir-tool-credentials-renv-cache");
+    let tool_store = temp_dir("ir-tool-credentials-store");
+    let bin_dir = temp_dir("ir-tool-credentials-bin");
+    let package_dir = temp_dir("ir-tool-credentials-packages");
+    let repository = temp_dir("ir-tool-credentials-repository");
+    let package = write_r_source_package(&package_dir, "ircredentialfixture", &[]);
+    let exec_dir = package.join("exec");
+    fs::create_dir_all(&exec_dir).unwrap();
+    fs::write(
+        exec_dir.join("hello.R"),
+        r#"#!/usr/bin/env Rscript
+cat("ir.fixture=credential-tool\n")
+"#,
+    )
+    .unwrap();
+    write_r_repository_package(&package, &repository.join("src").join("contrib"));
+    let server = serve_authenticated_repository(
+        &repository,
+        "repository-user",
+        "repository-password",
+        "repository-token",
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TOOL_STORE_DIR", &tool_store)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .args(["tool", "install", "--repo", server.url(), "--bin-dir"])
+        .arg(&bin_dir)
+        .arg("ircredentialfixture")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "Installed");
+    assert!(launcher_path(&bin_dir, "hello").exists());
+
+    let metadata_check = r#"
+metadata <- unlist(lapply(commandArgs(TRUE), function(root) {
+  files <- list.files(
+    root,
+    pattern = "DESCRIPTION$|package[.]rds$",
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  unlist(lapply(files, function(path) {
+    if (basename(path) == "DESCRIPTION")
+      read.dcf(path, all = TRUE)
+    else
+      readRDS(path)$DESCRIPTION
+  }))
+}))
+leaked <- metadata[
+  grepl("repository-user", metadata, fixed = TRUE) |
+    grepl("repository-password", metadata, fixed = TRUE) |
+    grepl("repository-token", metadata, fixed = TRUE)
+]
+if (length(leaked))
+  stop(paste(names(leaked), leaked, collapse = "\n"), call. = FALSE)
+repositories <- unname(metadata[
+  names(metadata) %in% c("Repository", "RemoteRepos")
+])
+stopifnot(
+  length(repositories) > 0,
+  all(repositories == commandArgs(TRUE)[[3]])
+)
+"#;
+    let out = Command::new(rscript())
+        .args(["--vanilla", "-e", metadata_check])
+        .arg(&tool_store)
+        .arg(&renv_cache)
+        .arg(server.public_url())
+        .output()
+        .unwrap();
+    assert_success(&out);
+}
+
+#[test]
 fn tool_run_rx_and_install_support_package_bin_executables() {
     let cache_dir = temp_dir("ir-tool-bin-executable-cache");
     let bin_dir = temp_dir("ir-tool-bin-executable-bin");
