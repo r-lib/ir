@@ -2235,6 +2235,51 @@ fn run_plain_ppm_latest_profile_resolves_with_real_pak_binary_repo() {
 }
 
 #[test]
+fn run_installs_from_multiple_real_repositories() {
+    let cache_dir = temp_dir("ir-real-repositories-cache");
+    let renv_cache = temp_cache("ir-real-repositories-renv-cache");
+    let user_cache = temp_cache("ir-real-repositories-user-cache");
+    let expression = r#"
+stopifnot(
+  identical(
+    packageDescription("tengen")[["Repository"]],
+    "https://r-xla.r-universe.dev"
+  ),
+  identical(
+    packageDescription("safetensors")[["Repository"]],
+    "https://mlverse.r-universe.dev"
+  )
+)
+cat("ir.fixture=real-repositories\n")
+"#;
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &user_cache)
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "--repo",
+            "https://r-xla.r-universe.dev",
+            "--repo",
+            "https://mlverse.r-universe.dev",
+            "--with",
+            "tengen",
+            "--with",
+            "safetensors",
+            "-e",
+            expression,
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=real-repositories");
+}
+
+#[test]
 fn run_installs_bare_package_from_bioconductor_repositories() {
     let cache_dir = temp_dir("ir-bioconductor-cache");
     let renv_cache = temp_cache("ir-bioconductor-renv-cache");
