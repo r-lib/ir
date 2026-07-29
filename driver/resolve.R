@@ -108,9 +108,11 @@ ir_resolve_repositories <- function(specs) {
   stopifnot(is.character(specs), all(nzchar(specs)))
   if (!length(specs)) return(character())
 
+  # pak::repo_resolve() accepts a scalar spec and returns a named character
+  # scalar. vapply() enforces that contract.
   repositories <- vapply(
     specs,
-    function(spec) unname(ir_repo_resolve(spec)[[1L]]),
+    function(spec) unname(ir_repo_resolve(spec)),
     character(1),
     USE.NAMES = FALSE
   )
