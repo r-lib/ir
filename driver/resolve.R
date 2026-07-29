@@ -32,7 +32,7 @@ ir_env_optional <- function(name) {
 
 # Optional date-bounded resolution. `exclude-newer` is a YAML mapping key whose
 # value is an ISO date; resolution then uses that day's Posit Package Manager
-# CRAN snapshot instead of the latest CRAN repository.
+# CRAN and Bioconductor snapshots instead of the latest repositories.
 ir_exclude_newer <- function(value) {
   if (is.null(value)) return(NULL)
 
@@ -101,6 +101,33 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
     repos[["CRAN"]] <- ir_ppm_snapshot_url("latest")
 
   repos
+}
+
+ir_ppm_bioconductor_mirror <- function(cran_repo, exclude_newer) {
+  stopifnot(length(cran_repo) == 1L, !is.na(cran_repo), nzchar(cran_repo),
+            length(exclude_newer) == 1L, !is.na(exclude_newer),
+            nzchar(exclude_newer))
+
+  cran_path <- regexpr("/cran(?:/|$)", cran_repo, perl = TRUE)
+  if (cran_path[[1L]] == -1L)
+    stop("could not derive the PPM root from CRAN repository `",
+         cran_repo, "`", call. = FALSE)
+
+  ppm_root <- substr(cran_repo, 1L, cran_path[[1L]] - 1L)
+  paste0(ppm_root, "/bioconductor/", exclude_newer)
+}
+
+ir_effective_repositories <- function() {
+  repositories <- pak::repo_get()
+  stopifnot(is.data.frame(repositories),
+            all(c("name", "url") %in% names(repositories)),
+            all(!is.na(repositories$name)),
+            all(nzchar(repositories$name)),
+            all(!is.na(repositories$url)),
+            all(nzchar(repositories$url)))
+
+  setNames(as.character(repositories$url),
+           as.character(repositories$name))
 }
 
 ## --- resolution cache -------------------------------------------------------
@@ -206,6 +233,10 @@ ir_install_specs <- function(res) {
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
+  # renv currently drops exact package versions when its pak integration is
+  # enabled: https://github.com/rstudio/renv/issues/2341
+  options(renv.config.pak.enabled = FALSE)
+
   cache_dir <- ir_cache_dir()
   library_root <- ir_env_optional("IR_LIBRARY_ROOT")
   ir_configure_child_tempdir()
@@ -230,6 +261,15 @@ ir_resolve_main <- function() {
     ## Ensure the rest of the resolver's own tooling is available before any
     ## secretbase/pak/renv use below.
     ir_ensure_tooling(cache_dir = cache_dir)
+
+    if (!is.null(exclude_newer)) {
+      options(
+        BioC_mirror = ir_ppm_bioconductor_mirror(
+          repos[["CRAN"]],
+          exclude_newer
+        )
+      )
+    }
   }
 
   if (!is.null(python_result_file)) {
@@ -369,11 +409,12 @@ ir_resolve_main <- function() {
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
+    effective_repositories <- ir_effective_repositories()
     do.call(renv::use, c(
       as.list(install_specs),
       list(
         library = library_path,
-        repos   = repos,
+        repos   = effective_repositories,
         attach  = FALSE,
         sandbox = FALSE,
         isolate = TRUE,
