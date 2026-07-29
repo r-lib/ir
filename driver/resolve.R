@@ -332,8 +332,12 @@ ir_resolve_main <- function() {
     stopifnot(all(nzchar(repository_specs)))
 
     repositories <- ir_resolve_repositories(repository_specs)
-    repos <- c(repositories, ir_repos(exclude_newer))
-    repos <- repos[!duplicated(repos)]
+    default_repositories <- ir_repos(exclude_newer)
+    # Keep the named defaults: dated Bioconductor setup requires `CRAN`.
+    repositories <- repositories[
+      !repositories %in% unname(default_repositories)
+    ]
+    repos <- c(repositories, default_repositories)
     options(repos = repos)
 
     ## Ensure the rest of the resolver's own tooling is available before any

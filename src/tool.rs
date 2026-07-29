@@ -1670,7 +1670,8 @@ fn cmd_quote_os(value: &OsStr) -> String {
 
 #[cfg(not(unix))]
 fn cmd_quote_str(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
+    // Quotes do not stop cmd.exe from expanding `%`; batch literals use `%%`.
+    format!("\"{}\"", value.replace('%', "%%").replace('"', "\"\""))
 }
 
 #[cfg(not(unix))]

@@ -2142,11 +2142,12 @@ fn tool_install_records_env_selected_rscript_in_recovery_command() {
 
 #[cfg(windows)]
 #[test]
-fn tool_install_quotes_windows_recovery_rscript() {
+fn tool_install_preserves_windows_recovery_arguments() {
     let cache_dir = temp_dir("ir-tool-install-windows-rscript-cache");
     let bin_dir = temp_dir("ir-tool-install-windows-rscript-bin");
     let library = temp_dir("ir-tool-install-windows-rscript-library");
     let rscript_dir = temp_dir("ir tool install windows rscript");
+    let repository = "https://repo.example.test/a%20b";
     let package = library.join("irfake");
     let exec_dir = package.join("exec");
     fs::create_dir_all(&exec_dir).unwrap();
@@ -2172,7 +2173,7 @@ fn tool_install_quotes_windows_recovery_rscript() {
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
         .env_remove("IR_RSCRIPT")
-        .args(["tool", "install", "--rscript"])
+        .args(["tool", "install", "--repo", repository, "--rscript"])
         .arg(&rscript)
         .args(["--bin-dir"])
         .arg(&bin_dir)
@@ -2184,13 +2185,24 @@ fn tool_install_quotes_windows_recovery_rscript() {
     let launcher = fs::read_to_string(launcher_path(&bin_dir, "hello")).unwrap();
     let selected = std::path::absolute(&rscript).unwrap();
     let reinstall = format!(
-        "ir tool install --force --rscript \"{}\" irfake",
+        "ir tool install --force --repo \"https://repo.example.test/a%%20b\" --rscript \"{}\" irfake",
         selected.to_string_lossy().replace('"', "\"\"")
     );
     assert!(launcher.contains(&reinstall), "{launcher}");
     assert!(
         !launcher.contains("--rscript '"),
         "Windows recovery command should not use POSIX quoting:\n{launcher}"
+    );
+
+    fs::remove_dir_all(&library).unwrap();
+    let out = Command::new(launcher_path(&bin_dir, "hello"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(
+        output_text(&out).contains("--repo \"https://repo.example.test/a%20b\""),
+        "{}",
+        output_text(&out)
     );
 }
 

@@ -2420,6 +2420,8 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
             "--isolated",
             "--repo",
             "family",
+            "--repo",
+            "PPM@2026-06-01",
             "--exclude-newer",
             "2026-06-01",
             "--with",
