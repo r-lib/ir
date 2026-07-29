@@ -58,10 +58,9 @@ ir cache dir
 
 Bioconductor packages use their bare package names.
 pak selects the Bioconductor release compatible with the selected R.
-`--exclude-newer` dates the default CRAN and Bioconductor repositories; repositories supplied through `--repo` or frontmatter `repos` remain live.
-
-`--repo` adds a CRAN-like R package repository, such as an R-universe repository, not a Git repository.
-Use pak package refs such as `github::owner/repo` with `--with` or `--from` for packages hosted in Git.
+`--repo` adds a CRAN-like package repository, such as R-universe, before the defaults.
+For Git repositories, use a pak package ref such as `github::owner/repo` with `--with` or `--from`.
+`--exclude-newer` dates the default repositories; explicit repositories remain live.
 
 ## Install
 

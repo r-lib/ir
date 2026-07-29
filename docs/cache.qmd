@@ -12,18 +12,16 @@ Resolution requests for ordinary registry refs are keyed by declared packages, o
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
 Latest resolution records a Unix timestamp inside the cache marker; markers older than `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` are refreshed in place, so newly published versions are picked up without accumulating one marker per refresh window.
 The default max age is 86400 seconds (24 hours).
-Snapshot resolution without additional repositories uses the `exclude-newer` date in the key because the default CRAN and Bioconductor PPM repository states are immutable.
-Additional repositories are used as provided and may change, so resolutions that use `repos` or `--repo` retain the latest-resolution expiry even when `exclude-newer` is set.
+Snapshot resolution uses the `exclude-newer` date in the key because the default CRAN and Bioconductor PPM repository states are immutable.
+Because additional repositories remain live, resolutions that use `repos` or `--repo` retain the latest-resolution expiry even when `exclude-newer` is set.
 Python environments use separate cache markers that record the resolved Python executable path.
 If the recorded Python path no longer exists, `ir` resolves the Python environment again.
 
 Non-standard refs skip the resolution-marker cache.
 Each run asks pak to resolve them again, so branch heads, URLs, and local paths are not hidden behind a warm resolution marker.
 
-Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, the resolved artifact identities reported by pak, ordered repositories, R version, and platform.
-Artifact identities use repository SHA-256 or MD5 checksums when available, resolved source commit hashes, and source URLs as a fallback.
-After a resolution marker expires, a repository package rebuilt under the same name and version therefore receives a new library when its advertised checksum changes.
-Scripts or tools that resolve to the same package artifacts share one library.
+Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
+With additional repositories, the key also includes the ordered repositories and pak's artifact checksums, commit hashes, or source URLs, so a same-version rebuild does not reuse a stale library.
 Source refs are still passed to `renv::use()` on each run so renv can refresh source installs; renv may reuse its own package cache when the source has not changed.
 Installed tool libraries use the same content-addressing under `IR_TOOL_STORE_DIR`.
 

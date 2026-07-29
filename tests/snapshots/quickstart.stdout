@@ -42,14 +42,12 @@ Python:
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Package repositories:
-  Add `repos` as a YAML sequence of CRAN-like R package repositories when
-  packages are published outside CRAN. These are package indexes such as
-  R-universe repositories, not Git repositories.
-  In Quarto, put `repos` under `ir:`. Use repeatable `--repo` options for
-  command-line dependencies. Explicit repositories come before the default.
-  Bioconductor packages use their bare package names; pak selects the release
-  compatible with the selected R. `exclude-newer` dates the default CRAN and
-  Bioconductor repositories; explicit repositories remain live.
+  `repos` is a YAML sequence of CRAN-like package repositories such as
+  R-universe, not Git repositories. In Quarto, put it under `ir:`.
+  Repeat `--repo` on the command line. Explicit repositories come first and
+  remain live when `exclude-newer` dates the defaults.
+  Bioconductor packages use bare names; pak selects the release compatible
+  with the selected R.
 
 Isolation:
   By default, the resolved R library is first on `.libPaths()` and ambient user

@@ -145,14 +145,7 @@ fn run_command() -> ClapCommand {
                 .action(ArgAction::Append)
                 .help("Add a dependency for this run; may be repeated"),
         )
-        .arg(
-            Arg::new("repo")
-                .long("repo")
-                .value_name("REPO")
-                .num_args(1)
-                .action(ArgAction::Append)
-                .help("Add a CRAN-like R package repository for this run; may be repeated"),
-        )
+        .arg(repository_arg())
         .arg(
             Arg::new("r-version")
                 .long("r-version")
@@ -237,16 +230,7 @@ fn quarto_command(command: QuartoCommand) -> ClapCommand {
                 .action(ArgAction::Append)
                 .help(format!("Add a dependency for this {name}; may be repeated")),
         )
-        .arg(
-            Arg::new("repo")
-                .long("repo")
-                .value_name("REPO")
-                .num_args(1)
-                .action(ArgAction::Append)
-                .help(format!(
-                    "Add a CRAN-like R package repository for this {name}; may be repeated"
-                )),
-        )
+        .arg(repository_arg())
         .arg(
             Arg::new("r-version")
                 .long("r-version")
@@ -397,14 +381,7 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .action(ArgAction::Append)
                 .help("Add a dependency for this tool run; may be repeated"),
         )
-        .arg(
-            Arg::new("repo")
-                .long("repo")
-                .value_name("REPO")
-                .num_args(1)
-                .action(ArgAction::Append)
-                .help("Add a CRAN-like R package repository for this tool run; may be repeated"),
-        )
+        .arg(repository_arg())
         .arg(
             Arg::new("r-version")
                 .long("r-version")
@@ -446,14 +423,7 @@ fn tool_install_command() -> ClapCommand {
                 .action(ArgAction::Append)
                 .help("Add a dependency for installed tools; may be repeated"),
         )
-        .arg(
-            Arg::new("repo")
-                .long("repo")
-                .value_name("REPO")
-                .num_args(1)
-                .action(ArgAction::Append)
-                .help("Add a CRAN-like R package repository for installed tools; may be repeated"),
-        )
+        .arg(repository_arg())
         .arg(
             Arg::new("r-version")
                 .long("r-version")
@@ -513,6 +483,15 @@ fn raw_args_arg(help: &'static str) -> Arg {
         .allow_hyphen_values(true)
         .trailing_var_arg(true)
         .help(help)
+}
+
+fn repository_arg() -> Arg {
+    Arg::new("repo")
+        .long("repo")
+        .value_name("REPO")
+        .num_args(1)
+        .action(ArgAction::Append)
+        .help("Add a CRAN-like R package repository; may be repeated")
 }
 
 pub(crate) struct PackageExecTarget {
@@ -618,9 +597,9 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             let value = iter
                 .next()
                 .ok_or("`--repo` requires a repository (try `ir run --repo https://r-universe.dev script.R`)")?;
-            push_repository(&mut repositories, &value, "ir run")?;
+            push_repository(&mut repositories, &value)?;
         } else if let Some(value) = arg.strip_prefix("--repo=") {
-            push_repository(&mut repositories, value, "ir run")?;
+            push_repository(&mut repositories, value)?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir run --r-version 4.5 script.R`)",
@@ -738,9 +717,9 @@ fn parse_quarto_args(
                      (try `ir {name} --repo https://r-universe.dev report.qmd`)"
                 )
             })?;
-            push_repository(&mut repositories, &value, &format!("ir {name}"))?;
+            push_repository(&mut repositories, &value)?;
         } else if let Some(value) = arg.strip_prefix("--repo=") {
-            push_repository(&mut repositories, value, &format!("ir {name}"))?;
+            push_repository(&mut repositories, value)?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or_else(|| {
                 format!(
@@ -913,9 +892,9 @@ pub(crate) fn parse_tool_run_args(
                     invocation.command()
                 )
             })?;
-            push_repository(&mut repositories, &value, invocation.command())?;
+            push_repository(&mut repositories, &value)?;
         } else if let Some(value) = arg.strip_prefix("--repo=") {
-            push_repository(&mut repositories, value, invocation.command())?;
+            push_repository(&mut repositories, value)?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or_else(|| {
                 format!(
@@ -1009,9 +988,9 @@ pub(crate) fn parse_tool_install_args(
             let value = iter.next().ok_or(
                 "`--repo` requires a repository (try `ir tool install --repo https://r-universe.dev btw`)",
             )?;
-            push_repository(&mut repositories, &value, "ir tool install")?;
+            push_repository(&mut repositories, &value)?;
         } else if let Some(value) = arg.strip_prefix("--repo=") {
-            push_repository(&mut repositories, value, "ir tool install")?;
+            push_repository(&mut repositories, value)?;
         } else if arg == "--r-version" {
             let value = iter.next().ok_or(
                 "`--r-version` requires a version spec (try `ir tool install --r-version 4.5 btw`)",
@@ -1080,14 +1059,10 @@ fn push_with_deps(with_deps: &mut Vec<String>, value: &str) {
     }
 }
 
-fn push_repository(
-    repositories: &mut Vec<String>,
-    value: &str,
-    command: &str,
-) -> Result<(), Box<dyn Error>> {
+fn push_repository(repositories: &mut Vec<String>, value: &str) -> Result<(), Box<dyn Error>> {
     let value = value.trim();
     if value.is_empty() || value.contains(['\r', '\n']) {
-        return Err(format!("`--repo` for `{command}` must be a non-empty single line").into());
+        return Err("`--repo` must be a non-empty single line".into());
     }
     repositories.push(value.to_string());
     Ok(())

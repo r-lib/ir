@@ -38,8 +38,7 @@ $ rx --rscript /path/to/Rscript --from btw btw
 
 Package refs use pak syntax.
 Quote refs when the shell would otherwise interpret characters such as `>`.
-`--repo` accepts CRAN-like R package repository specs, such as R-universe URLs, not Git repositories.
-For packages hosted in Git, use a pak package ref with `--from` or `--with`.
+`--repo` adds CRAN-like package repositories; use pak package refs with `--from` or `--with` for Git repositories.
 
 ## Write package tools
 
@@ -99,7 +98,7 @@ The tool store is configured with `IR_TOOL_STORE_DIR`.
 By default, it is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix and macOS, and `%LOCALAPPDATA%\Programs\R\ir\tools` or `%USERPROFILE%\AppData\Local\Programs\R\ir\tools` on Windows.
 Installed tool libraries are persistent state, so `ir cache clean` does not remove them.
 
-Generated launchers keep the same resolved package ref, `--with` package additions, `--repo` repositories, and R selection that were used at install time.
+Generated launchers keep the same resolved package ref, `--with` package additions, `--repo` repositories, and R selection used at install time.
 Recovery commands embedded in launchers omit HTTP repository userinfo, query strings, and fragments so they do not persist repository credentials.
 They set `R_LIBS` to the resolved library and `R_LIBS_USER=NULL`.
 Nested `#| launcher:` metadata is included in generated launchers.

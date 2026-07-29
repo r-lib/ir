@@ -24,28 +24,25 @@ pub(crate) struct CachedResolution {
     pub(crate) primary_package: Option<String>,
 }
 
-pub(crate) struct ResolutionInputs<'a> {
-    pub(crate) dependencies: &'a [String],
-    pub(crate) repositories: &'a [String],
-    pub(crate) exclude_newer: Option<&'a str>,
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct QuartoCacheFlags {
     pub(crate) render: bool,
     pub(crate) reticulate: bool,
 }
 
+// Each input participates independently in cache-key construction.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
     rscript_args: &[String],
-    inputs: ResolutionInputs<'_>,
+    dependencies: &[String],
+    repositories: &[String],
+    exclude_newer: Option<&str>,
     quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
-    if !inputs
-        .dependencies
+    if !dependencies
         .iter()
         .all(|dependency| is_standard_ref(dependency))
     {
@@ -56,17 +53,16 @@ pub(crate) fn paths(
         return Ok(None);
     };
 
-    let latest_max_age_seconds =
-        if inputs.exclude_newer.is_none() || !inputs.repositories.is_empty() {
-            Some(latest_max_age_seconds()?)
-        } else {
-            None
-        };
-    let source = resolution_cache_source(inputs.exclude_newer, inputs.repositories)?;
+    let latest_max_age_seconds = if exclude_newer.is_none() || !repositories.is_empty() {
+        Some(latest_max_age_seconds()?)
+    } else {
+        None
+    };
+    let source = resolution_cache_source(exclude_newer, repositories)?;
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
-        inputs.dependencies,
-        inputs.repositories,
-        inputs.exclude_newer,
+        dependencies,
+        repositories,
+        exclude_newer,
         quarto,
         &rscript_identity,
         rscript_args,
@@ -76,7 +72,7 @@ pub(crate) fn paths(
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or("resolution cache marker path is not valid UTF-8")?;
-    let package_marker = inputs.dependencies.first().map(|primary_ref| {
+    let package_marker = dependencies.first().map(|primary_ref| {
         marker.with_file_name(format!("{marker_name}-primary-{}", sha256_hex(primary_ref)))
     });
 
@@ -453,11 +449,9 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            ResolutionInputs {
-                dependencies: &dependencies,
-                repositories: &[],
-                exclude_newer: None,
-            },
+            &dependencies,
+            &[],
+            None,
             default_quarto_flags(),
             None,
         )
@@ -470,11 +464,9 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            ResolutionInputs {
-                dependencies: &dependencies,
-                repositories: &[],
-                exclude_newer: None,
-            },
+            &dependencies,
+            &[],
+            None,
             default_quarto_flags(),
             None,
         )
@@ -488,11 +480,9 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            ResolutionInputs {
-                dependencies: &dependencies,
-                repositories: &[],
-                exclude_newer: None,
-            },
+            &dependencies,
+            &[],
+            None,
             default_quarto_flags(),
             None,
         )
@@ -518,11 +508,9 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            ResolutionInputs {
-                dependencies: &dependencies,
-                repositories: &[],
-                exclude_newer: Some("2026-06-01"),
-            },
+            &dependencies,
+            &[],
+            Some("2026-06-01"),
             default_quarto_flags(),
             None,
         )
@@ -533,11 +521,9 @@ mod tests {
             &cache_dir,
             rscript.as_os_str(),
             &[],
-            ResolutionInputs {
-                dependencies: &dependencies,
-                repositories: &[],
-                exclude_newer: Some("2026-06-01"),
-            },
+            &dependencies,
+            &[],
+            Some("2026-06-01"),
             default_quarto_flags(),
             Some(&dir.join("tool-store")),
         )
@@ -573,11 +559,9 @@ mod tests {
                     &cache_dir,
                     rscript.as_os_str(),
                     &[],
-                    ResolutionInputs {
-                        dependencies: &dependencies,
-                        repositories: &[],
-                        exclude_newer: Some("2026-06-01"),
-                    },
+                    &dependencies,
+                    &[],
+                    Some("2026-06-01"),
                     default_quarto_flags(),
                     None
                 )
@@ -604,11 +588,9 @@ mod tests {
                     &cache_dir,
                     rscript.as_os_str(),
                     &[],
-                    ResolutionInputs {
-                        dependencies: &dependencies,
-                        repositories: &[],
-                        exclude_newer: Some("2026-06-01"),
-                    },
+                    &dependencies,
+                    &[],
+                    Some("2026-06-01"),
                     default_quarto_flags(),
                     None
                 )

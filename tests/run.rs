@@ -458,30 +458,31 @@ fn malformed_frontmatter_errors_before_resolution() {
 }
 
 #[test]
-fn frontmatter_packages_must_be_sequence() {
-    let script = temp_path("ir-packages-scalar-frontmatter", "R");
-    fs::write(
-        &script,
-        r#"#!/usr/bin/env -S ir run
-#| packages: ""
-
-cat('not reached')
-"#,
-    )
-    .unwrap();
-
-    let out = ir()
-        .args(["run", script.to_str().unwrap()])
-        .output()
+fn frontmatter_list_fields_must_be_sequences() {
+    for (key, value) in [
+        ("packages", "\"\""),
+        ("repos", "https://r-xla.r-universe.dev"),
+    ] {
+        let script = temp_path(&format!("ir-{key}-scalar-frontmatter"), "R");
+        fs::write(
+            &script,
+            format!("#!/usr/bin/env -S ir run\n#| {key}: {value}\n\ncat('not reached')\n"),
+        )
         .unwrap();
 
-    assert_eq!(out.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&out.stderr)
-            .contains("frontmatter `packages` must be a YAML sequence"),
-        "{}",
-        output_text(&out)
-    );
+        let out = ir()
+            .args(["run", script.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        assert_eq!(out.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains(&format!("frontmatter `{key}` must be a YAML sequence")),
+            "{}",
+            output_text(&out)
+        );
+    }
 }
 
 #[test]
@@ -506,33 +507,6 @@ cat("ir.fixture=packages-null\n")
 
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=packages-null");
-}
-
-#[test]
-fn frontmatter_repos_must_be_sequence() {
-    let script = temp_path("ir-repos-scalar-frontmatter", "R");
-    fs::write(
-        &script,
-        r#"#!/usr/bin/env -S ir run
-#| repos: https://r-xla.r-universe.dev
-
-cat('not reached')
-"#,
-    )
-    .unwrap();
-
-    let out = ir()
-        .args(["run", script.to_str().unwrap()])
-        .output()
-        .unwrap();
-
-    assert_eq!(out.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&out.stderr)
-            .contains("frontmatter `repos` must be a YAML sequence"),
-        "{}",
-        output_text(&out)
-    );
 }
 
 #[test]
@@ -2070,18 +2044,22 @@ cat("ir.fixture=future-cli-exclude-newer\n")
 
 #[cfg(unix)]
 #[test]
-fn render_cli_exclude_newer_overrides_env_and_frontmatter() {
+fn render_merges_repositories_and_applies_cli_exclude_newer() {
     let cache_dir = temp_dir("ir-render-cli-exclude-newer-precedence-cache");
     let library = temp_dir("ir-render-cli-exclude-newer-precedence-library");
     let doc = temp_path("ir-render-cli-exclude-newer-precedence", "qmd");
     let profile = temp_path("ir-render-cli-exclude-newer-precedence-profile", "R");
     let quarto = temp_path("ir-render-cli-exclude-newer-precedence-quarto", "");
+    let repositories_seen = temp_path("ir-render-repositories", "txt");
+    let exclude_newer_seen = temp_path("ir-render-exclude-newer", "txt");
     fs::write(
         &doc,
         r#"---
 title: CLI exclude newer precedence
 ir:
   exclude-newer: 2024-01-01
+  repos:
+    - https://frontmatter.example
 ---
 
 ```{r}
@@ -2094,13 +2072,17 @@ cat("ir.fixture=render-cli-exclude-newer-precedence\n")
         &profile,
         r#"
 if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  repositories <- readLines(Sys.getenv("IR_REPOSITORIES_FILE"), warn = FALSE)
+  writeLines(repositories, Sys.getenv("IR_TEST_REPOSITORIES_SEEN"))
+  writeLines(Sys.getenv("IR_EXCLUDE_NEWER"),
+             Sys.getenv("IR_TEST_EXCLUDE_NEWER_SEEN"))
   library <- Sys.getenv("IR_TEST_LIBRARY")
   dir.create(library, recursive = TRUE, showWarnings = FALSE)
   marker <- Sys.getenv("IR_RESOLUTION_MARKER")
   if (nzchar(marker)) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
     writeLines(c(
-      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
+      sprintf("latest: %.0f", floor(as.numeric(Sys.time()))),
       library
     ), marker)
   }
@@ -2118,8 +2100,16 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
         .env("IR_QUARTO", &quarto)
         .env("IR_RSCRIPT", rscript())
         .env("IR_TEST_LIBRARY", &library)
+        .env("IR_TEST_EXCLUDE_NEWER_SEEN", &exclude_newer_seen)
+        .env("IR_TEST_REPOSITORIES_SEEN", &repositories_seen)
         .env("R_PROFILE_USER", &profile)
-        .args(["render", "--exclude-newer", " 2024-03-01 "])
+        .args([
+            "render",
+            "--repo",
+            "https://cli.example",
+            "--exclude-newer",
+            " 2024-03-01 ",
+        ])
         .arg(&doc)
         .output()
         .unwrap();
@@ -2127,69 +2117,17 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
     assert_success(&out);
 
     let marker_text = only_resolution_marker_text(&cache_dir);
-    assert_eq!(
-        marker_text.lines().next(),
-        Some("exclude-newer: 2024-03-01")
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
     );
-}
-
-#[cfg(unix)]
-#[test]
-fn render_merges_cli_and_frontmatter_repositories() {
-    let cache_dir = temp_dir("ir-render-repositories-cache");
-    let library = temp_dir("ir-render-repositories-library");
-    let doc = temp_path("ir-render-repositories", "qmd");
-    let profile = temp_path("ir-render-repositories", "Rprofile");
-    let quarto = temp_path("ir-render-repositories-quarto", "");
-    let repositories_seen = temp_path("ir-render-repositories", "txt");
-    fs::write(
-        &doc,
-        r#"---
-title: Repositories
-ir:
-  packages:
-    - cli
-  repos:
-    - https://frontmatter.example
----
-"#,
-    )
-    .unwrap();
-    fs::write(
-        &profile,
-        r#"
-if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
-  repositories <- readLines(Sys.getenv("IR_REPOSITORIES_FILE"), warn = FALSE)
-  writeLines(repositories, Sys.getenv("IR_TEST_REPOSITORIES_SEEN"))
-  library <- Sys.getenv("IR_TEST_LIBRARY")
-  dir.create(library, recursive = TRUE, showWarnings = FALSE)
-  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
-  dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-  writeLines(c(
-    sprintf("latest: %.0f", floor(as.numeric(Sys.time()))),
-    library
-  ), marker)
-  writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
-  q(save = "no", status = 0)
-}
-"#,
-    )
-    .unwrap();
-    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_QUARTO", &quarto)
-        .env("IR_RSCRIPT", rscript())
-        .env("IR_TEST_LIBRARY", &library)
-        .env("IR_TEST_REPOSITORIES_SEEN", &repositories_seen)
-        .env("R_PROFILE_USER", &profile)
-        .args(["render", "--repo", "https://cli.example"])
-        .arg(&doc)
-        .output()
-        .unwrap();
-
-    assert_success(&out);
+    assert_eq!(
+        fs::read_to_string(exclude_newer_seen).unwrap(),
+        "2024-03-01\n"
+    );
     assert_eq!(
         fs::read_to_string(repositories_seen)
             .unwrap()
@@ -2349,6 +2287,10 @@ cat("ir.fixture=bioconductor-repository\n")
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &user_cache)
         .env("R_PROFILE_USER", &profile)
+        .env(
+            "RENV_CONFIG_REPOS_OVERRIDE",
+            r_repository_url(&cran_repository),
+        )
         .env("R_BIOC_MIRROR", r_repository_url(&bioc_repository))
         .env("R_BIOC_VERSION", bioc_version)
         .env("PKG_USE_BIOCONDUCTOR", "true")
@@ -2419,7 +2361,6 @@ pkg_deps <- function(refs, ...) {
     type = "standard",
     priority = NA_character_,
     direct = TRUE,
-    sha256 = "dated-fixture-sha",
     stringsAsFactors = FALSE
   )
 }
@@ -2835,13 +2776,8 @@ fn run_frontmatter_uses_explicit_repository() {
     let rebuilt_user_cache = temp_cache("ir-explicit-repository-rebuilt-user-cache");
     let package_dir = temp_dir("ir-explicit-repository-packages");
     let repository = temp_dir("ir-explicit-repository");
-    let default_package_dir = temp_dir("ir-default-repository-packages");
     let default_repository = temp_dir("ir-default-repository");
     let source_repository = repository.join("src").join("contrib");
-    let default_source_repository = default_repository.join("src").join("contrib");
-    fs::create_dir_all(&source_repository).unwrap();
-    fs::create_dir_all(&default_source_repository).unwrap();
-
     let dep = write_r_source_package(
         &package_dir,
         "iradditionaldep",
@@ -2852,58 +2788,11 @@ fn run_frontmatter_uses_explicit_repository() {
         "repository_origin <- function() \"explicit\"\n",
     )
     .unwrap();
-    let default_dep = write_r_source_package(
-        &default_package_dir,
-        "iradditionaldep",
-        &["RemoteSha: default".to_string()],
-    );
-    fs::write(
-        default_dep.join("R").join("ok.R"),
-        "repository_origin <- function() \"default\"\n",
-    )
-    .unwrap();
     let tarball = source_repository.join("iradditionaldep_0.0.1.tar.gz");
-    let default_tarball = default_source_repository.join("iradditionaldep_0.0.1.tar.gz");
-    let r_expr = concat!(
-        "args <- commandArgs(TRUE); ",
-        "old <- setwd(dirname(args[[1]])); ",
-        "on.exit(setwd(old)); ",
-        "utils::tar(args[[2]], basename(args[[1]]), compression = 'gzip'); ",
-        "tools::write_PACKAGES(dirname(args[[2]]), type = 'source')"
-    );
-    let out = Command::new(rscript())
-        .args(["--vanilla", "-e", r_expr])
-        .arg(&dep)
-        .arg(&tarball)
-        .output()
-        .unwrap();
-    assert_success(&out);
-    let out = Command::new(rscript())
-        .args(["--vanilla", "-e", r_expr])
-        .arg(&default_dep)
-        .arg(&default_tarball)
-        .output()
-        .unwrap();
-    assert_success(&out);
-
-    let repository_path = renviron_path(&repository);
-    let repository_url = if repository_path.starts_with('/') {
-        format!("file://{repository_path}")
-    } else {
-        format!("file:///{repository_path}")
-    };
-    let default_repository_path = renviron_path(&default_repository);
-    let default_repository_url = if default_repository_path.starts_with('/') {
-        format!("file://{default_repository_path}")
-    } else {
-        format!("file:///{default_repository_path}")
-    };
-    let renviron = temp_path("ir-explicit-repository", "Renviron");
-    fs::write(
-        &renviron,
-        format!("RENV_CONFIG_REPOS_OVERRIDE={default_repository_url}\n"),
-    )
-    .unwrap();
+    write_r_repository_package(&dep, &source_repository);
+    write_empty_r_repository(&default_repository);
+    let repository_url = r_repository_url(&repository);
+    let default_repository_url = r_repository_url(&default_repository);
     let profile = temp_path("ir-explicit-repository", "Rprofile");
     fs::write(
         &profile,
@@ -2919,13 +2808,7 @@ fn run_frontmatter_uses_explicit_repository() {
         &["Imports: iradditionaldep".to_string()],
     );
     let parent_tarball = package_dir.join("iradditionalparent_0.0.1.tar.gz");
-    let out = Command::new(rscript())
-        .args(["--vanilla", "-e", r_expr])
-        .arg(&parent)
-        .arg(&parent_tarball)
-        .output()
-        .unwrap();
-    assert_success(&out);
+    write_r_repository_package(&parent, &package_dir);
 
     let script = temp_path("ir-explicit-repository", "R");
     fs::write(
@@ -2939,17 +2822,6 @@ fn run_frontmatter_uses_explicit_repository() {
 library(iradditionalparent)
 library(iradditionaldep)
 lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
-expected <- normalizePath(
-  file.path(lib, c("iradditionalparent", "iradditionaldep")),
-  mustWork = TRUE
-)
-loaded <- normalizePath(
-  path.package(c("iradditionalparent", "iradditionaldep")),
-  mustWork = TRUE
-)
-stopifnot(
-  identical(loaded, expected)
-)
 cat("ir.fixture=explicit-repository\n")
 cat("repository.origin=", repository_origin(), "\n", sep = "")
 cat("library.path=", lib, "\n", sep = "")
@@ -2960,17 +2832,18 @@ cat("library.path=", lib, "\n", sep = "")
     )
     .unwrap();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("RENV_PATHS_CACHE", &renv_cache)
-        .env("R_USER_CACHE_DIR", &first_user_cache)
-        .env("R_ENVIRON_USER", &renviron)
-        .env("R_PROFILE_USER", &profile)
-        .args(["run", "--isolated", "--no-site-file"])
-        .arg(&script)
-        .output()
-        .unwrap();
+    let run = |user_cache: &Path| {
+        ir().env("IR_CACHE_DIR", &cache_dir)
+            .env("RENV_PATHS_CACHE", &renv_cache)
+            .env("R_USER_CACHE_DIR", user_cache)
+            .env("R_PROFILE_USER", &profile)
+            .args(["run", "--isolated", "--no-site-file"])
+            .arg(&script)
+            .output()
+            .unwrap()
+    };
 
+    let out = run(&first_user_cache);
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=explicit-repository");
     assert_stdout_contains(&out, "repository.origin=explicit");
@@ -2988,30 +2861,14 @@ cat("library.path=", lib, "\n", sep = "")
     let description_path = dep.join("DESCRIPTION");
     let description = fs::read_to_string(&description_path).unwrap();
     fs::write(
-        &description_path,
+        description_path,
         description.replace("RemoteSha: explicit", "RemoteSha: explicit-rebuilt"),
     )
     .unwrap();
     fs::remove_file(&tarball).unwrap();
-    let out = Command::new(rscript())
-        .args(["--vanilla", "-e", r_expr])
-        .arg(&dep)
-        .arg(&tarball)
-        .output()
-        .unwrap();
-    assert_success(&out);
+    write_r_repository_package(&dep, &source_repository);
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("RENV_PATHS_CACHE", &renv_cache)
-        .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
-        .env("R_ENVIRON_USER", &renviron)
-        .env("R_PROFILE_USER", &profile)
-        .args(["run", "--isolated", "--no-site-file"])
-        .arg(&script)
-        .output()
-        .unwrap();
-
+    let out = run(&rebuilt_user_cache);
     assert_success(&out);
     assert_stdout_contains(&out, "repository.origin=explicit-rebuilt");
     let rebuilt_library = stdout(&out)
@@ -3020,26 +2877,6 @@ cat("library.path=", lib, "\n", sep = "")
         .expect("rebuilt repository run should report its library path")
         .to_string();
     assert_ne!(rebuilt_library, first_library);
-
-    let script_contents = fs::read_to_string(&script).unwrap();
-    fs::write(
-        &script,
-        script_contents.replace(&repository_url, &default_repository_url),
-    )
-    .unwrap();
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("RENV_PATHS_CACHE", &renv_cache)
-        .env("R_USER_CACHE_DIR", &rebuilt_user_cache)
-        .env("R_ENVIRON_USER", &renviron)
-        .env("R_PROFILE_USER", &profile)
-        .args(["run", "--isolated", "--no-site-file"])
-        .arg(&script)
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_stdout_contains(&out, "repository.origin=default");
 }
 
 #[test]

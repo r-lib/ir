@@ -34,7 +34,7 @@ const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
 pub(crate) fn cmd_run(
     source: &RunSource,
     rscript_args: &[String],
-    dependencies: DependencyArgs<'_>,
+    with_deps: &[String],
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
     script_args: &[String],
@@ -46,9 +46,8 @@ pub(crate) fn cmd_run(
         snapshots.exclude_newer,
         snapshots.python_exclude_newer,
     )?;
-    spec.dependencies
-        .extend(dependencies.with_deps.iter().cloned());
-    let mut selected_repositories = dependencies.repositories.to_vec();
+    spec.dependencies.extend(with_deps.iter().cloned());
+    let mut selected_repositories = snapshots.repositories.to_vec();
     selected_repositories.append(&mut spec.repositories);
     spec.repositories = selected_repositories;
     let isolated = isolated || spec.isolated;
@@ -75,7 +74,7 @@ pub(crate) fn cmd_run(
 pub(crate) fn cmd_quarto(
     command: QuartoCommand,
     source: &QuartoSource,
-    dependencies: DependencyArgs<'_>,
+    with_deps: &[String],
     r_selection: RSelectionArgs<'_>,
     snapshots: SnapshotArgs<'_>,
     quarto_args: &[String],
@@ -87,9 +86,8 @@ pub(crate) fn cmd_quarto(
         snapshots.exclude_newer,
         snapshots.python_exclude_newer,
     )?;
-    spec.dependencies
-        .extend(dependencies.with_deps.iter().cloned());
-    let mut selected_repositories = dependencies.repositories.to_vec();
+    spec.dependencies.extend(with_deps.iter().cloned());
+    let mut selected_repositories = snapshots.repositories.to_vec();
     selected_repositories.append(&mut spec.repositories);
     spec.repositories = selected_repositories;
     spec.quarto_render = true;
@@ -122,12 +120,8 @@ pub(crate) struct RSelectionArgs<'a> {
     pub(crate) rscript: Option<&'a str>,
 }
 
-pub(crate) struct DependencyArgs<'a> {
-    pub(crate) with_deps: &'a [String],
-    pub(crate) repositories: &'a [String],
-}
-
 pub(crate) struct SnapshotArgs<'a> {
+    pub(crate) repositories: &'a [String],
     pub(crate) exclude_newer: Option<&'a str>,
     pub(crate) python_exclude_newer: Option<&'a str>,
 }
@@ -369,11 +363,9 @@ fn resolve_library_inner(
         cache_dir,
         rscript,
         rscript_args,
-        resolve_cache::ResolutionInputs {
-            dependencies: &dependencies,
-            repositories: &repositories,
-            exclude_newer: spec.exclude_newer.as_deref(),
-        },
+        &dependencies,
+        &repositories,
+        spec.exclude_newer.as_deref(),
         resolve_cache::QuartoCacheFlags {
             render: spec.quarto_render,
             reticulate: spec.quarto_reticulate,
@@ -480,7 +472,6 @@ fn resolve_library_inner(
             .env_remove("IR_QUARTO_RETICULATE")
             .env_remove("IR_EXCLUDE_NEWER")
             .env_remove("IR_REPOSITORIES_FILE")
-            .env_remove("RENV_CONFIG_REPOS_OVERRIDE")
             .env_remove("IR_PYTHON_RESULT_FILE")
             .env_remove("IR_PYTHON_PACKAGES_FILE")
             .env_remove("IR_PYTHON_VERSION")

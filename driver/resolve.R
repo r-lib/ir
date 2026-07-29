@@ -5,7 +5,7 @@
 #   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
 # Responsibilities (steps 1-4 of the `ir` pipeline):
-#   1. Consume package refs from stdin and explicit repository specs from
+#   1. Consume package refs from stdin and repository specs from
 #      IR_REPOSITORIES_FILE.
 #   2. Resolve dependencies with pak.
 #   3. Hash the install refs to derive a content-addressed library path under
@@ -108,8 +108,7 @@ ir_resolve_repositories <- function(specs) {
   stopifnot(is.character(specs), all(nzchar(specs)))
   if (!length(specs)) return(character())
 
-  # A repository specification may expand to multiple URLs. Flatten each
-  # result in specification order, then retain the first occurrence.
+  # Specs may expand to multiple URLs; preserve order and first occurrence.
   repositories <- unlist(
     lapply(specs, function(spec) unname(ir_repo_resolve(spec))),
     use.names = FALSE
@@ -299,9 +298,10 @@ ir_resolved_content_specs <- function(res) {
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
-  # R startup files can restore this after the parent process removes it.
-  # The repositories selected by IR must also remain authoritative for renv.
+  # R startup files can set this after the parent process launches R.
+  # pak's effective repository set is authoritative for renv.
   Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+
   # renv currently drops exact package versions when its pak integration is
   # enabled: https://github.com/rstudio/renv/issues/2341
   options(renv.config.pak.enabled = FALSE)
@@ -461,7 +461,7 @@ ir_resolve_main <- function() {
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
-    content_specs <- character()
+    library_specs <- character()
     has_source_ref <- FALSE
   } else {
     # Drop base / recommended packages: those are supplied by R itself.
@@ -469,16 +469,19 @@ ir_resolve_main <- function() {
     res <- res[keep, , drop = FALSE]
     pkgs     <- res$package
     install_specs <- ir_install_specs(res)
-    content_specs <- ir_resolved_content_specs(res)
+    library_specs <- if (length(repository_specs))
+      ir_resolved_content_specs(res)
+    else
+      install_specs
     has_source_ref <- any(!ir_is_standard_resolved_ref(res))
   }
 
-  ## 3. Hash resolved content identities -> content-addressed library path
+  ## 3. Hash resolved packages -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
-  # Explicit repositories also distinguish packages that share a name and
-  # version but contain different builds.
-  key <- paste(c(content_specs,
+  # For live explicit repositories, include artifact identities so same-version
+  # rebuilds do not reuse stale libraries.
+  key <- paste(c(library_specs,
                  paste0("repo: ", repository_specs),
                  as.character(getRversion()),
                  R.version$platform),

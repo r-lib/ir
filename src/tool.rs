@@ -1392,19 +1392,14 @@ fn launcher_target_path(bin_dir: &Path, name: &str) -> PathBuf {
 }
 
 fn repository_recovery_spec(repository: &str) -> String {
-    let Some(scheme_end) = repository.find("://") else {
+    let Some((scheme, remainder)) = repository.split_once("://") else {
         return repository.to_string();
     };
-    let scheme = &repository[..scheme_end];
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
         return repository.to_string();
     }
 
-    let prefix_end = scheme_end + "://".len();
-    let prefix = &repository[..prefix_end];
-    let remainder = &repository[prefix_end..];
-    let remainder_end = remainder.find(['?', '#']).unwrap_or(remainder.len());
-    let remainder = &remainder[..remainder_end];
+    let remainder = remainder.split(['?', '#']).next().unwrap_or(remainder);
     let (authority, path) = remainder
         .find('/')
         .map_or((remainder, ""), |index| remainder.split_at(index));
@@ -1412,7 +1407,7 @@ fn repository_recovery_spec(repository: &str) -> String {
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
 
-    format!("{prefix}{authority}{path}")
+    format!("{scheme}://{authority}{path}")
 }
 
 fn tool_install_recovery_command(install: &ToolInstallArgs, rscript: &OsStr) -> String {

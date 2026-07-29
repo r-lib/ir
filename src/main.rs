@@ -67,15 +67,13 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_run(
                 &run.source,
                 &run.rscript_args,
-                runtime::DependencyArgs {
-                    with_deps: &run.with_deps,
-                    repositories: &run.repositories,
-                },
+                &run.with_deps,
                 runtime::RSelectionArgs {
                     r_requirement: run.r_requirement.as_deref(),
                     rscript: run.rscript.as_deref(),
                 },
                 runtime::SnapshotArgs {
+                    repositories: &run.repositories,
                     exclude_newer: run.exclude_newer.as_deref(),
                     python_exclude_newer: run.python_exclude_newer.as_deref(),
                 },
@@ -88,15 +86,13 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_quarto(
                 quarto::QuartoCommand::Render,
                 &render.source,
-                runtime::DependencyArgs {
-                    with_deps: &render.with_deps,
-                    repositories: &render.repositories,
-                },
+                &render.with_deps,
                 runtime::RSelectionArgs {
                     r_requirement: render.r_requirement.as_deref(),
                     rscript: render.rscript.as_deref(),
                 },
                 runtime::SnapshotArgs {
+                    repositories: &render.repositories,
                     exclude_newer: render.exclude_newer.as_deref(),
                     python_exclude_newer: render.python_exclude_newer.as_deref(),
                 },
@@ -112,15 +108,13 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             runtime::cmd_quarto(
                 quarto::QuartoCommand::Preview,
                 &preview.source,
-                runtime::DependencyArgs {
-                    with_deps: &preview.with_deps,
-                    repositories: &preview.repositories,
-                },
+                &preview.with_deps,
                 runtime::RSelectionArgs {
                     r_requirement: preview.r_requirement.as_deref(),
                     rscript: preview.rscript.as_deref(),
                 },
                 runtime::SnapshotArgs {
+                    repositories: &preview.repositories,
                     exclude_newer: preview.exclude_newer.as_deref(),
                     python_exclude_newer: preview.python_exclude_newer.as_deref(),
                 },

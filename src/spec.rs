@@ -135,6 +135,7 @@ fn frontmatter_repositories(
     doc: &Yaml<'_>,
     key_prefix: &str,
 ) -> Result<Vec<String>, Box<dyn Error>> {
+    let key = frontmatter_key(key_prefix, "repos");
     let Some(value) = doc.as_mapping_get("repos") else {
         return Ok(Vec::new());
     };
@@ -143,26 +144,17 @@ fn frontmatter_repositories(
     }
 
     let Some(seq) = value.as_vec() else {
-        return Err(format!(
-            "frontmatter `{}` must be a YAML sequence",
-            frontmatter_key(key_prefix, "repos")
-        )
-        .into());
+        return Err(format!("frontmatter `{key}` must be a YAML sequence").into());
     };
     let mut repositories = Vec::new();
     for item in seq {
         let Some(value) = item.as_str() else {
-            return Err(format!(
-                "frontmatter `{}` entries must be strings",
-                frontmatter_key(key_prefix, "repos")
-            )
-            .into());
+            return Err(format!("frontmatter `{key}` entries must be strings").into());
         };
         let value = value.trim();
         if value.is_empty() || value.contains(['\r', '\n']) {
             return Err(format!(
-                "frontmatter `{}` entries must be non-empty single-line strings",
-                frontmatter_key(key_prefix, "repos")
+                "frontmatter `{key}` entries must be non-empty single-line strings"
             )
             .into());
         }

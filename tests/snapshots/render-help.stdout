@@ -8,7 +8,7 @@ Arguments:
 
 Options:
       --with <PKG>                   Add a dependency for this render; may be repeated
-      --repo <REPO>                  Add a CRAN-like R package repository for this render; may be repeated
+      --repo <REPO>                  Add a CRAN-like R package repository; may be repeated
       --r-version <SPEC>             Select the R version for this render with rig
       --rscript <RSCRIPT>            Select the Rscript executable
       --exclude-newer <DATE>         Use this date for default CRAN and Bioconductor PPM snapshots
