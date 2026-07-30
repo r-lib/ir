@@ -20,8 +20,9 @@ A mixed local/network graph follows the network policy; use `--refresh` to pick 
 Python environments use separate cache markers that record the resolved Python executable path.
 If the recorded Python path no longer exists, `ir` resolves the Python environment again.
 
-Resolution graphs with no network-backed pak source, or with any pak query modifier, skip the resolution-marker cache.
+Nonempty resolution graphs with no network-backed pak source, or with any pak query modifier, skip the resolution-marker cache.
 Each invocation asks pak to resolve local-only graphs again, so local changes and explicit cache-control modifiers are not hidden behind a warm marker.
+Empty dependency graphs remain cacheable because they have no package source to invalidate.
 
 Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
 Scripts or tools that resolve to the same install refs share one library.

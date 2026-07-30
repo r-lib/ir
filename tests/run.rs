@@ -1903,24 +1903,16 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")) ||
         marker
     };
     let markers = [only_marker("resolutions"), only_marker("python")];
-    let mut observed_same_second = false;
-    for _ in 0..10 {
-        let before = resolver_probe_count(&resolver_runs);
-        let created_at = current_utc_seconds();
-        for marker in &markers {
-            let contents = fs::read_to_string(marker).unwrap();
-            let (_, value) = contents.split_once('\n').unwrap();
-            fs::write(marker, format!("latest: {created_at}\n{value}")).unwrap();
-        }
-        let out = invoke(false, None, Some("0"), false);
-        assert_success(&out);
-        if current_utc_seconds() == created_at {
-            assert_eq!(resolver_probe_count(&resolver_runs), before + 1);
-            observed_same_second = true;
-            break;
-        }
+    let before = resolver_probe_count(&resolver_runs);
+    let created_at = current_utc_seconds();
+    for marker in &markers {
+        let contents = fs::read_to_string(marker).unwrap();
+        let (_, value) = contents.split_once('\n').unwrap();
+        fs::write(marker, format!("latest: {created_at}\n{value}")).unwrap();
     }
-    assert!(observed_same_second);
+    let out = invoke(false, None, Some("0"), false);
+    assert_success(&out);
+    assert_eq!(resolver_probe_count(&resolver_runs), before + 1);
 
     let failed = invoke(true, None, None, true);
     assert!(!failed.status.success(), "{}", output_text(&failed));
