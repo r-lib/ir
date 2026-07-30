@@ -1884,16 +1884,18 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")) ||
 
     let out = invoke(false, None, None, true);
     assert_success(&out);
-    assert_eq!(fs::read_to_string(&resolver_runs).unwrap(), "normal\n");
+    let runs = fs::read_to_string(&resolver_runs).unwrap();
+    assert_eq!(runs.lines().collect::<Vec<_>>(), ["normal"]);
 
     let out = invoke(true, None, None, false);
     assert_success(&out);
 
     let out = invoke(false, Some("1"), None, false);
     assert_success(&out);
+    let runs = fs::read_to_string(&resolver_runs).unwrap();
     assert_eq!(
-        fs::read_to_string(&resolver_runs).unwrap(),
-        "normal\nrefresh\nrefresh\n"
+        runs.lines().collect::<Vec<_>>(),
+        ["normal", "refresh", "refresh"]
     );
 
     let only_marker = |name: &str| {
