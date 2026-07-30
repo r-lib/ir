@@ -24,6 +24,7 @@ Render the document with the `render` subcommand:
 $ ir render report.qmd
 $ ir render report.qmd --to pdf
 $ ir render --exclude-newer 2024-02-01 report.qmd
+$ ir render --refresh report.qmd
 $ ir render --vanilla report.qmd
 ```
 

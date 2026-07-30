@@ -692,6 +692,126 @@ printf 'path_first=%s\\n' \"${{PATH%%:*}}\"\n",
 
 #[cfg(unix)]
 #[test]
+fn run_python_resolution_cache_reuses_until_refreshed_or_max_age_is_zero() {
+    let cache_dir = temp_dir("ir-run-refresh-python-cache");
+    let bin_dir = temp_dir("ir-run-refresh-python-bin");
+    let script = temp_path("ir-run-refresh-python", "R");
+    let fake_python = bin_dir.join("python");
+    let rscript = bin_dir.join("Rscript");
+    let python_resolutions = temp_path("ir-run-refresh-python-resolutions", "txt");
+
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| python-version: "3.11"
+
+cat("ignored\n")
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_python, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+    printf 'python\\n' >> {}\n\
+    printf '%s\\n' {} > \"$IR_PYTHON_RESULT_FILE\"\n\
+  fi\n\
+  exit 0\n\
+fi\n\
+printf 'ir.fixture=refresh-python\\n'\n",
+            python_resolutions.display(),
+            fake_python.display()
+        ),
+    );
+
+    let invoke = |refresh: bool, latest_max_age: Option<&str>| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", &cache_dir)
+            .arg("run")
+            .arg("--rscript")
+            .arg(&rscript);
+        if refresh {
+            command.arg("--refresh");
+        }
+        if let Some(latest_max_age) = latest_max_age {
+            command.env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", latest_max_age);
+        } else {
+            command.env_remove("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS");
+        }
+        command.arg(&script);
+        remove_uv_resolver_env(&mut command);
+        command.output().unwrap()
+    };
+
+    let out = invoke(false, None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=refresh-python");
+
+    let out = invoke(false, None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=refresh-python");
+    assert_eq!(fs::read_to_string(&python_resolutions).unwrap(), "python\n");
+
+    let out = invoke(true, None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=refresh-python");
+    assert_eq!(
+        fs::read_to_string(&python_resolutions).unwrap(),
+        "python\npython\n"
+    );
+
+    let python_dir = cache_dir.join("python");
+    let markers = fs::read_dir(&python_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", python_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker = &markers[0];
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let python = marker_text.lines().nth(1).unwrap().to_string();
+    let mut observed_same_second = false;
+    for _ in 0..10 {
+        let resolutions_before = fs::read_to_string(&python_resolutions)
+            .unwrap()
+            .lines()
+            .count();
+        let created_at = current_utc_seconds();
+        fs::write(marker, format!("latest: {created_at}\n{python}\n"))
+            .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+        let out = invoke(false, Some("0"));
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=refresh-python");
+        let resolutions_after = fs::read_to_string(&python_resolutions)
+            .unwrap()
+            .lines()
+            .count();
+        if current_utc_seconds() == created_at {
+            assert_eq!(
+                resolutions_after,
+                resolutions_before + 1,
+                "a zero latest-resolution max age should re-resolve Python even when the marker was written during the same second"
+            );
+            observed_same_second = true;
+            break;
+        }
+    }
+    assert!(
+        observed_same_second,
+        "could not observe a Python cache check within one UTC second after 10 attempts"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn run_python_version_only_writes_empty_package_file_and_clears_pythonhome() {
     let cache_dir = temp_dir("ir-run-python-version-only-cache");
     let bin_dir = temp_dir("ir-run-python-version-only-bin");
@@ -1763,16 +1883,16 @@ fn run_inline_expression_forwards_option_like_args_after_expr() {
             "--vanilla",
             "-e",
             "cat('inline.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = '')",
-            "--script-flag",
+            "--refresh",
             "value",
         ])
         .output()
         .unwrap();
 
     assert_success(&out);
-    assert_stdout_contains(&out, "inline.args=--script-flag|value");
+    assert_stdout_contains(&out, "inline.args=--refresh|value");
     assert!(
-        !output_text(&out).contains("unknown option '--script-flag'"),
+        !output_text(&out).contains("unknown option '--refresh'"),
         "{}",
         output_text(&out)
     );
@@ -1800,6 +1920,212 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
         .count();
 
     assert_eq!(resolution_count, 1);
+}
+
+#[test]
+fn run_remote_ref_reuses_resolution_cache_until_refreshed_or_max_age_is_zero() {
+    let cache_dir = temp_dir("ir-remote-ref-refresh-cache");
+    let library = temp_dir("ir-remote-ref-refresh-library");
+    let profile = temp_path("ir-remote-ref-refresh-profile", "R");
+    let resolver_runs = temp_path("ir-remote-ref-refresh-runs", "txt");
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  refresh <- if (nzchar(Sys.getenv("IR_REFRESH"))) "refresh" else "normal"
+  cat(refresh, "\n", file = Sys.getenv("IR_TEST_RESOLVER_RUNS"), append = TRUE)
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  if (!nzchar(marker)) {
+    stop("remote refs should receive a resolution marker", call. = FALSE)
+  }
+  dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(
+    paste("latest:", floor(as.numeric(Sys.time()))),
+    Sys.getenv("IR_TEST_LIBRARY")
+  ), marker)
+  writeLines(Sys.getenv("IR_TEST_LIBRARY"), Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+
+    let invoke = |flag: bool, refresh_env: Option<&str>, latest_max_age: Option<&str>| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_RSCRIPT", rscript())
+            .env("IR_TEST_LIBRARY", &library)
+            .env("IR_TEST_RESOLVER_RUNS", &resolver_runs)
+            .env("R_PROFILE_USER", &profile)
+            .arg("run");
+        if flag {
+            command.arg("--refresh");
+        }
+        if let Some(refresh_env) = refresh_env {
+            command.env("IR_REFRESH", refresh_env);
+        } else {
+            command.env_remove("IR_REFRESH");
+        }
+        if let Some(latest_max_age) = latest_max_age {
+            command.env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", latest_max_age);
+        } else {
+            command.env_remove("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS");
+        }
+        command
+            .args([
+                "--exclude-newer",
+                "2024-06-01",
+                "--with",
+                "github::example/pkg@main",
+                "--vanilla",
+                "-e",
+                "cat('ir.fixture=remote-ref-refresh\\n')",
+            ])
+            .output()
+            .unwrap()
+    };
+
+    let out = invoke(false, None, None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=remote-ref-refresh");
+
+    let out = invoke(false, Some(""), None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=remote-ref-refresh");
+    assert_eq!(fs::read_to_string(&resolver_runs).unwrap(), "normal \n");
+
+    let out = invoke(true, None, None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=remote-ref-refresh");
+    assert_eq!(
+        fs::read_to_string(&resolver_runs).unwrap(),
+        "normal \nrefresh \n"
+    );
+
+    let out = invoke(false, Some("1"), None);
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=remote-ref-refresh");
+    assert_eq!(
+        fs::read_to_string(&resolver_runs).unwrap(),
+        "normal \nrefresh \nrefresh \n"
+    );
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker = &markers[0];
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let resolved_library = marker_text.lines().nth(1).unwrap().to_string();
+    let mut observed_same_second = false;
+    for _ in 0..10 {
+        let resolutions_before = fs::read_to_string(&resolver_runs).unwrap().lines().count();
+        let created_at = current_utc_seconds();
+        fs::write(
+            marker,
+            format!("latest: {created_at}\n{resolved_library}\n"),
+        )
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+        let out = invoke(false, None, Some("0"));
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=remote-ref-refresh");
+        let resolutions_after = fs::read_to_string(&resolver_runs).unwrap().lines().count();
+        if current_utc_seconds() == created_at {
+            assert_eq!(
+                resolutions_after,
+                resolutions_before + 1,
+                "a zero latest-resolution max age should re-resolve R dependencies even when the marker was written during the same second"
+            );
+            observed_same_second = true;
+            break;
+        }
+    }
+    assert!(
+        observed_same_second,
+        "could not observe an R cache check within one UTC second after 10 attempts"
+    );
+}
+
+#[test]
+fn run_refresh_replaces_a_fresh_resolution_marker() {
+    let cache_dir = temp_dir("ir-explicit-refresh-cache");
+    let expr = "cat('ir.fixture=explicit-refresh\\n')";
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["run", "--isolated", "--vanilla", "-e", expr])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=explicit-refresh");
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let markers = fs::read_dir(&resolution_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    let marker = &markers[0];
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let library = marker_text.lines().nth(1).unwrap();
+    let previous_created_at = current_utc_seconds() - 60;
+    let previous_marker = format!("latest: {previous_created_at}\n{library}\n");
+    fs::write(marker, &previous_marker)
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", marker.display()));
+
+    let failing_profile = temp_path("ir-explicit-refresh-failing-profile", "R");
+    fs::write(
+        &failing_profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  stop("intentional refresh failure", call. = FALSE)
+}
+"#,
+    )
+    .unwrap();
+    let failed = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &failing_profile)
+        .args(["run", "--refresh", "--isolated", "--vanilla", "-e", expr])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success(), "{}", output_text(&failed));
+    assert_eq!(fs::read_to_string(marker).unwrap(), previous_marker);
+
+    let cached = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &failing_profile)
+        .args(["run", "--isolated", "--vanilla", "-e", expr])
+        .output()
+        .unwrap();
+    assert_success(&cached);
+    assert_stdout_contains(&cached, "ir.fixture=explicit-refresh");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", "3600")
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--refresh", "--isolated", "--vanilla", "-e", expr])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=explicit-refresh");
+
+    let marker_text = fs::read_to_string(marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", marker.display()));
+    let refreshed_at = marker_text
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("latest: "))
+        .and_then(|timestamp| timestamp.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("{} should record a latest timestamp", marker.display()));
+    assert!(refreshed_at > previous_created_at);
 }
 
 #[test]
@@ -2590,6 +2916,14 @@ cat("github.remote=", paste(
     assert_stdout_contains(
         &out,
         "github.remote=github/r-lib/pkgdepends/tests/testthat/fixtures/foo",
+    );
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
     );
 }
 

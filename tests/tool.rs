@@ -101,6 +101,7 @@ fn rx_preserves_quickstart_package_shorthand() {
         concat!(
             "#!/bin/sh\n",
             "if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n",
+            "  if [ \"${IR_REFRESH:-}\" != \"1\" ]; then exit 1; fi\n",
             "  cat >/dev/null\n",
             "  printf '%s\\n' \"$IR_TEST_LIBRARY\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
             "  printf '%s\\n' quickstart > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",
@@ -114,7 +115,7 @@ fn rx_preserves_quickstart_package_shorthand() {
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_TEST_LIBRARY", &library)
         .env("IR_RSCRIPT", &rscript)
-        .args(["quickstart", "--help"])
+        .args(["--refresh", "quickstart", "--help"])
         .output()
         .unwrap();
 
@@ -1847,7 +1848,7 @@ cat("stats.attached=", tolower("package:stats" %in% search()), "\n", sep = "")
 
 #[cfg(unix)]
 #[test]
-fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
+fn tool_install_warm_resolution_cache_skips_rscript_unless_refreshed() {
     let cache_dir = temp_dir("ir-warm-tool-install-cache");
     let bin_dir = temp_dir("ir-warm-tool-install-bin");
     let rscript = rscript();
@@ -1894,6 +1895,32 @@ fn tool_install_warm_resolution_cache_skips_resolver_rscript() {
 
     assert_success(&cached);
     assert_stdout_contains(&cached, "Installed");
+
+    let refreshed = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "tool",
+            "install",
+            "--refresh",
+            "--force",
+            "--with",
+            "docopt,pkgsearch,prettyunits",
+            "--bin-dir",
+        ])
+        .arg(&bin_dir)
+        .arg("cli")
+        .output()
+        .unwrap();
+
+    assert!(!refreshed.status.success(), "{}", output_text(&refreshed));
+    assert!(
+        String::from_utf8_lossy(&refreshed.stderr)
+            .contains("resolver Rscript should not be launched"),
+        "{}",
+        output_text(&refreshed)
+    );
 }
 
 #[cfg(unix)]

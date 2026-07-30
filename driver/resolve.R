@@ -177,16 +177,21 @@ ir_latest_resolution_max_age_seconds <- function() {
 }
 
 ir_marker_source <- function(exclude_newer,
+                             time_bounded = is.null(exclude_newer),
                              created_at = ir_current_utc_seconds()) {
-  if (is.null(exclude_newer))
+  if (time_bounded)
     sprintf("latest: %.0f", floor(created_at))
   else
     sprintf("exclude-newer: %s", exclude_newer)
 }
 
-ir_marker_source_current <- function(source, exclude_newer) {
-  if (!is.null(exclude_newer))
-    return(identical(source, ir_marker_source(exclude_newer)))
+ir_marker_source_current <- function(source, exclude_newer,
+                                     time_bounded = is.null(exclude_newer)) {
+  if (!time_bounded)
+    return(identical(source, ir_marker_source(exclude_newer, FALSE)))
+
+  max_age_seconds <- ir_latest_resolution_max_age_seconds()
+  if (max_age_seconds == 0) return(FALSE)
 
   if (!startsWith(source, "latest: ")) return(FALSE)
   created_at <- suppressWarnings(as.numeric(sub("^latest: ", "", source)))
@@ -194,7 +199,7 @@ ir_marker_source_current <- function(source, exclude_newer) {
 
   now <- ir_current_utc_seconds()
   if (created_at > now) return(FALSE)
-  now - created_at <= ir_latest_resolution_max_age_seconds()
+  now - created_at <= max_age_seconds
 }
 
 ir_is_standard_input_ref <- function(ref) {
@@ -208,8 +213,42 @@ ir_is_standard_input_ref <- function(ref) {
         ref)
 }
 
-ir_has_nonstandard_input_ref <- function(refs) {
-  any(!vapply(refs, ir_is_standard_input_ref, logical(1)))
+ir_input_ref_without_package_name <- function(ref) {
+  sub(paste0("^",
+             "[[:alpha:]]([[:alnum:].]*[[:alnum:]])?",
+             "="),
+      "", ref)
+}
+
+ir_is_local_input_ref <- function(ref) {
+  ref <- tolower(ref)
+  identical(ref, ".") ||
+    grepl("^(local|deps|installed|any)::", ref) ||
+    grepl("^(url::)?file:", ref) ||
+    grepl("^[./\\\\~]", ref) ||
+    grepl("^[[:alpha:]]:[/\\\\]", ref)
+}
+
+ir_is_remote_input_ref <- function(ref) {
+  stopifnot(length(ref) == 1L)
+
+  ref <- trimws(ref)
+  if (grepl("?", ref, fixed = TRUE) || ir_is_standard_input_ref(ref))
+    return(FALSE)
+
+  ref <- ir_input_ref_without_package_name(ref)
+  lower <- tolower(ref)
+  if (ir_is_local_input_ref(lower)) return(FALSE)
+
+  grepl("^(github|gitlab|bitbucket|git|url)::", lower) ||
+    (grepl("://", ref, fixed = TRUE) && !startsWith(lower, "file:")) ||
+    (grepl("/", ref, fixed = TRUE) &&
+       !grepl("[[:space:]\\\\]", ref) &&
+       !grepl("^[./~]", ref))
+}
+
+ir_is_cacheable_input_ref <- function(ref) {
+  ir_is_standard_input_ref(ref) || ir_is_remote_input_ref(ref)
 }
 
 ir_is_standard_resolved_ref <- function(res) {
@@ -304,8 +343,14 @@ ir_resolve_main <- function() {
   ## written only after a successful materialise (below), so its presence implies
   ## a complete library.
   primary_ref <- if (length(deps)) deps[[1L]] else NULL
-  cache_resolution <- !ir_has_nonstandard_input_ref(deps)
-  marker <- ir_env_optional("IR_RESOLUTION_MARKER")
+  remote_resolution <- any(vapply(deps, ir_is_remote_input_ref, logical(1)))
+  cache_resolution <- all(vapply(deps, ir_is_cacheable_input_ref, logical(1)))
+  time_bounded_resolution <- is.null(exclude_newer) || remote_resolution
+  refresh <- !is.null(ir_env_optional("IR_REFRESH"))
+  marker <- if (cache_resolution)
+    ir_env_optional("IR_RESOLUTION_MARKER")
+  else
+    NULL
   if (is.null(marker) && cache_resolution) {
     marker <- file.path(cache_dir, "resolutions",
                         ir_input_key(deps, exclude_newer = exclude_newer,
@@ -322,10 +367,11 @@ ir_resolve_main <- function() {
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!is.null(marker) && file.exists(marker)) {
+  if (!refresh && !is.null(marker) && file.exists(marker)) {
     cached <- readLines(marker, n = 2L, warn = FALSE)
     if (length(cached) >= 2L &&
-        ir_marker_source_current(cached[[1L]], exclude_newer) &&
+        ir_marker_source_current(cached[[1L]], exclude_newer,
+                                 time_bounded_resolution) &&
         nzchar(cached[[2L]]) &&
         dir.exists(cached[[2L]])) {
       if (!is.null(package_result_file) &&
@@ -430,7 +476,9 @@ ir_resolve_main <- function() {
   ## 4b. Record the resolution so an identical request skips pak.
   if (!is.null(marker)) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
+    writeLines(c(ir_marker_source(exclude_newer, time_bounded_resolution),
+                 library_path),
+               marker)
   }
   if (!is.null(primary_package) && !is.null(package_marker)) {
     writeLines(primary_package, package_marker)

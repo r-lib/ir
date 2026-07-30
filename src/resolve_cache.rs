@@ -30,6 +30,12 @@ pub(crate) struct QuartoCacheFlags {
     pub(crate) reticulate: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Freshness {
+    Registry,
+    Remote,
+}
+
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
@@ -39,23 +45,26 @@ pub(crate) fn paths(
     quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
-    if !dependencies
-        .iter()
-        .all(|dependency| is_standard_ref(dependency))
-    {
-        return Ok(None);
+    let mut remote = false;
+    for dependency in dependencies {
+        match ref_freshness(dependency) {
+            Some(Freshness::Registry) => {}
+            Some(Freshness::Remote) => remote = true,
+            None => return Ok(None),
+        }
     }
 
     let Some(rscript_identity) = rscript_identity(rscript) else {
         return Ok(None);
     };
 
-    let latest_max_age_seconds = if exclude_newer.is_none() {
+    let time_bounded = exclude_newer.is_none() || remote;
+    let latest_max_age_seconds = if time_bounded {
         Some(latest_max_age_seconds()?)
     } else {
         None
     };
-    let source = resolution_cache_source(exclude_newer)?;
+    let source = resolution_cache_source(exclude_newer, time_bounded)?;
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
@@ -169,6 +178,75 @@ fn is_standard_ref(dependency: &str) -> bool {
     is_package_name(package) && is_standard_version(version)
 }
 
+fn ref_freshness(dependency: &str) -> Option<Freshness> {
+    let dependency = dependency.trim();
+    if dependency.contains('?') {
+        return None;
+    }
+    if is_standard_ref(dependency) {
+        return Some(Freshness::Registry);
+    }
+
+    let dependency = strip_package_name(dependency);
+    let lower = dependency.to_ascii_lowercase();
+    if is_local_ref(&lower) {
+        return None;
+    }
+
+    if ["github::", "gitlab::", "bitbucket::", "git::", "url::"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+        || (dependency.contains("://") && !lower.starts_with("file:"))
+        || is_github_shorthand(dependency)
+    {
+        return Some(Freshness::Remote);
+    }
+
+    None
+}
+
+fn strip_package_name(dependency: &str) -> &str {
+    let Some((name, reference)) = dependency.split_once('=') else {
+        return dependency;
+    };
+    if is_package_name(name) && !reference.is_empty() {
+        reference
+    } else {
+        dependency
+    }
+}
+
+fn is_local_ref(lower: &str) -> bool {
+    lower == "."
+        || lower.starts_with("local::")
+        || lower.starts_with("deps::")
+        || lower.starts_with("installed::")
+        || lower.starts_with("any::")
+        || lower.starts_with("file:")
+        || lower.starts_with("url::file:")
+        || lower.starts_with('/')
+        || lower.starts_with('\\')
+        || lower.starts_with('~')
+        || lower.starts_with("./")
+        || lower.starts_with(".\\")
+        || is_windows_absolute_path(lower)
+}
+
+fn is_windows_absolute_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+}
+
+fn is_github_shorthand(dependency: &str) -> bool {
+    dependency.contains('/')
+        && !dependency.contains(char::is_whitespace)
+        && !dependency.contains('\\')
+        && !dependency.starts_with(['.', '/', '~'])
+}
+
 fn is_standard_version(version: &str) -> bool {
     let version = version.strip_prefix(">=").unwrap_or(version);
     if matches!(version, "current" | "last") {
@@ -199,17 +277,23 @@ fn is_package_name(name: &str) -> bool {
             .is_some_and(|ch| ch.is_ascii_alphanumeric())
 }
 
-fn resolution_cache_source(exclude_newer: Option<&str>) -> Result<String, Box<dyn Error>> {
-    Ok(match exclude_newer {
-        Some(date) => format!("exclude-newer: {date}"),
-        None => format!("latest: {}", current_utc_seconds()?),
-    })
+fn resolution_cache_source(
+    exclude_newer: Option<&str>,
+    time_bounded: bool,
+) -> Result<String, Box<dyn Error>> {
+    match (exclude_newer, time_bounded) {
+        (Some(date), false) => Ok(format!("exclude-newer: {date}")),
+        _ => Ok(format!("latest: {}", current_utc_seconds()?)),
+    }
 }
 
 fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>> {
     let Some(max_age_seconds) = cache.latest_max_age_seconds else {
         return Ok(source == cache.source.as_str());
     };
+    if max_age_seconds == 0 {
+        return Ok(false);
+    }
 
     let Some(created_at) = source.strip_prefix("latest: ") else {
         return Ok(false);
@@ -522,19 +606,20 @@ mod tests {
     }
 
     #[test]
-    fn nonstandard_refs_skip_resolution_markers() {
-        let dir = unique_dir("ir-nonstandard-ref-cache-unit");
+    fn local_and_dynamic_refs_skip_resolution_markers() {
+        let dir = unique_dir("ir-uncacheable-ref-cache-unit");
         let cache_dir = dir.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
         let rscript = dummy_rscript(&dir);
 
         for dependency in [
-            "github::owner/repo@branch",
-            "owner/repo/subdir@main",
-            "pkg=owner/repo/subdir@main",
-            "gitlab::group/project",
-            "https://example.com/pkg.tar.gz",
+            "local::.",
+            "../pkg",
+            "pkg=local::C:/work/pkg",
+            "C:/work/pkg",
             "\\work\\pkg",
+            "github::owner/repo?reinstall",
+            "unknown::pkg",
             "cli@3",
         ] {
             let dependencies = vec![dependency.to_string()];
@@ -558,13 +643,22 @@ mod tests {
     }
 
     #[test]
-    fn standard_refs_use_resolution_markers() {
-        let dir = unique_dir("ir-standard-ref-cache-unit");
+    fn registry_and_remote_refs_use_resolution_markers() {
+        let dir = unique_dir("ir-cacheable-ref-cache-unit");
         let cache_dir = dir.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
         let rscript = dummy_rscript(&dir);
 
-        for dependency in ["cli", "cli@3.6.6", "cli@>=3.6.6"] {
+        for dependency in [
+            "cli",
+            "cli@3.6.6",
+            "cli@>=3.6.6",
+            "github::owner/repo@branch",
+            "owner/repo/subdir@main",
+            "pkg=owner/repo/subdir@main",
+            "gitlab::group/project",
+            "https://example.com/pkg.tar.gz",
+        ] {
             let dependencies = vec![dependency.to_string()];
             assert!(
                 paths(

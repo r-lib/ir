@@ -10,6 +10,7 @@ Options:
   -w, --with <PKG>         Add a dependency for this tool run; may be repeated
       --r-version <SPEC>   Select the R version for this tool run with rig
       --rscript <RSCRIPT>  Select the Rscript executable
+      --refresh            Ignore cached dependency resolution for this invocation
   -h, --help               Print help
 
 Tool discovery:

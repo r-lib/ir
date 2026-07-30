@@ -8,21 +8,37 @@ Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DI
 This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
 Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of `IR_CACHE_DIR`.
 
-Resolution requests for ordinary registry refs are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
+Resolution requests are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
 Latest resolution records a Unix timestamp inside the cache marker; markers older than `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` are refreshed in place, so newly published versions are picked up without accumulating one marker per refresh window.
 The default max age is 86400 seconds (24 hours).
+Set `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS=0` to treat every time-bounded resolution marker as stale, including one written during the current second.
 Snapshot resolution uses the `exclude-newer` date in the key because the default CRAN and Bioconductor PPM repository states are immutable.
+Remote source refs, including GitHub, GitLab, Bitbucket, git, and URL refs, use the same expiring marker policy as latest registry resolution.
+This remains true when `exclude-newer` is set because that date does not make a branch head or remote URL immutable.
 Python environments use separate cache markers that record the resolved Python executable path.
 If the recorded Python path no longer exists, `ir` resolves the Python environment again.
 
-Non-standard refs skip the resolution-marker cache.
-Each run asks pak to resolve them again, so branch heads, URLs, and local paths are not hidden behind a warm resolution marker.
+Local package refs, unknown ref types, and refs with pak query modifiers skip the resolution-marker cache.
+Each invocation asks pak to resolve them again, so local changes and explicit cache-control modifiers are not hidden behind a warm marker.
 
 Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
 Scripts or tools that resolve to the same install refs share one library.
-Source refs are still passed to `renv::use()` on each run so renv can refresh source installs; renv may reuse its own package cache when the source has not changed.
+When a source ref is re-resolved, it is passed to `renv::use()` so renv can refresh the source install; renv may reuse its own package cache when the source has not changed.
 Installed tool libraries use the same content-addressing under `IR_TOOL_STORE_DIR`.
+
+Use `--refresh` to bypass the R and Python resolution markers for one invocation:
+
+```console
+$ ir run --refresh --with github::r-xla/anvl -e '.libPaths()'
+$ ir render --refresh report.qmd
+$ rx --refresh btw --help
+```
+
+`--refresh` is available on `ir run`, `ir render`, `ir preview`, `ir tool run`, `rx`, and `ir tool install`.
+Set the nonempty environment variable `IR_REFRESH` for the same behavior.
+A refresh reruns dependency resolution but keeps resolver tooling, downloaded packages, uv environments, and content-addressed libraries available for reuse.
+The existing resolution marker is replaced only after resolution succeeds, so a failed refresh does not discard the last usable marker.
 
 ## Commands
 

@@ -46,7 +46,8 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
 | `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also chooses the R minor when no R selector is set and limits multi-minor `r-version` requirements by date | unset |
-| `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
+| `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache; `0` disables reuse of time-bounded resolution markers | `86400` seconds |
+| `IR_REFRESH` | dependency-resolving commands | unset; any nonempty value bypasses resolution markers |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
 | `IR_QUARTO` | Quarto rendering and preview | `quarto` on `PATH` |
@@ -71,6 +72,7 @@ Package snapshot date precedence for `ir run`, `ir render`, and `ir preview` is 
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
+Use `--refresh` or set `IR_REFRESH` to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries.
 `exclude-newer` dates the default CRAN and Bioconductor repositories with PPM snapshots.
 When Python metadata is present, the selected `exclude-newer` value is also used during Python environment resolution unless `--python-exclude-newer` or frontmatter `python-exclude-newer` is set.
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.

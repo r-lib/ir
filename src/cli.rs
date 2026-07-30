@@ -173,6 +173,7 @@ fn run_command() -> ClapCommand {
                 .num_args(1)
                 .help("Resolve Python packages using this snapshot date"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
@@ -257,6 +258,7 @@ fn quarto_command(command: QuartoCommand) -> ClapCommand {
                 .num_args(1)
                 .help("Resolve Python packages using this snapshot date"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
@@ -393,6 +395,7 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .num_args(1)
                 .help("Select the Rscript executable"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
@@ -447,6 +450,7 @@ fn tool_install_command() -> ClapCommand {
                 .action(ArgAction::SetTrue)
                 .help("Overwrite an existing installed executable path"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("package-ref")
                 .value_name("PKG_REF")
@@ -481,6 +485,13 @@ fn raw_args_arg(help: &'static str) -> Arg {
         .help(help)
 }
 
+fn refresh_arg() -> Arg {
+    Arg::new("refresh")
+        .long("refresh")
+        .action(ArgAction::SetTrue)
+        .help("Ignore cached dependency resolution for this invocation")
+}
+
 pub(crate) struct PackageExecTarget {
     pub(crate) package_ref: String,
     pub(crate) executable: String,
@@ -496,6 +507,7 @@ pub(crate) struct RunArgs {
     pub(crate) source: RunSource,
     pub(crate) script_args: Vec<String>,
     pub(crate) isolated: bool,
+    pub(crate) refresh: bool,
 }
 
 pub(crate) struct QuartoArgs {
@@ -508,6 +520,7 @@ pub(crate) struct QuartoArgs {
     pub(crate) quarto_args: Vec<String>,
     pub(crate) isolated: bool,
     pub(crate) vanilla: bool,
+    pub(crate) refresh: bool,
 }
 
 pub(crate) struct ToolRunArgs {
@@ -517,6 +530,7 @@ pub(crate) struct ToolRunArgs {
     pub(crate) rscript: Option<String>,
     pub(crate) target: PackageExecTarget,
     pub(crate) tool_args: Vec<String>,
+    pub(crate) refresh: bool,
 }
 
 pub(crate) struct ToolInstallArgs {
@@ -527,6 +541,7 @@ pub(crate) struct ToolInstallArgs {
     pub(crate) bin_dir: PathBuf,
     pub(crate) setup_bin_dir_on_path: bool,
     pub(crate) force: bool,
+    pub(crate) refresh: bool,
 }
 
 /// Split the leading region of `ir run`'s arguments into Rscript options,
@@ -535,9 +550,9 @@ pub(crate) struct ToolInstallArgs {
 /// args.
 ///
 /// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--rscript <path>`,
-/// `--exclude-newer <date>`, `--python-exclude-newer <date>` and `--isolated`
-/// are `ir`-level flags handled here. Any other `-...` argument is an Rscript
-/// option, forwarded verbatim to the user-code
+/// `--exclude-newer <date>`, `--python-exclude-newer <date>`, `--refresh`, and
+/// `--isolated` are `ir`-level flags handled here. Any other `-...` argument is
+/// an Rscript option, forwarded verbatim to the user-code
 /// phase. Scanning stops at the script path unless `-e` was given, in which case
 /// scanning stops after the last `-e <expr>` pair. Everything after the source
 /// boundary is passed to user code as program args.
@@ -550,6 +565,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     let mut python_exclude_newer = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -604,6 +620,8 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             python_exclude_newer = Some(value.to_string());
         } else if arg == "--isolated" {
             isolated = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-" {
             positional = Some(arg);
             break;
@@ -640,6 +658,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
         source,
         script_args,
         isolated,
+        refresh,
     })
 }
 
@@ -667,6 +686,7 @@ fn parse_quarto_args(
     let mut python_exclude_newer = None;
     let mut isolated = false;
     let mut vanilla = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -726,6 +746,8 @@ fn parse_quarto_args(
             isolated = true;
         } else if arg == "--vanilla" {
             vanilla = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-" {
             return Err(format!("`ir {name}` requires a source path, not stdin").into());
         } else if arg.starts_with('-') {
@@ -751,6 +773,7 @@ fn parse_quarto_args(
         quarto_args,
         isolated,
         vanilla,
+        refresh,
     })
 }
 
@@ -818,6 +841,7 @@ pub(crate) fn parse_tool_run_args(
     let mut r_requirement = None;
     let mut rscript = None;
     let mut from = None;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -868,6 +892,8 @@ pub(crate) fn parse_tool_run_args(
         } else if arg == "--isolated" {
             // `ir tool run` is always isolated; accept this for symmetry with
             // `ir run` without changing behavior.
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-e" {
             return Err(format!("`-e` is not supported by `{}`", invocation.command()).into());
         } else if arg.starts_with('-') {
@@ -910,6 +936,7 @@ pub(crate) fn parse_tool_run_args(
         rscript,
         target,
         tool_args,
+        refresh,
     })
 }
 
@@ -921,6 +948,7 @@ pub(crate) fn parse_tool_install_args(
     let mut rscript = None;
     let mut bin_dir = None;
     let mut force = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -958,6 +986,8 @@ pub(crate) fn parse_tool_install_args(
             bin_dir = Some(PathBuf::from(value));
         } else if arg == "--force" {
             force = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-e" {
             return Err("`-e` is not supported by `ir tool install`".into());
         } else if arg.starts_with('-') {
@@ -985,6 +1015,7 @@ pub(crate) fn parse_tool_install_args(
         bin_dir: bin_dir.unwrap_or(tool_install_bin_dir()?),
         setup_bin_dir_on_path,
         force,
+        refresh,
     })
 }
 

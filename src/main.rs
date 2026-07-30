@@ -72,9 +72,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     r_requirement: run.r_requirement.as_deref(),
                     rscript: run.rscript.as_deref(),
                 },
-                runtime::SnapshotArgs {
+                runtime::ResolutionArgs {
                     exclude_newer: run.exclude_newer.as_deref(),
                     python_exclude_newer: run.python_exclude_newer.as_deref(),
+                    refresh: run.refresh,
                 },
                 &run.script_args,
                 run.isolated,
@@ -90,9 +91,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     r_requirement: render.r_requirement.as_deref(),
                     rscript: render.rscript.as_deref(),
                 },
-                runtime::SnapshotArgs {
+                runtime::ResolutionArgs {
                     exclude_newer: render.exclude_newer.as_deref(),
                     python_exclude_newer: render.python_exclude_newer.as_deref(),
+                    refresh: render.refresh,
                 },
                 &render.quarto_args,
                 quarto::QuartoOptions {
@@ -111,9 +113,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     r_requirement: preview.r_requirement.as_deref(),
                     rscript: preview.rscript.as_deref(),
                 },
-                runtime::SnapshotArgs {
+                runtime::ResolutionArgs {
                     exclude_newer: preview.exclude_newer.as_deref(),
                     python_exclude_newer: preview.python_exclude_newer.as_deref(),
+                    refresh: preview.refresh,
                 },
                 &preview.quarto_args,
                 quarto::QuartoOptions {
