@@ -25,6 +25,10 @@ if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n\
     echo expected IR_QUARTO_RENDER >&2\n\
     exit 1\n\
   fi\n\
+  if [ \"${IR_REFRESH:-}\" != \"1\" ]; then\n\
+    echo expected IR_REFRESH >&2\n\
+    exit 1\n\
+  fi\n\
   mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
   printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
   exit 0\n\
@@ -44,7 +48,7 @@ printf '%s\\n' \"$@\" > {}\n",
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_QUARTO", &quarto)
-        .args(["preview", "--rscript"])
+        .args(["preview", "--refresh", "--rscript"])
         .arg(&rscript)
         .arg(&doc)
         .args(["--port", "4321"])

@@ -45,13 +45,25 @@ ir_exclude_newer <- function(value) {
 }
 
 # Resolve dependency refs with pak, stopping if any ref fails to resolve.
-ir_resolve_refs <- function(refs) {
-  res <- pak::pkg_deps(refs, dependencies = NA, upgrade = TRUE)
+ir_resolve_refs <- function(refs, dependencies = NA) {
+  res <- pak::pkg_deps(refs, dependencies = dependencies, upgrade = TRUE)
   failed <- res[res$status != "OK", , drop = FALSE]
   if (nrow(failed))
     stop("pak could not resolve: ",
          paste(failed$ref, collapse = ", "), call. = FALSE)
   res
+}
+
+ir_resolve_primary_package <- function(res, primary_ref) {
+  packages <- unique(res$package[res$direct])
+  if (length(packages) != 1L) {
+    primary <- ir_resolve_refs(primary_ref, dependencies = FALSE)
+    packages <- unique(primary$package[primary$direct])
+  }
+  if (length(packages) != 1L || !(packages[[1L]] %in% res$package))
+    stop("package ref must resolve to exactly one R package: ",
+         primary_ref, call. = FALSE)
+  packages[[1L]]
 }
 
 ## --- repositories -----------------------------------------------------------
@@ -176,40 +188,60 @@ ir_latest_resolution_max_age_seconds <- function() {
   as.numeric(value)
 }
 
-ir_marker_source <- function(exclude_newer,
-                             created_at = ir_current_utc_seconds()) {
-  if (is.null(exclude_newer))
-    sprintf("latest: %.0f", floor(created_at))
-  else
-    sprintf("exclude-newer: %s", exclude_newer)
+ir_marker_source <- function(created_at = ir_current_utc_seconds()) {
+  sprintf("latest: %.0f", floor(created_at))
 }
 
-ir_marker_source_current <- function(source, exclude_newer) {
-  if (!is.null(exclude_newer))
-    return(identical(source, ir_marker_source(exclude_newer)))
-
+ir_marker_source_current <- function(source) {
   if (!startsWith(source, "latest: ")) return(FALSE)
+  max_age_seconds <- ir_latest_resolution_max_age_seconds()
+
   created_at <- suppressWarnings(as.numeric(sub("^latest: ", "", source)))
   if (is.na(created_at)) return(FALSE)
 
   now <- ir_current_utc_seconds()
   if (created_at > now) return(FALSE)
-  now - created_at <= ir_latest_resolution_max_age_seconds()
+  now - created_at < max_age_seconds
 }
 
-ir_is_standard_input_ref <- function(ref) {
-  stopifnot(length(ref) == 1L)
-
-  ref <- trimws(ref)
-  grepl(paste0("^",
-               "[[:alpha:]]([[:alnum:].]*[[:alnum:]])?",
-               "(@(>=)?([0-9]+[-.][0-9]+([-.][0-9]+)*|current|last))?",
-               "$"),
-        ref)
+ir_is_network_locator <- function(locator) {
+  uri <- grepl("^[[:alpha:]][[:alnum:]+.-]*://", locator) &&
+    !grepl("^file:", locator, ignore.case = TRUE)
+  scp <- grepl("^[^/@:[:space:]]+@[^/@:[:space:]]+:.+", locator)
+  uri || scp
 }
 
-ir_has_nonstandard_input_ref <- function(refs) {
-  any(!vapply(refs, ir_is_standard_input_ref, logical(1)))
+ir_resolution_is_cacheable <- function(res) {
+  if (is.null(res) || !nrow(res))
+    return(TRUE)
+
+  stopifnot(
+    is.data.frame(res),
+    all(c("sources", "params") %in% names(res)),
+    is.list(res$sources),
+    is.list(res$params)
+  )
+
+  if (any(lengths(res$params))) return(FALSE)
+
+  locators <- unlist(res$sources, use.names = FALSE)
+  if ("mirror" %in% names(res))
+    locators <- c(locators, res$mirror)
+  locators <- locators[!is.na(locators) & nzchar(locators)]
+  any(vapply(locators, ir_is_network_locator, logical(1)))
+}
+
+ir_invalidate_primary_package_markers <- function(marker) {
+  directory <- dirname(marker)
+  if (!dir.exists(directory)) return(invisible())
+
+  entries <- list.files(directory, all.files = TRUE, full.names = TRUE)
+  prefix <- paste0(basename(marker), "-primary-")
+  markers <- entries[startsWith(basename(entries), prefix)]
+  if (length(markers) && unlink(markers) != 0L)
+    stop("could not invalidate previous primary package markers",
+         call. = FALSE)
+  invisible()
 }
 
 ir_is_standard_resolved_ref <- function(res) {
@@ -298,15 +330,14 @@ ir_resolve_main <- function() {
   quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
   quarto_reticulate <- !is.null(ir_env_optional("IR_QUARTO_RETICULATE"))
 
-  ## 1b. Resolution cache: Rust checks this marker before launching this
-  ## resolver. Keep the in-resolver check as the fallback for direct driver runs
-  ## and races where another process warms the marker first. The marker is
-  ## written only after a successful materialise (below), so its presence implies
-  ## a complete library.
+  ## 1b. Resolution cache: Rust checks its marker before launching this resolver.
+  ## Wrapper Rscript CLI runs and direct driver invocations use an R-derived
+  ## fallback key and check it here instead.
   primary_ref <- if (length(deps)) deps[[1L]] else NULL
-  cache_resolution <- !ir_has_nonstandard_input_ref(deps)
+  refresh <- !is.null(ir_env_optional("IR_REFRESH"))
   marker <- ir_env_optional("IR_RESOLUTION_MARKER")
-  if (is.null(marker) && cache_resolution) {
+  marker_from_rust <- !is.null(marker)
+  if (is.null(marker)) {
     marker <- file.path(cache_dir, "resolutions",
                         ir_input_key(deps, exclude_newer = exclude_newer,
                                      quarto = quarto,
@@ -316,28 +347,28 @@ ir_resolve_main <- function() {
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
   if (!is.null(package_result_file) &&
       is.null(package_marker) &&
-      !is.null(marker) &&
       !is.null(primary_ref)) {
     package_marker <- file.path(cache_dir, "resolutions",
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!is.null(marker) && file.exists(marker)) {
-    cached <- readLines(marker, n = 2L, warn = FALSE)
-    if (length(cached) >= 2L &&
-        ir_marker_source_current(cached[[1L]], exclude_newer) &&
+  if (!marker_from_rust && !refresh) {
+    cache_marker <- if (is.null(package_result_file)) marker else package_marker
+    required_lines <- if (is.null(package_result_file)) 2L else 3L
+    cached <- if (!is.null(cache_marker) && file.exists(cache_marker))
+      readLines(cache_marker, n = required_lines, warn = FALSE)
+    else
+      character()
+    if (length(cached) >= required_lines &&
+        ir_marker_source_current(cached[[1L]]) &&
         nzchar(cached[[2L]]) &&
         dir.exists(cached[[2L]])) {
-      if (!is.null(package_result_file) &&
-          (is.null(package_marker) || !file.exists(package_marker))) {
-        # The library is reusable, but this caller needs primary-package
-        # metadata that older cache entries did not record.
-      } else {
+      package_is_current <- is.null(package_result_file) ||
+        nzchar(cached[[3L]])
+      if (package_is_current) {
         writeLines(cached[[2L]], result_file)
-        if (!is.null(package_result_file)) {
-          package <- readLines(package_marker, n = 1L, warn = FALSE)
-          writeLines(package, package_result_file)
-        }
+        if (!is.null(package_result_file))
+          writeLines(cached[[3L]], package_result_file)
         return(invisible())
       }
     }
@@ -356,11 +387,7 @@ ir_resolve_main <- function() {
     if (is.null(res))
       stop("cannot resolve a primary package without dependencies",
            call. = FALSE)
-    primary <- unique(res$package[res$direct & res$ref == refs_in[[1L]]])
-    if (length(primary) != 1L)
-      stop("package ref must resolve to exactly one R package: ",
-           deps[[1L]], call. = FALSE)
-    primary_package <- primary[[1L]]
+    primary_package <- ir_resolve_primary_package(res, refs_in[[1L]])
   }
 
   ## 2b. Quarto's knitr engine needs rmarkdown. Inject it (latest) only when the
@@ -381,6 +408,9 @@ ir_resolve_main <- function() {
     }
   }
 
+  cache_resolution <- ir_resolution_is_cacheable(res)
+  if (cache_resolution)
+    ir_latest_resolution_max_age_seconds()
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
@@ -428,12 +458,18 @@ ir_resolve_main <- function() {
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
-  if (!is.null(marker)) {
+  if (cache_resolution) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
-  }
-  if (!is.null(primary_package) && !is.null(package_marker)) {
-    writeLines(primary_package, package_marker)
+    marker_source <- ir_marker_source()
+    writeLines(c(marker_source, library_path), marker)
+    if (!is.null(primary_package) && !is.null(package_marker))
+      writeLines(c(marker_source, library_path, primary_package),
+                 package_marker)
+  } else {
+    ir_invalidate_primary_package_markers(marker)
+    if (unlink(marker) != 0L)
+      stop("could not invalidate the previous resolution marker",
+           call. = FALSE)
   }
   writeLines(library_path, result_file)
   if (!is.null(package_result_file)) {

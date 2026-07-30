@@ -12,6 +12,7 @@ Options:
       --rscript <RSCRIPT>            Select the Rscript executable
       --exclude-newer <DATE>         Use this date for default CRAN and Bioconductor PPM snapshots
       --python-exclude-newer <DATE>  Resolve Python packages using this snapshot date
+      --refresh                      Ignore cached dependency resolution for this invocation
       --isolated                     Disable the user library for this preview
       --vanilla                      Pass --vanilla to the Rscript used by Quarto
   -h, --help                         Print help

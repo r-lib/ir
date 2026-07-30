@@ -304,7 +304,7 @@ fn source_is_current(source: &str, request: &EnvRequest) -> Result<bool, Box<dyn
     if created_at > now {
         return Ok(false);
     }
-    Ok(now - created_at <= max_age_seconds)
+    Ok(now - created_at < max_age_seconds)
 }
 
 fn latest_max_age_seconds() -> Result<u64, Box<dyn Error>> {

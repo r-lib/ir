@@ -1325,7 +1325,6 @@ printf 'ir.fixture=python-uv-config-cache\\n'\n",
     );
 }
 
-#[cfg(unix)]
 fn remove_uv_resolver_env(command: &mut Command) {
     for (name, _) in std::env::vars_os() {
         if name
@@ -1763,16 +1762,16 @@ fn run_inline_expression_forwards_option_like_args_after_expr() {
             "--vanilla",
             "-e",
             "cat('inline.args=', paste(commandArgs(TRUE), collapse = '|'), '\\n', sep = '')",
-            "--script-flag",
+            "--refresh",
             "value",
         ])
         .output()
         .unwrap();
 
     assert_success(&out);
-    assert_stdout_contains(&out, "inline.args=--script-flag|value");
+    assert_stdout_contains(&out, "inline.args=--refresh|value");
     assert!(
-        !output_text(&out).contains("unknown option '--script-flag'"),
+        !output_text(&out).contains("unknown option '--refresh'"),
         "{}",
         output_text(&out)
     );
@@ -1800,6 +1799,128 @@ fn run_normalizes_version_specs_before_resolution_cache_keying() {
         .count();
 
     assert_eq!(resolution_count, 1);
+}
+
+#[test]
+fn run_refresh_bypasses_and_preserves_r_and_python_resolution_caches() {
+    let cache_dir = temp_dir("ir-remote-ref-refresh-cache");
+    let library = temp_dir("ir-remote-ref-refresh-library");
+    let profile = temp_path("ir-remote-ref-refresh-profile", "R");
+    let script = temp_path("ir-remote-ref-refresh", "R");
+    let python = temp_path("ir-remote-ref-refresh-python", "");
+    let resolver_runs = temp_path("ir-remote-ref-refresh-runs", "txt");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| python-version: "3.11"
+#| python-exclude-newer: null
+
+cat("ir.fixture=remote-ref-refresh\n")
+"#,
+    )
+    .unwrap();
+    fs::write(&python, "").unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")) ||
+    nzchar(Sys.getenv("IR_PYTHON_RESULT_FILE"))) {
+  if (nzchar(Sys.getenv("IR_TEST_FAIL")))
+    stop("intentional refresh failure", call. = FALSE)
+  stopifnot(nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")),
+            nzchar(Sys.getenv("IR_PYTHON_RESULT_FILE")))
+  refresh <- if (nzchar(Sys.getenv("IR_REFRESH"))) "refresh" else "normal"
+  cat(refresh, "\n", sep = "",
+      file = Sys.getenv("IR_TEST_RESOLVER_RUNS"), append = TRUE)
+  marker <- Sys.getenv("IR_RESOLUTION_MARKER")
+  stopifnot(nzchar(marker))
+  dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+  writeLines(c(paste("latest:", floor(as.numeric(Sys.time()))),
+               Sys.getenv("IR_TEST_LIBRARY")), marker)
+  writeLines(Sys.getenv("IR_TEST_LIBRARY"),
+             Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  writeLines(Sys.getenv("IR_TEST_PYTHON"),
+             Sys.getenv("IR_PYTHON_RESULT_FILE"))
+  q(save = "no", status = 0)
+}
+"#,
+    )
+    .unwrap();
+
+    let invoke =
+        |flag: bool, refresh_env: Option<&str>, latest_max_age: Option<&str>, fail: bool| {
+            let mut command = ir();
+            command
+                .env("IR_CACHE_DIR", &cache_dir)
+                .env("IR_RSCRIPT", rscript())
+                .env("IR_TEST_LIBRARY", &library)
+                .env("IR_TEST_PYTHON", &python)
+                .env("IR_TEST_RESOLVER_RUNS", &resolver_runs)
+                .env("R_PROFILE_USER", &profile)
+                .arg("run");
+            if flag {
+                command.arg("--refresh");
+            }
+            if let Some(refresh_env) = refresh_env {
+                command.env("IR_REFRESH", refresh_env);
+            } else {
+                command.env_remove("IR_REFRESH");
+            }
+            if let Some(latest_max_age) = latest_max_age {
+                command.env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", latest_max_age);
+            } else {
+                command.env_remove("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS");
+            }
+            if fail {
+                command.env("IR_TEST_FAIL", "1");
+            }
+            command.arg("--vanilla").arg(&script);
+            remove_uv_resolver_env(&mut command);
+            command.output().unwrap()
+        };
+
+    let out = invoke(false, None, None, false);
+    assert_success(&out);
+
+    let out = invoke(false, None, None, true);
+    assert_success(&out);
+    let runs = fs::read_to_string(&resolver_runs).unwrap();
+    assert_eq!(runs.lines().collect::<Vec<_>>(), ["normal"]);
+
+    let out = invoke(true, None, None, false);
+    assert_success(&out);
+
+    let out = invoke(false, Some("1"), None, false);
+    assert_success(&out);
+    let runs = fs::read_to_string(&resolver_runs).unwrap();
+    assert_eq!(
+        runs.lines().collect::<Vec<_>>(),
+        ["normal", "refresh", "refresh"]
+    );
+
+    let only_marker = |name: &str| {
+        let mut entries = fs::read_dir(cache_dir.join(name)).unwrap();
+        let marker = entries.next().unwrap().unwrap().path();
+        assert!(entries.next().is_none());
+        marker
+    };
+    let markers = [only_marker("resolutions"), only_marker("python")];
+    let before = resolver_probe_count(&resolver_runs);
+    let created_at = current_utc_seconds();
+    for marker in &markers {
+        let contents = fs::read_to_string(marker).unwrap();
+        let (_, value) = contents.split_once('\n').unwrap();
+        fs::write(marker, format!("latest: {created_at}\n{value}")).unwrap();
+    }
+    let out = invoke(false, None, Some("0"), false);
+    assert_success(&out);
+    assert_eq!(resolver_probe_count(&resolver_runs), before + 1);
+
+    let failed = invoke(true, None, None, true);
+    assert!(!failed.status.success(), "{}", output_text(&failed));
+
+    let cached = invoke(false, None, None, true);
+    assert_success(&cached);
 }
 
 #[test]
@@ -1847,9 +1968,12 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
     assert_eq!(markers.len(), 1);
     let marker_text = fs::read_to_string(&markers[0])
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", markers[0].display()));
-    assert_eq!(
-        marker_text.lines().next(),
-        Some("exclude-newer: 2024-06-01")
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
     );
 }
 
@@ -1878,10 +2002,23 @@ cat("ir.fixture=cli-exclude-newer-precedence\n")
     assert_success(&out);
     assert_stdout_contains(&out, "ir.fixture=cli-exclude-newer-precedence");
 
-    let marker_text = only_resolution_marker_text(&cache_dir);
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_EXCLUDE_NEWER", "2024-03-01")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=cli-exclude-newer-precedence");
+
+    let resolution_dir = cache_dir.join("resolutions");
     assert_eq!(
-        marker_text.lines().next(),
-        Some("exclude-newer: 2024-03-01")
+        fs::read_dir(&resolution_dir)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", resolution_dir.display()))
+            .count(),
+        1,
+        "equivalent CLI and environment overrides should share a cache key"
     );
 }
 
@@ -1985,8 +2122,9 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
   if (nzchar(marker)) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
     writeLines(c(
-      paste("exclude-newer:", Sys.getenv("IR_EXCLUDE_NEWER")),
-      library
+      paste("latest:", floor(as.numeric(Sys.time()))),
+      library,
+      Sys.getenv("IR_EXCLUDE_NEWER")
     ), marker)
   }
   writeLines(library, Sys.getenv("IR_RESOLVE_RESULT_FILE"))
@@ -2012,10 +2150,7 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
     assert_success(&out);
 
     let marker_text = only_resolution_marker_text(&cache_dir);
-    assert_eq!(
-        marker_text.lines().next(),
-        Some("exclude-newer: 2024-03-01")
-    );
+    assert_eq!(marker_text.lines().nth(2), Some("2024-03-01"));
 }
 
 #[test]
@@ -2190,8 +2325,11 @@ fn run_materializes_with_complete_dated_repository_set() {
     let cache_dir = temp_dir("ir-dated-repositories-cache");
     let fake_library = temp_dir("ir-dated-repositories-tooling");
     let effective_repositories = temp_path("ir-dated-repositories", "txt");
+    let materialized = temp_path("ir-dated-repositories-materialized", "txt");
+    let resolutions = temp_path("ir-dated-repository-resolutions", "txt");
     let profile = temp_path("ir-dated-repositories-profile", "R");
     let renviron = temp_path("ir-dated-repositories-renviron", "");
+    let finished_at = current_utc_seconds();
 
     install_fake_r_package(
         &fake_library,
@@ -2228,16 +2366,34 @@ repo_get <- function(...) {
 }
 
 pkg_deps <- function(refs, ...) {
-  data.frame(
-    ref = refs[[1L]],
-    status = "OK",
-    package = "irdatedfixture",
-    version = "1.0.0",
-    type = "standard",
-    priority = NA_character_,
-    direct = TRUE,
+  cat("resolve\n", file = Sys.getenv("IR_TEST_RESOLUTIONS"), append = TRUE)
+  res <- data.frame(
+    ref = c(refs[[1L]], "irlocalfixture", "base"),
+    status = rep("OK", 3L),
+    package = c("irdatedfixture", "irlocalfixture", "base"),
+    version = c("1.0.0", "1.0.0", as.character(getRversion())),
+    type = c("cran", "local", "installed"),
+    priority = c(NA_character_, NA_character_, "base"),
+    direct = c(TRUE, FALSE, FALSE),
     stringsAsFactors = FALSE
   )
+  res$sources <- list(
+    if (startsWith(refs[[1L]], "git@"))
+      refs[[1L]]
+    else
+      "https://packagemanager.posit.co/cran/2026-06-01/src/contrib/irdatedfixture_1.0.0.tar.gz",
+    "file:///tmp/irlocalfixture",
+    character()
+  )
+  res$params <- list(
+    if (grepl("?", refs[[1L]], fixed = TRUE))
+      c(reinstall = "")
+    else
+      character(),
+    character(),
+    character()
+  )
+  res
 }
 "#,
     );
@@ -2262,6 +2418,7 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
     dir.create(file.path(library, package),
                recursive = TRUE, showWarnings = FALSE)
   }
+  writeLines("materialized", Sys.getenv("IR_TEST_MATERIALIZED"))
   invisible(TRUE)
 }
 "#,
@@ -2275,36 +2432,79 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
     fs::write(
         &profile,
         format!(
-            ".libPaths(c({}, .libPaths()))\n",
-            serde_json::to_string(&renviron_path(&fake_library)).unwrap()
+            r#".libPaths(c({}, .libPaths()))
+Sys.time <- function() {{
+  finished_at <- as.numeric(Sys.getenv("IR_TEST_FINISHED_AT"))
+  if (!file.exists(Sys.getenv("IR_TEST_MATERIALIZED")))
+    finished_at <- finished_at - 1200
+  as.POSIXct(finished_at, origin = "1970-01-01", tz = "UTC")
+}}
+"#,
+            serde_json::to_string(&renviron_path(&fake_library)).unwrap(),
         ),
     )
     .unwrap();
     fs::write(&renviron, "").unwrap();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", rscript())
-        .env("R_LIBS_USER", &fake_library)
-        .env("R_PROFILE_USER", &profile)
-        .env("R_ENVIRON_USER", &renviron)
-        .env("RENV_CONFIG_PAK_ENABLED", "TRUE")
-        .env("IR_TEST_EFFECTIVE_REPOSITORIES", &effective_repositories)
-        .args([
-            "run",
-            "--isolated",
-            "--exclude-newer",
-            "2026-06-01",
-            "--with",
-            "irdatedfixture",
-            "-e",
-            "cat('ir.fixture=dated-repositories\\n')",
-        ])
-        .output()
-        .unwrap();
+    let invoke = |package_ref: &str| {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_RSCRIPT", rscript())
+            .env("R_LIBS_USER", &fake_library)
+            .env("R_PROFILE_USER", &profile)
+            .env("R_ENVIRON_USER", &renviron)
+            .env("RENV_CONFIG_PAK_ENABLED", "TRUE")
+            .env("IR_TEST_EFFECTIVE_REPOSITORIES", &effective_repositories)
+            .env("IR_TEST_FINISHED_AT", finished_at.to_string())
+            .env("IR_TEST_MATERIALIZED", &materialized)
+            .env("IR_TEST_RESOLUTIONS", &resolutions)
+            .env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", "600")
+            .args([
+                "run",
+                "--isolated",
+                "--exclude-newer",
+                "2026-06-01",
+                "--with",
+                package_ref,
+                "-e",
+                "cat('ir.fixture=dated-repositories\\n')",
+            ])
+            .output()
+            .unwrap();
 
-    assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=dated-repositories");
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=dated-repositories");
+    };
+
+    for _ in 0..2 {
+        invoke("cran::irdatedfixture");
+    }
+    assert_eq!(resolver_probe_count(&resolutions), 1);
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    let expected_marker_source = format!("latest: {finished_at}");
+    assert_eq!(
+        marker_text.lines().next(),
+        Some(expected_marker_source.as_str()),
+        "the marker timestamp should be recorded after materialization"
+    );
+
+    for _ in 0..2 {
+        invoke("cran::irdatedfixture?reinstall");
+    }
+    assert_eq!(
+        resolver_probe_count(&resolutions),
+        3,
+        "pak query modifiers should bypass the resolution cache"
+    );
+
+    for _ in 0..2 {
+        invoke("git@example.test:r-xla/anvl.git");
+    }
+    assert_eq!(
+        resolver_probe_count(&resolutions),
+        4,
+        "SCP-style Git sources should use the shared TTL policy"
+    );
     assert_eq!(
         fs::read_to_string(effective_repositories)
             .unwrap()
@@ -2490,9 +2690,23 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[test]
-fn run_frontmatter_github_ref_installs_github_package() {
+fn run_frontmatter_github_ref_installs_and_reuses_warm_resolution() {
     let cache_dir = temp_dir("ir-github-ref-cache");
+    let profile = temp_path("ir-github-ref-profile", "R");
+    let resolver_forbidden = temp_path("ir-github-ref-resolver-forbidden", "txt");
     let script = temp_path("ir-github-ref", "R");
+    fs::write(
+        &profile,
+        format!(
+            r#"if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")) &&
+    file.exists({})) {{
+  stop("warm GitHub resolution launched resolver R", call. = FALSE)
+}}
+"#,
+            serde_json::to_string(&renviron_path(&resolver_forbidden)).unwrap(),
+        ),
+    )
+    .unwrap();
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -2523,17 +2737,24 @@ cat("github.remote=", paste(
     )
     .unwrap();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env_remove("R_PROFILE_USER")
-        .args(["run", "--isolated", "--vanilla"])
-        .arg(&script)
-        .output()
-        .unwrap();
+    let invoke = || {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("R_PROFILE_USER", &profile)
+            .env_remove("IR_RESOLVE_RESULT_FILE")
+            .args(["run", "--isolated", "--vanilla"])
+            .arg(&script)
+            .output()
+            .unwrap();
 
-    assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=github-ref");
-    assert_stdout_contains(&out, "github.remote=github/rstudio/reticulate");
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=github-ref");
+        assert_stdout_contains(&out, "github.remote=github/rstudio/reticulate");
+    };
+
+    invoke();
+    fs::write(&resolver_forbidden, "").unwrap();
+    invoke();
 }
 
 #[test]
@@ -2590,6 +2811,14 @@ cat("github.remote=", paste(
     assert_stdout_contains(
         &out,
         "github.remote=github/r-lib/pkgdepends/tests/testthat/fixtures/foo",
+    );
+    let marker_text = only_resolution_marker_text(&cache_dir);
+    assert!(
+        marker_text
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with("latest: ")),
+        "{marker_text}"
     );
 }
 

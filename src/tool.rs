@@ -32,7 +32,8 @@ pub(crate) fn cmd_tool_run(run: &ToolRunArgs) -> Result<(), Box<dyn Error>> {
         },
     )?;
     let arch_args = rscript_arch_args(&run.rscript_args);
-    let (library, package_name) = resolve_library_and_primary_package(&rscript, &spec, &arch_args)?;
+    let (library, package_name) =
+        resolve_library_and_primary_package(&rscript, &spec, &arch_args, run.refresh)?;
     let r_arch = selected_r_arch(&rscript, &arch_args)?;
     let r_arch_env = selected_r_arch_env(&rscript, &arch_args)?;
     let executable = find_package_executable(
@@ -68,8 +69,13 @@ pub(crate) fn cmd_tool_install(install: &ToolInstallArgs) -> Result<(), Box<dyn 
         },
     )?;
     let tool_store_dir = tool_store_dir()?;
-    let (library, package_name) =
-        resolve_library_and_primary_package_in_root(&rscript, &spec, &[], Some(&tool_store_dir))?;
+    let (library, package_name) = resolve_library_and_primary_package_in_root(
+        &rscript,
+        &spec,
+        &[],
+        Some(&tool_store_dir),
+        install.refresh,
+    )?;
     let r_arch = selected_r_arch(&rscript, &[])?;
     let r_arch_env = selected_r_arch_env(&rscript, &[])?;
     let executables = discover_package_executables(&library, &package_name, r_arch.as_deref())?;

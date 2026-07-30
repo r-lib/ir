@@ -11,6 +11,7 @@ Options:
       --rscript <RSCRIPT>  Select the Rscript executable
       --bin-dir <DIR>      Directory where executables are installed
       --force              Overwrite an existing installed executable path
+      --refresh            Ignore cached dependency resolution for this invocation
   -h, --help               Print help
 
 Tool discovery:

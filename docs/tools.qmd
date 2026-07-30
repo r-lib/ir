@@ -31,6 +31,7 @@ Tool runs support the same dependency and R selection flags as script runs:
 $ rx --with cli --from btw btw
 $ rx -w cli --from btw btw
 $ rx --from 'btw>=0.1.0' btw
+$ rx --refresh --from btw btw
 $ rx --r-version 4.5 --from btw btw
 $ rx --rscript /path/to/Rscript --from btw btw
 ```
@@ -85,6 +86,7 @@ For compiled CLIs, put the executable at `bin/tool` or `bin/<arch>/tool`.
 ```console
 $ ir tool install btw
 $ ir tool install github::r-lib/Rapp
+$ ir tool install --refresh --force github::r-lib/Rapp
 $ ir tool install --bin-dir ~/.local/bin btw
 $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw

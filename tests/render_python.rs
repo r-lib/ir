@@ -122,7 +122,7 @@ repo_get <- function(...) {
 }
 pkg_deps <- function(refs, ...) {
   stopifnot(identical(refs, "rmarkdown"))
-  data.frame(
+  res <- data.frame(
     ref = refs,
     status = "OK",
     package = "rmarkdown",
@@ -131,6 +131,10 @@ pkg_deps <- function(refs, ...) {
     priority = NA_character_,
     direct = TRUE
   )
+  res$sources <- list("https://example.test/rmarkdown_1.0.0.tar.gz")
+  res$mirror <- "https://example.test/cran"
+  res$params <- list(character())
+  res
 }
 pkg_install <- function(pkg, lib, ...) {
   writeLines(pkg, Sys.getenv("IR_TEST_INSTALL_REF"))
