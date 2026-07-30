@@ -2690,9 +2690,23 @@ if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
 }
 
 #[test]
-fn run_frontmatter_github_ref_installs_github_package() {
+fn run_frontmatter_github_ref_installs_and_reuses_warm_resolution() {
     let cache_dir = temp_dir("ir-github-ref-cache");
+    let profile = temp_path("ir-github-ref-profile", "R");
+    let resolver_forbidden = temp_path("ir-github-ref-resolver-forbidden", "txt");
     let script = temp_path("ir-github-ref", "R");
+    fs::write(
+        &profile,
+        format!(
+            r#"if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE")) &&
+    file.exists({})) {{
+  stop("warm GitHub resolution launched resolver R", call. = FALSE)
+}}
+"#,
+            serde_json::to_string(&renviron_path(&resolver_forbidden)).unwrap(),
+        ),
+    )
+    .unwrap();
     fs::write(
         &script,
         r#"#!/usr/bin/env -S ir run
@@ -2723,17 +2737,24 @@ cat("github.remote=", paste(
     )
     .unwrap();
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env_remove("R_PROFILE_USER")
-        .args(["run", "--isolated", "--vanilla"])
-        .arg(&script)
-        .output()
-        .unwrap();
+    let invoke = || {
+        let out = ir()
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("R_PROFILE_USER", &profile)
+            .env_remove("IR_RESOLVE_RESULT_FILE")
+            .args(["run", "--isolated", "--vanilla"])
+            .arg(&script)
+            .output()
+            .unwrap();
 
-    assert_success(&out);
-    assert_stdout_contains(&out, "ir.fixture=github-ref");
-    assert_stdout_contains(&out, "github.remote=github/rstudio/reticulate");
+        assert_success(&out);
+        assert_stdout_contains(&out, "ir.fixture=github-ref");
+        assert_stdout_contains(&out, "github.remote=github/rstudio/reticulate");
+    };
+
+    invoke();
+    fs::write(&resolver_forbidden, "").unwrap();
+    invoke();
 }
 
 #[test]
