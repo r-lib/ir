@@ -15,8 +15,6 @@ const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
 pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
     pub(crate) package_marker: Option<PathBuf>,
-    source: String,
-    latest_max_age_seconds: Option<u64>,
 }
 
 pub(crate) struct CachedResolution {
@@ -30,12 +28,6 @@ pub(crate) struct QuartoCacheFlags {
     pub(crate) reticulate: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Freshness {
-    Registry,
-    Remote,
-}
-
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
@@ -45,26 +37,10 @@ pub(crate) fn paths(
     quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
-    let mut remote = false;
-    for dependency in dependencies {
-        match ref_freshness(dependency) {
-            Some(Freshness::Registry) => {}
-            Some(Freshness::Remote) => remote = true,
-            None => return Ok(None),
-        }
-    }
-
     let Some(rscript_identity) = rscript_identity(rscript) else {
         return Ok(None);
     };
 
-    let time_bounded = exclude_newer.is_none() || remote;
-    let latest_max_age_seconds = if time_bounded {
-        Some(latest_max_age_seconds()?)
-    } else {
-        None
-    };
-    let source = resolution_cache_source(exclude_newer, time_bounded)?;
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
@@ -84,8 +60,6 @@ pub(crate) fn paths(
     Ok(Some(Paths {
         marker,
         package_marker,
-        source,
-        latest_max_age_seconds,
     }))
 }
 
@@ -105,7 +79,7 @@ pub(crate) fn read(
         .map_err(|e| format!("failed to read `{}`: {e}", cache.marker.display()))?;
     let mut lines = marker.lines();
     let source = lines.next().unwrap_or_default();
-    if !source_is_current(source, cache)? {
+    if !source_is_current(source)? {
         return Ok(None);
     }
     let library = lines.next().unwrap_or_default().trim();
@@ -168,136 +142,12 @@ fn resolution_cache_key(
     sha256_fields(&parts)
 }
 
-fn is_standard_ref(dependency: &str) -> bool {
-    let dependency = dependency.trim();
-
-    let Some((package, version)) = dependency.split_once('@') else {
-        return is_package_name(dependency);
-    };
-
-    is_package_name(package) && is_standard_version(version)
-}
-
-fn ref_freshness(dependency: &str) -> Option<Freshness> {
-    let dependency = dependency.trim();
-    if dependency.contains('?') {
-        return None;
-    }
-    if is_standard_ref(dependency) {
-        return Some(Freshness::Registry);
-    }
-
-    let dependency = strip_package_name(dependency);
-    let lower = dependency.to_ascii_lowercase();
-    if is_local_ref(&lower) {
-        return None;
-    }
-
-    if ["github::", "gitlab::", "bitbucket::", "git::", "url::"]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix))
-        || (dependency.contains("://") && !lower.starts_with("file:"))
-        || is_github_shorthand(dependency)
-    {
-        return Some(Freshness::Remote);
-    }
-
-    None
-}
-
-fn strip_package_name(dependency: &str) -> &str {
-    let Some((name, reference)) = dependency.split_once('=') else {
-        return dependency;
-    };
-    if is_package_name(name) && !reference.is_empty() {
-        reference
-    } else {
-        dependency
-    }
-}
-
-fn is_local_ref(lower: &str) -> bool {
-    lower == "."
-        || lower.starts_with("local::")
-        || lower.starts_with("deps::")
-        || lower.starts_with("installed::")
-        || lower.starts_with("any::")
-        || lower.starts_with("file:")
-        || lower.starts_with("url::file:")
-        || lower.starts_with('/')
-        || lower.starts_with('\\')
-        || lower.starts_with('~')
-        || lower.starts_with("./")
-        || lower.starts_with(".\\")
-        || is_windows_absolute_path(lower)
-}
-
-fn is_windows_absolute_path(path: &str) -> bool {
-    let bytes = path.as_bytes();
-    bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'/' | b'\\')
-}
-
-fn is_github_shorthand(dependency: &str) -> bool {
-    dependency.contains('/')
-        && !dependency.contains(char::is_whitespace)
-        && !dependency.contains('\\')
-        && !dependency.starts_with(['.', '/', '~'])
-}
-
-fn is_standard_version(version: &str) -> bool {
-    let version = version.strip_prefix(">=").unwrap_or(version);
-    if matches!(version, "current" | "last") {
-        return true;
-    }
-
-    let mut part_count = 0;
-    for part in version.split(['.', '-']) {
-        if part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()) {
-            return false;
-        }
-        part_count += 1;
-    }
-
-    part_count >= 2
-}
-
-fn is_package_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphabetic()
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '.')
-        && name
-            .chars()
-            .last()
-            .is_some_and(|ch| ch.is_ascii_alphanumeric())
-}
-
-fn resolution_cache_source(
-    exclude_newer: Option<&str>,
-    time_bounded: bool,
-) -> Result<String, Box<dyn Error>> {
-    match (exclude_newer, time_bounded) {
-        (Some(date), false) => Ok(format!("exclude-newer: {date}")),
-        _ => Ok(format!("latest: {}", current_utc_seconds()?)),
-    }
-}
-
-fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>> {
-    let Some(max_age_seconds) = cache.latest_max_age_seconds else {
-        return Ok(source == cache.source.as_str());
-    };
-    if max_age_seconds == 0 {
-        return Ok(false);
-    }
-
+fn source_is_current(source: &str) -> Result<bool, Box<dyn Error>> {
     let Some(created_at) = source.strip_prefix("latest: ") else {
         return Ok(false);
     };
+    let max_age_seconds = latest_max_age_seconds()?;
+
     let Ok(created_at) = created_at.parse::<u64>() else {
         return Ok(false);
     };
@@ -306,7 +156,7 @@ fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>
         return Ok(false);
     }
     let age_seconds = now - created_at;
-    Ok(age_seconds <= max_age_seconds)
+    Ok(age_seconds < max_age_seconds)
 }
 
 fn rscript_identity(rscript: &OsStr) -> Option<String> {
@@ -601,80 +451,6 @@ mod tests {
 
         assert_ne!(cache_marker, store_marker);
         assert!(store_marker.starts_with(cache_dir.join("resolutions")));
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn local_and_dynamic_refs_skip_resolution_markers() {
-        let dir = unique_dir("ir-uncacheable-ref-cache-unit");
-        let cache_dir = dir.join("cache");
-        fs::create_dir_all(&cache_dir).unwrap();
-        let rscript = dummy_rscript(&dir);
-
-        for dependency in [
-            "local::.",
-            "../pkg",
-            "pkg=local::C:/work/pkg",
-            "C:/work/pkg",
-            "\\work\\pkg",
-            "github::owner/repo?reinstall",
-            "unknown::pkg",
-            "cli@3",
-        ] {
-            let dependencies = vec![dependency.to_string()];
-            assert!(
-                paths(
-                    &cache_dir,
-                    rscript.as_os_str(),
-                    &[],
-                    &dependencies,
-                    Some("2026-06-01"),
-                    default_quarto_flags(),
-                    None
-                )
-                .unwrap()
-                .is_none(),
-                "{dependency} should not use a warm resolution marker",
-            );
-        }
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn registry_and_remote_refs_use_resolution_markers() {
-        let dir = unique_dir("ir-cacheable-ref-cache-unit");
-        let cache_dir = dir.join("cache");
-        fs::create_dir_all(&cache_dir).unwrap();
-        let rscript = dummy_rscript(&dir);
-
-        for dependency in [
-            "cli",
-            "cli@3.6.6",
-            "cli@>=3.6.6",
-            "github::owner/repo@branch",
-            "owner/repo/subdir@main",
-            "pkg=owner/repo/subdir@main",
-            "gitlab::group/project",
-            "https://example.com/pkg.tar.gz",
-        ] {
-            let dependencies = vec![dependency.to_string()];
-            assert!(
-                paths(
-                    &cache_dir,
-                    rscript.as_os_str(),
-                    &[],
-                    &dependencies,
-                    Some("2026-06-01"),
-                    default_quarto_flags(),
-                    None
-                )
-                .unwrap()
-                .is_some(),
-                "{dependency} should use a warm resolution marker",
-            );
-        }
 
         let _ = fs::remove_dir_all(&dir);
     }

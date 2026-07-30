@@ -393,16 +393,17 @@ fn resolve_library_inner(
         },
         library_root,
     )?;
-    let cached_library = if refresh {
-        None
-    } else {
-        resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?
+    let read_caches = || -> Result<_, Box<dyn Error>> {
+        if refresh {
+            Ok((None, None))
+        } else {
+            Ok((
+                resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?,
+                python::read_cache(python_request)?,
+            ))
+        }
     };
-    let cached_python = if refresh {
-        None
-    } else {
-        python::read_cache(python_request)?
-    };
+    let (cached_library, cached_python) = read_caches()?;
     if let Some(resolved) = &cached_library {
         if python_request.is_none() || cached_python.is_some() {
             return Ok(ResolvedLibrary {
@@ -414,16 +415,7 @@ fn resolve_library_inner(
     }
 
     let _resolver_lock = FileLock::acquire(&resolver_lock_path(cache_dir))?;
-    let cached_library = if refresh {
-        None
-    } else {
-        resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?
-    };
-    let cached_python = if refresh {
-        None
-    } else {
-        python::read_cache(python_request)?
-    };
+    let (cached_library, cached_python) = read_caches()?;
     if let Some(resolved) = &cached_library {
         if python_request.is_none() || cached_python.is_some() {
             return Ok(ResolvedLibrary {
@@ -436,14 +428,6 @@ fn resolve_library_inner(
 
     let resolve_r = cached_library.is_none();
     let resolve_python = python_request.is_some() && cached_python.is_none();
-    if !resolve_r && !resolve_python {
-        let resolved = cached_library.expect("cached library was checked above");
-        return Ok(ResolvedLibrary {
-            library: Some(resolved.library),
-            primary_package: resolved.primary_package,
-            python: cached_python,
-        });
-    }
 
     let driver = driver::cached_path(cache_dir, driver::RESOLVE_FILE, RESOLVE_DRIVER)?;
     let tmp = env::temp_dir();

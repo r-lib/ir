@@ -1762,11 +1762,14 @@ cat("selected=primary\n")
 "#,
     )
     .unwrap();
-    let package_ref = format!("local::{}", renviron_path(&package));
+    let package_ref = format!("local::{}?reinstall", renviron_path(&package));
+    let dependency_ref = format!("local::{}", renviron_path(&dep));
 
     let out = ir()
         .env("IR_CACHE_DIR", &cache_dir)
-        .args(["tool", "run", "--from", &package_ref, "picked"])
+        .args(["tool", "run", "--with", &dependency_ref, "--from"])
+        .arg(&package_ref)
+        .arg("picked")
         .output()
         .unwrap();
     assert_success(&out);
@@ -2252,24 +2255,56 @@ fn tool_install_with_rscript_wrapper_records_primary_package_marker() {
     .unwrap();
     make_executable(&wrapper);
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_RSCRIPT", &wrapper)
-        .env("IR_TEST_RSCRIPT_TARGET", rscript())
-        .args([
-            "tool",
-            "install",
-            "--with",
-            "docopt,pkgsearch,prettyunits",
-            "--bin-dir",
-        ])
-        .arg(&bin_dir)
-        .arg("cli")
-        .output()
-        .unwrap();
+    let install = |refresh: bool| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_RSCRIPT", &wrapper)
+            .env("IR_TEST_RSCRIPT_TARGET", rscript())
+            .args(["tool", "install"]);
+        if refresh {
+            command.args(["--refresh", "--force"]);
+        }
+        command
+            .args(["--with", "docopt,pkgsearch,prettyunits", "--bin-dir"])
+            .arg(&bin_dir)
+            .arg("cli")
+            .output()
+            .unwrap()
+    };
 
+    let out = install(false);
     assert_success(&out);
     assert_stdout_contains(&out, "Installed");
+
+    let resolution_dir = cache_dir.join("resolutions");
+    let main_marker = fs::read_dir(&resolution_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| !path.to_string_lossy().contains("-primary-"))
+        .unwrap();
+    let main_name = main_marker.file_name().unwrap().to_string_lossy();
+    for suffix in ["stale-a", "stale-b"] {
+        fs::write(
+            resolution_dir.join(format!("{main_name}-primary-{suffix}")),
+            "stale\n",
+        )
+        .unwrap();
+    }
+
+    let out = install(true);
+    assert_success(&out);
+    let sidecars = fs::read_dir(&resolution_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("{main_name}-primary-"))
+        })
+        .count();
+    assert_eq!(sidecars, 1);
 }
 
 fn launcher_path(bin_dir: &Path, name: &str) -> PathBuf {

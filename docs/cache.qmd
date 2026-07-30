@@ -10,17 +10,18 @@ Installed tools use the same resolver cache for tooling and markers, but their p
 
 Resolution requests are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
-Latest resolution records a Unix timestamp inside the cache marker; markers older than `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` are refreshed in place, so newly published versions are picked up without accumulating one marker per refresh window.
+R resolution records a Unix timestamp inside the cache marker; markers older than `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` are refreshed in place, so changed package metadata is picked up without accumulating one marker per refresh window.
 The default max age is 86400 seconds (24 hours).
 Set `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS=0` to treat every time-bounded resolution marker as stale, including one written during the current second.
-Snapshot resolution uses the `exclude-newer` date in the key because the default CRAN and Bioconductor PPM repository states are immutable.
-Remote source refs, including GitHub, GitLab, Bitbucket, git, and URL refs, use the same expiring marker policy as latest registry resolution.
-This remains true when `exclude-newer` is set because that date does not make a branch head or remote URL immutable.
+After pak resolves the complete dependency graph, `ir` uses pak's resolved source locations to choose the marker policy.
+Any graph containing a network-backed resolved location uses the same expiring marker policy, including registry snapshots, GitHub, GitLab, Bitbucket, git, URL, and transitive remote dependencies.
+An `exclude-newer` date remains part of the cache key, so different snapshot requests never share a marker.
+A mixed local/network graph follows the network policy; use `--refresh` to pick up local changes immediately.
 Python environments use separate cache markers that record the resolved Python executable path.
 If the recorded Python path no longer exists, `ir` resolves the Python environment again.
 
-Local package refs, unknown ref types, and refs with pak query modifiers skip the resolution-marker cache.
-Each invocation asks pak to resolve them again, so local changes and explicit cache-control modifiers are not hidden behind a warm marker.
+Resolution graphs with no network-backed pak source, or with any pak query modifier, skip the resolution-marker cache.
+Each invocation asks pak to resolve local-only graphs again, so local changes and explicit cache-control modifiers are not hidden behind a warm marker.
 
 Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
 Scripts or tools that resolve to the same install refs share one library.

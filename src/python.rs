@@ -293,9 +293,6 @@ fn source_is_current(source: &str, request: &EnvRequest) -> Result<bool, Box<dyn
     let Some(max_age_seconds) = request.latest_max_age_seconds else {
         return Ok(source == request.source.as_str());
     };
-    if max_age_seconds == 0 {
-        return Ok(false);
-    }
 
     let Some(created_at) = source.strip_prefix("latest: ") else {
         return Ok(false);
@@ -307,7 +304,7 @@ fn source_is_current(source: &str, request: &EnvRequest) -> Result<bool, Box<dyn
     if created_at > now {
         return Ok(false);
     }
-    Ok(now - created_at <= max_age_seconds)
+    Ok(now - created_at < max_age_seconds)
 }
 
 fn latest_max_age_seconds() -> Result<u64, Box<dyn Error>> {
