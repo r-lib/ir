@@ -1732,6 +1732,8 @@ cat("not reached\n")
 fn tool_run_limits_metadata_lookup_to_primary_package() {
     let cache_dir = temp_dir("ir-tool-primary-package-cache");
     let package_dir = temp_dir("ir-tool-primary-package-packages");
+    let resolver_runs = temp_path("ir-tool-primary-package-resolver-runs", "txt");
+    let profile = temp_path("ir-tool-primary-package-profile", "R");
     let dep = write_r_source_package(&package_dir, "irtooldep", &[]);
     let dep_exec_dir = dep.join("exec");
     fs::create_dir_all(&dep_exec_dir).unwrap();
@@ -1749,7 +1751,7 @@ cat("selected=dependency\n")
         &package_dir,
         "irtoolprimary",
         &[
-            "Imports: irtooldep".to_string(),
+            "Imports: irtooldep, cli".to_string(),
             format!("Remotes: irtooldep=local::{}", renviron_path(&dep)),
         ],
     );
@@ -1762,18 +1764,66 @@ cat("selected=primary\n")
 "#,
     )
     .unwrap();
-    let package_ref = format!("local::{}?reinstall", renviron_path(&package));
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  cat("resolve\n",
+      file = Sys.getenv("IR_TEST_RESOLVER_RUNS"),
+      append = TRUE)
+}
+"#,
+    )
+    .unwrap();
+
+    let package_ref = format!("local::{}", renviron_path(&package));
     let dependency_ref = format!("local::{}", renviron_path(&dep));
 
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .args(["tool", "run", "--with", &dependency_ref, "--from"])
-        .arg(&package_ref)
-        .arg("picked")
-        .output()
-        .unwrap();
-    assert_success(&out);
-    assert_stdout_contains(&out, "selected=primary");
+    let invoke = |primary_ref: &str, secondary_ref: &str, refresh: bool, selected: &str| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_TEST_RESOLVER_RUNS", &resolver_runs)
+            .env("R_PROFILE_USER", &profile)
+            .args(["tool", "run"]);
+        if refresh {
+            command.arg("--refresh");
+        }
+        let out = command
+            .args(["--with", secondary_ref, "--from", primary_ref, "picked"])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        assert_stdout_contains(&out, selected);
+    };
+
+    let primary = (
+        package_ref.as_str(),
+        dependency_ref.as_str(),
+        "selected=primary",
+    );
+    let dependency = (
+        dependency_ref.as_str(),
+        package_ref.as_str(),
+        "selected=dependency",
+    );
+
+    invoke(primary.0, primary.1, false, primary.2);
+    invoke(dependency.0, dependency.1, false, dependency.2);
+    invoke(primary.0, primary.1, false, primary.2);
+    assert_eq!(
+        fs::read_to_string(&resolver_runs).unwrap().lines().count(),
+        2,
+        "each primary package should retain an independent warm marker"
+    );
+
+    invoke(dependency.0, dependency.1, true, dependency.2);
+    invoke(primary.0, primary.1, false, primary.2);
+    assert_eq!(
+        fs::read_to_string(&resolver_runs).unwrap().lines().count(),
+        3,
+        "refreshing one primary package should preserve its siblings"
+    );
 }
 
 #[test]
@@ -2375,7 +2425,7 @@ fn write_fake_tool_store_resolver(rscript_dir: &Path, package: &str) -> PathBuf 
                 "  fi\n",
                 "  if [ -n \"${{IR_PRIMARY_PACKAGE_MARKER:-}}\" ]; then\n",
                 "    mkdir -p \"$(dirname \"$IR_PRIMARY_PACKAGE_MARKER\")\"\n",
-                "    printf '%s\\n' {} > \"$IR_PRIMARY_PACKAGE_MARKER\"\n",
+                "    printf 'latest: %s\\n%s\\n%s\\n' \"$(date +%s)\" \"$library\" {} > \"$IR_PRIMARY_PACKAGE_MARKER\"\n",
                 "  fi\n",
                 "  printf '%s\\n' \"$library\" > \"$IR_RESOLVE_RESULT_FILE\"\n",
                 "  printf '%s\\n' {} > \"$IR_RESOLVE_PACKAGE_RESULT_FILE\"\n",

@@ -71,13 +71,22 @@ pub(crate) fn read(
         return Ok(None);
     };
 
-    if !cache.marker.exists() {
+    let marker = if primary_package {
+        let Some(package_marker) = &cache.package_marker else {
+            return Ok(None);
+        };
+        package_marker
+    } else {
+        &cache.marker
+    };
+
+    if !marker.exists() {
         return Ok(None);
     }
 
-    let marker = fs::read_to_string(&cache.marker)
-        .map_err(|e| format!("failed to read `{}`: {e}", cache.marker.display()))?;
-    let mut lines = marker.lines();
+    let contents = fs::read_to_string(marker)
+        .map_err(|e| format!("failed to read `{}`: {e}", marker.display()))?;
+    let mut lines = contents.lines();
     let source = lines.next().unwrap_or_default();
     if !source_is_current(source)? {
         return Ok(None);
@@ -88,15 +97,7 @@ pub(crate) fn read(
     }
 
     let primary_package = if primary_package {
-        let Some(package_marker) = &cache.package_marker else {
-            return Ok(None);
-        };
-        if !package_marker.exists() {
-            return Ok(None);
-        }
-        let package = fs::read_to_string(package_marker)
-            .map_err(|e| format!("failed to read `{}`: {e}", package_marker.display()))?;
-        let package = package.lines().next().unwrap_or_default().trim();
+        let package = lines.next().unwrap_or_default().trim();
         if package.is_empty() {
             return Ok(None);
         }

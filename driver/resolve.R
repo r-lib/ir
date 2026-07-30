@@ -189,7 +189,6 @@ ir_latest_resolution_max_age_seconds <- function() {
 }
 
 ir_marker_source <- function(created_at = ir_current_utc_seconds()) {
-  ir_latest_resolution_max_age_seconds()
   sprintf("latest: %.0f", floor(created_at))
 }
 
@@ -206,13 +205,15 @@ ir_marker_source_current <- function(source) {
 }
 
 ir_is_network_locator <- function(locator) {
-  grepl("^[[:alpha:]][[:alnum:]+.-]*://", locator) &&
+  uri <- grepl("^[[:alpha:]][[:alnum:]+.-]*://", locator) &&
     !grepl("^file:", locator, ignore.case = TRUE)
+  scp <- grepl("^[^/@:[:space:]]+@[^/@:[:space:]]+:.+", locator)
+  uri || scp
 }
 
-ir_resolution_marker_source <- function(res) {
+ir_resolution_is_cacheable <- function(res) {
   if (is.null(res) || !nrow(res))
-    return(ir_marker_source())
+    return(TRUE)
 
   stopifnot(
     is.data.frame(res),
@@ -221,16 +222,13 @@ ir_resolution_marker_source <- function(res) {
     is.list(res$params)
   )
 
-  if (any(lengths(res$params))) return(NULL)
+  if (any(lengths(res$params))) return(FALSE)
 
   locators <- unlist(res$sources, use.names = FALSE)
   if ("mirror" %in% names(res))
     locators <- c(locators, res$mirror)
   locators <- locators[!is.na(locators) & nzchar(locators)]
-  if (any(vapply(locators, ir_is_network_locator, logical(1))))
-    ir_marker_source()
-  else
-    NULL
+  any(vapply(locators, ir_is_network_locator, logical(1)))
 }
 
 ir_invalidate_primary_package_markers <- function(marker) {
@@ -354,24 +352,23 @@ ir_resolve_main <- function() {
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!marker_from_rust && !refresh && file.exists(marker)) {
-    cached <- readLines(marker, n = 2L, warn = FALSE)
-    if (length(cached) >= 2L &&
+  if (!marker_from_rust && !refresh) {
+    cache_marker <- if (is.null(package_result_file)) marker else package_marker
+    required_lines <- if (is.null(package_result_file)) 2L else 3L
+    cached <- if (!is.null(cache_marker) && file.exists(cache_marker))
+      readLines(cache_marker, n = required_lines, warn = FALSE)
+    else
+      character()
+    if (length(cached) >= required_lines &&
         ir_marker_source_current(cached[[1L]]) &&
         nzchar(cached[[2L]]) &&
         dir.exists(cached[[2L]])) {
-      cached_package <- if (!is.null(package_result_file) &&
-                            !is.null(package_marker) &&
-                            file.exists(package_marker))
-        readLines(package_marker, n = 1L, warn = FALSE)
-      else
-        character()
       package_is_current <- is.null(package_result_file) ||
-        (length(cached_package) == 1L && nzchar(cached_package[[1L]]))
+        nzchar(cached[[3L]])
       if (package_is_current) {
         writeLines(cached[[2L]], result_file)
         if (!is.null(package_result_file))
-          writeLines(cached_package, package_result_file)
+          writeLines(cached[[3L]], package_result_file)
         return(invisible())
       }
     }
@@ -411,7 +408,9 @@ ir_resolve_main <- function() {
     }
   }
 
-  marker_source <- ir_resolution_marker_source(res)
+  cache_resolution <- ir_resolution_is_cacheable(res)
+  if (cache_resolution)
+    ir_latest_resolution_max_age_seconds()
   if (is.null(res)) {
     pkgs     <- character()
     install_specs <- character()
@@ -459,13 +458,15 @@ ir_resolve_main <- function() {
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
-  ir_invalidate_primary_package_markers(marker)
-  if (!is.null(marker_source)) {
+  if (cache_resolution) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
+    marker_source <- ir_marker_source()
     writeLines(c(marker_source, library_path), marker)
     if (!is.null(primary_package) && !is.null(package_marker))
-      writeLines(primary_package, package_marker)
+      writeLines(c(marker_source, library_path, primary_package),
+                 package_marker)
   } else {
+    ir_invalidate_primary_package_markers(marker)
     if (unlink(marker) != 0L)
       stop("could not invalidate the previous resolution marker",
            call. = FALSE)

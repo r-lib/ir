@@ -2325,9 +2325,11 @@ fn run_materializes_with_complete_dated_repository_set() {
     let cache_dir = temp_dir("ir-dated-repositories-cache");
     let fake_library = temp_dir("ir-dated-repositories-tooling");
     let effective_repositories = temp_path("ir-dated-repositories", "txt");
+    let materialized = temp_path("ir-dated-repositories-materialized", "txt");
     let resolutions = temp_path("ir-dated-repository-resolutions", "txt");
     let profile = temp_path("ir-dated-repositories-profile", "R");
     let renviron = temp_path("ir-dated-repositories-renviron", "");
+    let finished_at = current_utc_seconds();
 
     install_fake_r_package(
         &fake_library,
@@ -2376,7 +2378,10 @@ pkg_deps <- function(refs, ...) {
     stringsAsFactors = FALSE
   )
   res$sources <- list(
-    "https://packagemanager.posit.co/cran/2026-06-01/src/contrib/irdatedfixture_1.0.0.tar.gz",
+    if (startsWith(refs[[1L]], "git@"))
+      refs[[1L]]
+    else
+      "https://packagemanager.posit.co/cran/2026-06-01/src/contrib/irdatedfixture_1.0.0.tar.gz",
     "file:///tmp/irlocalfixture",
     character()
   )
@@ -2413,6 +2418,7 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
     dir.create(file.path(library, package),
                recursive = TRUE, showWarnings = FALSE)
   }
+  writeLines("materialized", Sys.getenv("IR_TEST_MATERIALIZED"))
   invisible(TRUE)
 }
 "#,
@@ -2426,8 +2432,15 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
     fs::write(
         &profile,
         format!(
-            ".libPaths(c({}, .libPaths()))\n",
-            serde_json::to_string(&renviron_path(&fake_library)).unwrap()
+            r#".libPaths(c({}, .libPaths()))
+Sys.time <- function() {{
+  finished_at <- as.numeric(Sys.getenv("IR_TEST_FINISHED_AT"))
+  if (!file.exists(Sys.getenv("IR_TEST_MATERIALIZED")))
+    finished_at <- finished_at - 1200
+  as.POSIXct(finished_at, origin = "1970-01-01", tz = "UTC")
+}}
+"#,
+            serde_json::to_string(&renviron_path(&fake_library)).unwrap(),
         ),
     )
     .unwrap();
@@ -2442,7 +2455,10 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
             .env("R_ENVIRON_USER", &renviron)
             .env("RENV_CONFIG_PAK_ENABLED", "TRUE")
             .env("IR_TEST_EFFECTIVE_REPOSITORIES", &effective_repositories)
+            .env("IR_TEST_FINISHED_AT", finished_at.to_string())
+            .env("IR_TEST_MATERIALIZED", &materialized)
             .env("IR_TEST_RESOLUTIONS", &resolutions)
+            .env("IR_LATEST_RESOLUTION_MAX_AGE_SECONDS", "600")
             .args([
                 "run",
                 "--isolated",
@@ -2465,12 +2481,11 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
     }
     assert_eq!(resolver_probe_count(&resolutions), 1);
     let marker_text = only_resolution_marker_text(&cache_dir);
-    assert!(
-        marker_text
-            .lines()
-            .next()
-            .is_some_and(|line| line.starts_with("latest: ")),
-        "a graph with a network source should use the shared TTL policy\n{marker_text}"
+    let expected_marker_source = format!("latest: {finished_at}");
+    assert_eq!(
+        marker_text.lines().next(),
+        Some(expected_marker_source.as_str()),
+        "the marker timestamp should be recorded after materialization"
     );
 
     for _ in 0..2 {
@@ -2480,6 +2495,15 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
         resolver_probe_count(&resolutions),
         3,
         "pak query modifiers should bypass the resolution cache"
+    );
+
+    for _ in 0..2 {
+        invoke("git@example.test:r-xla/anvl.git");
+    }
+    assert_eq!(
+        resolver_probe_count(&resolutions),
+        4,
+        "SCP-style Git sources should use the shared TTL policy"
     );
     assert_eq!(
         fs::read_to_string(effective_repositories)
