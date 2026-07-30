@@ -380,6 +380,7 @@ $ ir tool run --from btw btw --help</code></pre>
 <pre class="console"><code>$ rx --with cli --from btw btw
 $ rx -w cli --from btw btw
 $ rx --from 'btw&gt;=0.1.0' btw
+$ rx --refresh --from btw btw
 $ rx --r-version 4.5 --from btw btw
 $ rx --rscript /path/to/Rscript --from btw btw</code></pre>
 <p>Package refs use pak syntax. Quote refs when the shell would otherwise interpret characters such as <code>&gt;</code>.</p>
@@ -411,6 +412,7 @@ $ rx --rscript /path/to/Rscript --from btw btw</code></pre>
 <p><code>ir tool install</code> resolves a package, materialises its package library into the durable tool store, and installs the executables it provides.</p>
 <pre class="console"><code>$ ir tool install btw
 $ ir tool install github::r-lib/Rapp
+$ ir tool install --refresh --force github::r-lib/Rapp
 $ ir tool install --bin-dir ~/.local/bin btw
 $ ir tool install --force btw
 $ ir tool install --with cli --r-version 4.5 btw

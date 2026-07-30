@@ -393,6 +393,7 @@ ul.task-list li input[type="checkbox"] {
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>            Select the Rscript executable
       <span style="color: #00BBBB; font-weight: bold;">--exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>         Use this date for default CRAN and Bioconductor PPM snapshots
       <span style="color: #00BBBB; font-weight: bold;">--python-exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>  Resolve Python packages using this snapshot date
+      <span style="color: #00BBBB; font-weight: bold;">--refresh</span>                      Ignore cached dependency resolution for this invocation
       <span style="color: #00BBBB; font-weight: bold;">--isolated</span>                     Disable the user library for this run
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>                         Print help
 
@@ -429,6 +430,7 @@ ul.task-list li input[type="checkbox"] {
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>            Select the Rscript executable
       <span style="color: #00BBBB; font-weight: bold;">--exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>         Use this date for default CRAN and Bioconductor PPM snapshots
       <span style="color: #00BBBB; font-weight: bold;">--python-exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>  Resolve Python packages using this snapshot date
+      <span style="color: #00BBBB; font-weight: bold;">--refresh</span>                      Ignore cached dependency resolution for this invocation
       <span style="color: #00BBBB; font-weight: bold;">--isolated</span>                     Disable the user library for this render
       <span style="color: #00BBBB; font-weight: bold;">--vanilla</span>                      Pass --vanilla to the Rscript used by Quarto
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>                         Print help
@@ -465,6 +467,7 @@ ul.task-list li input[type="checkbox"] {
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>            Select the Rscript executable
       <span style="color: #00BBBB; font-weight: bold;">--exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>         Use this date for default CRAN and Bioconductor PPM snapshots
       <span style="color: #00BBBB; font-weight: bold;">--python-exclude-newer</span><span style="color: #555555;"> &lt;DATE&gt;</span>  Resolve Python packages using this snapshot date
+      <span style="color: #00BBBB; font-weight: bold;">--refresh</span>                      Ignore cached dependency resolution for this invocation
       <span style="color: #00BBBB; font-weight: bold;">--isolated</span>                     Disable the user library for this preview
       <span style="color: #00BBBB; font-weight: bold;">--vanilla</span>                      Pass --vanilla to the Rscript used by Quarto
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>                         Print help
@@ -524,6 +527,7 @@ ul.task-list li input[type="checkbox"] {
   <span style="color: #00BBBB; font-weight: bold;">-w</span>, <span style="color: #00BBBB; font-weight: bold;">--with</span><span style="color: #555555;"> &lt;PKG&gt;</span>         Add a dependency for this tool run; may be repeated
       <span style="color: #00BBBB; font-weight: bold;">--r-version</span><span style="color: #555555;"> &lt;SPEC&gt;</span>   Select the R version for this tool run with rig
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>  Select the Rscript executable
+      <span style="color: #00BBBB; font-weight: bold;">--refresh</span>            Ignore cached dependency resolution for this invocation
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>               Print help
 
 <span style="color: #5555FF; font-weight: bold;">Tool discovery:</span>
@@ -560,6 +564,7 @@ ul.task-list li input[type="checkbox"] {
       <span style="color: #00BBBB; font-weight: bold;">--rscript</span><span style="color: #555555;"> &lt;RSCRIPT&gt;</span>  Select the Rscript executable
       <span style="color: #00BBBB; font-weight: bold;">--bin-dir</span><span style="color: #555555;"> &lt;DIR&gt;</span>      Directory where executables are installed
       <span style="color: #00BBBB; font-weight: bold;">--force</span>              Overwrite an existing installed executable path
+      <span style="color: #00BBBB; font-weight: bold;">--refresh</span>            Ignore cached dependency resolution for this invocation
   <span style="color: #00BBBB; font-weight: bold;">-h</span>, <span style="color: #00BBBB; font-weight: bold;">--help</span>               Print help
 
 <span style="color: #5555FF; font-weight: bold;">Tool discovery:</span>
