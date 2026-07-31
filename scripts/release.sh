@@ -93,6 +93,30 @@ wait_for_workflow() {
     --interval 10
 }
 
+wait_for_pypi() {
+  local version="$1"
+  local tool_dir="$2"
+  local bin_dir="$3"
+  local cache_dir="$4"
+  local attempt
+
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    if UV_NO_CONFIG=1 \
+      UV_DEFAULT_INDEX=https://pypi.org/simple \
+      UV_TOOL_DIR="$tool_dir" \
+      UV_TOOL_BIN_DIR="$bin_dir" \
+      UV_CACHE_DIR="$cache_dir" \
+      uv tool install --no-cache "r-lib-ir==$version"; then
+      return
+    fi
+    if ((attempt < 60)); then
+      sleep 5
+    fi
+  done
+
+  die "failed to install r-lib-ir==$version from PyPI"
+}
+
 case "${1:-}" in
   -h | --help)
     usage
@@ -106,7 +130,7 @@ version="$1"
   die "provide one stable version like 0.4.0"
 tag="v$version"
 
-for command in git gh awk grep mktemp tar Rscript; do
+for command in git gh awk grep mktemp tar Rscript uv; do
   command -v "$command" >/dev/null 2>&1 || die "required command not found: $command"
 done
 
@@ -200,6 +224,23 @@ rx_bin="$release_dir/ir-$target/rx"
 "$ir_bin" --help >/dev/null
 "$rx_bin" --help >/dev/null
 IR_CACHE_DIR="$release_dir/cache" "$ir_bin" run \
+  --rscript "$(command -v Rscript)" \
+  -e 'stopifnot(nzchar(as.character(getRversion())))'
+
+pypi_tool_dir="$release_dir/pypi-tool"
+pypi_bin_dir="$release_dir/pypi-bin"
+wait_for_pypi \
+  "$version" \
+  "$pypi_tool_dir" \
+  "$pypi_bin_dir" \
+  "$release_dir/pypi-uv-cache"
+pypi_ir="$pypi_bin_dir/ir"
+pypi_rx="$pypi_bin_dir/rx"
+[[ "$("$pypi_ir" --version)" == "ir $version" ]] || die "PyPI ir has the wrong version"
+[[ "$("$pypi_rx" --version)" == "rx $version" ]] || die "PyPI rx has the wrong version"
+"$pypi_ir" --help >/dev/null
+"$pypi_rx" --help >/dev/null
+IR_CACHE_DIR="$release_dir/pypi-cache" "$pypi_ir" run \
   --rscript "$(command -v Rscript)" \
   -e 'stopifnot(nzchar(as.character(getRversion())))'
 

@@ -60,6 +60,15 @@ pak selects the Bioconductor release compatible with the selected R.
 
 ## Install
 
+Install from PyPI with `uv`:
+
+```sh
+uv tool install r-lib-ir
+```
+
+This installs both `ir` and `rx`. If the `uv` tool executable directory is
+not already on `PATH`, run `uv tool update-shell`.
+
 Install a pre-built binary on Linux or macOS:
 
 ```sh
@@ -110,7 +119,7 @@ On Windows PowerShell, run:
 .\scripts\install-dev-deps.ps1
 ```
 
-The setup scripts install Rust, Python, rig, the current R release, R 4.3 for
+The setup scripts install Rust, Python, uv, rig, the current R release, R 4.3 for
 the version-selection and documentation example tests, and Quarto. They do not
 run tests or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on
 Windows to inspect the plan.
