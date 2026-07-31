@@ -959,3 +959,298 @@ fi
 
     let _ = fs::remove_dir_all(&temp);
 }
+
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    any(target_arch = "aarch64", target_arch = "x86_64")
+))]
+mod release_script_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use support::{make_executable, write_executable, TempPath};
+
+    struct ReleaseFixture {
+        _root: TempPath,
+        repo: PathBuf,
+        origin: PathBuf,
+        assets: PathBuf,
+        log: PathBuf,
+        path: OsString,
+    }
+
+    impl ReleaseFixture {
+        fn new() -> Self {
+            let root = temp_dir("ir-release-script");
+            let repo = root.join("repo");
+            let origin = root.join("origin.git");
+            let bin = root.join("bin");
+            let assets = root.join("assets");
+            fs::create_dir_all(repo.join("scripts")).unwrap();
+            fs::create_dir_all(&bin).unwrap();
+            fs::create_dir_all(&assets).unwrap();
+
+            let release_script = repo_root().join("scripts/release.sh");
+            fs::copy(&release_script, repo.join("scripts/release.sh")).unwrap();
+            make_executable(&repo.join("scripts/release.sh"));
+            fs::write(
+                repo.join("Cargo.toml"),
+                "[package]\nname = \"ir\"\nversion = \"0.3.0+dev\"\n",
+            )
+            .unwrap();
+            fs::write(
+                repo.join("Cargo.lock"),
+                concat!(
+                    "version = 4\n\n",
+                    "[[package]]\nname = \"helper\"\nversion = \"0.4.0\"\n\n",
+                    "[[package]]\nname = \"ir\"\nversion = \"0.3.0+dev\"\n",
+                ),
+            )
+            .unwrap();
+
+            let log = root.join("release.log");
+            fs::write(&log, "").unwrap();
+            write_executable(
+                &repo.join("scripts/check.sh"),
+                "#!/bin/sh\nset -eu\nprintf 'check\\n' >> \"$IR_RELEASE_TEST_LOG\"\n",
+            );
+            write_executable(
+                &bin.join("gh"),
+                r#"#!/bin/sh
+set -eu
+printf 'gh %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1:$2" in
+  repo:view) printf 'r-lib/ir\n' ;;
+  run:list)
+    case " $* " in
+      *" release.yml "*) printf '202\n' ;;
+      *) printf '101\n' ;;
+    esac
+    ;;
+  run:watch) ;;
+  release:view) printf 'https://example.test/v0.4.0\n' ;;
+  release:download)
+    destination=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--dir" ]; then
+        destination="$2"
+        shift 2
+      else
+        shift
+      fi
+    done
+    cp "$IR_RELEASE_TEST_ASSETS"/* "$destination/"
+    ;;
+  *) echo "unexpected gh command: $*" >&2; exit 98 ;;
+esac
+"#,
+            );
+            write_executable(
+                &bin.join("Rscript"),
+                "#!/bin/sh\nset -eu\nprintf 'Rscript %s\\n' \"$*\" >> \"$IR_RELEASE_TEST_LOG\"\n",
+            );
+
+            let target = release_target();
+            let package = format!("ir-{target}");
+            let package_dir = root.join(&package);
+            fs::create_dir_all(&package_dir).unwrap();
+            write_executable(
+                &package_dir.join("ir"),
+                r#"#!/bin/sh
+set -eu
+printf 'artifact ir %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'ir 0.4.0\n' ;;
+  --help) ;;
+  run) "$3" -e "$5" ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
+            write_executable(
+                &package_dir.join("rx"),
+                r#"#!/bin/sh
+set -eu
+printf 'artifact rx %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'rx 0.4.0\n' ;;
+  --help) ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
+            let archive_name = format!("{package}.tar.gz");
+            let archive = assets.join(&archive_name);
+            let output = Command::new("tar")
+                .current_dir(&root)
+                .args(["-czf", archive.to_str().unwrap(), &package])
+                .output()
+                .unwrap();
+            assert_success(&output);
+            use sha2::{Digest as _, Sha256};
+            let digest = Sha256::digest(fs::read(&archive).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            fs::write(
+                assets.join("SHA256SUMS.txt"),
+                format!("{digest}  {archive_name}\n"),
+            )
+            .unwrap();
+
+            run_git(&root, &["init", "--bare", origin.to_str().unwrap()]);
+            run_git(&repo, &["init", "-b", "main"]);
+            run_git(&repo, &["config", "user.email", "release-test@example.com"]);
+            run_git(&repo, &["config", "user.name", "Release Test"]);
+            run_git(&repo, &["add", "."]);
+            run_git(&repo, &["commit", "-m", "Initial development"]);
+            run_git(
+                &repo,
+                &["remote", "add", "origin", origin.to_str().unwrap()],
+            );
+            run_git(&repo, &["push", "-u", "origin", "main"]);
+
+            let mut paths = vec![bin];
+            paths.extend(std::env::split_paths(
+                &std::env::var_os("PATH").unwrap_or_default(),
+            ));
+
+            Self {
+                _root: root,
+                repo,
+                origin,
+                assets,
+                log,
+                path: std::env::join_paths(paths).unwrap(),
+            }
+        }
+
+        fn run(&self, version: &str) -> Output {
+            Command::new(self.repo.join("scripts/release.sh"))
+                .current_dir(&self.repo)
+                .arg(version)
+                .env("PATH", &self.path)
+                .env("IR_RELEASE_TEST_LOG", &self.log)
+                .env("IR_RELEASE_TEST_ASSETS", &self.assets)
+                .output()
+                .unwrap()
+        }
+
+        fn git_text(&self, args: &[&str]) -> String {
+            command_text(Command::new("git").current_dir(&self.repo).args(args))
+        }
+
+        fn origin_text(&self, args: &[&str]) -> String {
+            command_text(
+                Command::new("git")
+                    .args(["--git-dir", self.origin.to_str().unwrap()])
+                    .args(args),
+            )
+        }
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_success(&output);
+    }
+
+    fn command_text(command: &mut Command) -> String {
+        let output = command.output().unwrap();
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    fn release_target() -> &'static str {
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => "aarch64-apple-darwin",
+            ("macos", "x86_64") => "x86_64-apple-darwin",
+            ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+            ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+            (os, arch) => panic!("unsupported release test host: {os}/{arch}"),
+        }
+    }
+
+    fn assert_event_order(log: &str, events: &[&str]) {
+        let mut rest = log;
+        for event in events {
+            let position = rest
+                .find(event)
+                .unwrap_or_else(|| panic!("missing event {event:?}\n{log}"));
+            rest = &rest[position + event.len()..];
+        }
+    }
+
+    #[test]
+    fn release_script_rejects_invalid_version_before_preflight() {
+        let output = Command::new(repo_root().join("scripts/release.sh"))
+            .arg("v0.4.0")
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success(), "{}", output_text(&output));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("stable version like 0.4.0"),
+            "{}",
+            output_text(&output)
+        );
+    }
+
+    #[test]
+    fn release_script_runs_the_release_sequence() {
+        let fixture = ReleaseFixture::new();
+
+        let output = fixture.run("0.4.0");
+
+        assert_success(&output);
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.toml"))
+            .unwrap()
+            .contains("version = \"0.4.0+dev\""));
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.lock"))
+            .unwrap()
+            .contains("name = \"ir\"\nversion = \"0.4.0+dev\""));
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.lock"))
+            .unwrap()
+            .contains("name = \"helper\"\nversion = \"0.4.0\""));
+        assert_eq!(
+            fixture.git_text(&["log", "-2", "--format=%s"]),
+            "Mark post-release builds as development versions\nRelease v0.4.0"
+        );
+        let release_commit = fixture.git_text(&["rev-parse", "HEAD^"]);
+        assert_eq!(
+            fixture.git_text(&["rev-parse", "v0.4.0^{}"]),
+            release_commit
+        );
+        assert_eq!(fixture.git_text(&["cat-file", "-t", "v0.4.0"]), "tag");
+        assert_eq!(
+            fixture.origin_text(&["rev-parse", "v0.4.0^{}"]),
+            release_commit
+        );
+        assert_eq!(
+            fixture.origin_text(&["rev-parse", "refs/heads/main"]),
+            fixture.git_text(&["rev-parse", "HEAD"])
+        );
+
+        let log = fs::read_to_string(&fixture.log).unwrap();
+        assert_event_order(
+            &log,
+            &[
+                "gh repo view",
+                "gh repo view",
+                "check",
+                "gh run watch 101",
+                "gh run watch 202",
+                "gh release view v0.4.0",
+                "gh release download v0.4.0",
+                "artifact ir --version",
+                "artifact rx --version",
+                "artifact ir run",
+                "Rscript -e",
+                "gh run watch 101",
+            ],
+        );
+    }
+}
