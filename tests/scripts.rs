@@ -73,6 +73,49 @@ fn public_windows_install_guidance_recommends_scoop() {
 }
 
 #[test]
+fn public_install_guidance_includes_uv_tool_install() {
+    for file in ["README.md", "docs/config.qmd"] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        assert!(text.contains("uv tool install r-lib-ir"), "{file}");
+    }
+}
+
+#[test]
+fn release_workflow_publishes_pypi_wheels() {
+    let workflow = fs::read_to_string(repo_root().join(".github/workflows/release.yml")).unwrap();
+
+    for expected in [
+        "PyO3/maturin-action@v1",
+        "manylinux: \"2014\"",
+        "name: pypi-${{ matrix.target }}",
+        "environment: pypi",
+        "id-token: write",
+        "pattern: pypi-*",
+        "uv publish",
+        "--trusted-publishing always",
+        "--check-url https://pypi.org/simple",
+        "tag $TAG does not match Cargo.toml version v$package_version",
+    ] {
+        assert!(workflow.contains(expected), "missing {expected:?}");
+    }
+}
+
+#[test]
+fn release_process_documents_pypi_setup_and_verification() {
+    let release = fs::read_to_string(repo_root().join("RELEASE.md")).unwrap();
+
+    for expected in [
+        "r-lib-ir",
+        "pending Trusted Publisher",
+        "environment `pypi`",
+        "workflow `release.yml`",
+        "uv tool install",
+    ] {
+        assert!(release.contains(expected), "missing {expected:?}");
+    }
+}
+
+#[test]
 fn public_ir_links_use_r_lib_owner() {
     for file in [
         "README.md",
@@ -1049,6 +1092,52 @@ esac
                 &bin.join("Rscript"),
                 "#!/bin/sh\nset -eu\nprintf 'Rscript %s\\n' \"$*\" >> \"$IR_RELEASE_TEST_LOG\"\n",
             );
+            write_executable(&bin.join("sleep"), "#!/bin/sh\nset -eu\n");
+            write_executable(
+                &bin.join("uv"),
+                r#"#!/bin/sh
+set -eu
+printf 'uv %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+attempts="$(grep -c '^uv ' "$IR_RELEASE_TEST_LOG" || true)"
+if [ "$attempts" -le "${IR_RELEASE_TEST_UV_FAILURES:-0}" ]; then
+  exit 97
+fi
+case "$1:$2" in
+  tool:install)
+    mkdir -p "$UV_TOOL_BIN_DIR"
+    cp "$IR_RELEASE_TEST_ASSETS/pypi-ir" "$UV_TOOL_BIN_DIR/ir"
+    cp "$IR_RELEASE_TEST_ASSETS/pypi-rx" "$UV_TOOL_BIN_DIR/rx"
+    ;;
+  *) echo "unexpected uv command: $*" >&2; exit 98 ;;
+esac
+"#,
+            );
+
+            write_executable(
+                &assets.join("pypi-ir"),
+                r#"#!/bin/sh
+set -eu
+printf 'pypi ir %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'ir 0.4.0\n' ;;
+  --help) ;;
+  run) "$3" -e "$5" ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
+            write_executable(
+                &assets.join("pypi-rx"),
+                r#"#!/bin/sh
+set -eu
+printf 'pypi rx %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'rx 0.4.0\n' ;;
+  --help) ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
 
             let target = release_target();
             let package = format!("ir-{target}");
@@ -1126,14 +1215,29 @@ esac
         }
 
         fn run(&self, version: &str) -> Output {
-            Command::new(self.repo.join("scripts/release.sh"))
+            self.command(version).output().unwrap()
+        }
+
+        fn run_with_uv_failure(&self, version: &str) -> Output {
+            self.run_with_uv_failures(version, 100)
+        }
+
+        fn run_with_uv_failures(&self, version: &str, failures: usize) -> Output {
+            self.command(version)
+                .env("IR_RELEASE_TEST_UV_FAILURES", failures.to_string())
+                .output()
+                .unwrap()
+        }
+
+        fn command(&self, version: &str) -> Command {
+            let mut command = Command::new(self.repo.join("scripts/release.sh"));
+            command
                 .current_dir(&self.repo)
                 .arg(version)
                 .env("PATH", &self.path)
                 .env("IR_RELEASE_TEST_LOG", &self.log)
-                .env("IR_RELEASE_TEST_ASSETS", &self.assets)
-                .output()
-                .unwrap()
+                .env("IR_RELEASE_TEST_ASSETS", &self.assets);
+            command
         }
 
         fn git_text(&self, args: &[&str]) -> String {
@@ -1249,8 +1353,60 @@ esac
                 "artifact rx --version",
                 "artifact ir run",
                 "Rscript -e",
+                "uv tool install --no-cache r-lib-ir==0.4.0",
+                "pypi ir --version",
+                "pypi rx --version",
+                "pypi ir --help",
+                "pypi rx --help",
+                "pypi ir run",
+                "Rscript -e",
                 "gh run watch 101",
             ],
         );
+    }
+
+    #[test]
+    fn failed_pypi_smoke_stops_before_development_version_commit() {
+        let fixture = ReleaseFixture::new();
+
+        let output = fixture.run_with_uv_failure("0.4.0");
+
+        assert!(!output.status.success(), "{}", output_text(&output));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("failed to install r-lib-ir==0.4.0 from PyPI"),
+            "{}",
+            output_text(&output)
+        );
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.toml"))
+            .unwrap()
+            .contains("version = \"0.4.0\""));
+        assert_eq!(
+            fixture.git_text(&["log", "-1", "--format=%s"]),
+            "Release v0.4.0"
+        );
+        assert_eq!(
+            fixture.origin_text(&["rev-parse", "refs/heads/main"]),
+            fixture.git_text(&["rev-parse", "HEAD"])
+        );
+    }
+
+    #[test]
+    fn transient_pypi_visibility_is_retried() {
+        let fixture = ReleaseFixture::new();
+
+        let output = fixture.run_with_uv_failures("0.4.0", 2);
+
+        assert_success(&output);
+        let log = fs::read_to_string(&fixture.log).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line == &"uv tool install --no-cache r-lib-ir==0.4.0")
+                .count(),
+            3
+        );
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.toml"))
+            .unwrap()
+            .contains("version = \"0.4.0+dev\""));
     }
 }

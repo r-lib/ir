@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.10,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "r-lib-ir"
+dynamic = ["version"]
+description = "Run standalone R scripts from embedded dependency metadata."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = ["r", "quarto", "reproducibility"]
+classifiers = [
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+]
+
+[project.urls]
+Homepage = "https://r-lib.github.io/ir/"
+Repository = "https://github.com/r-lib/ir"
+Documentation = "https://r-lib.github.io/ir/"
+Issues = "https://github.com/r-lib/ir/issues"
+
+[tool.maturin]
+bindings = "bin"
+compatibility = "pypi"
+locked = true
+strip = true

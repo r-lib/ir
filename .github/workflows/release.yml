@@ -1,12 +1,12 @@
 name: Release
 
-# Build pre-built `ir` binaries and publish them to a GitHub Release so users
-# can install without a Rust toolchain (see issue #30).
+# Build pre-built `ir` binaries and publish them to GitHub and PyPI so users can
+# install without a Rust toolchain (see issue #30).
 #
 # Releases are tag-driven: push a tag like `v0.1.0` (or `v0.1.0-rc1` for a
 # prerelease) and the matching release is built and published. A manual
-# `workflow_dispatch` run builds the artifacts for inspection; pass an existing
-# tag to (re)publish that tag's release.
+# `workflow_dispatch` run builds the artifacts for inspection. Before passing an
+# existing tag, follow the PyPI recovery limits in RELEASE.md.
 
 on:
   push:
@@ -115,9 +115,143 @@ jobs:
           path: dist/${{ matrix.archive }}
           if-no-files-found: error
 
+  pypi:
+    name: pypi-${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2014"
+          - os: macos-14
+            target: aarch64-apple-darwin
+            manylinux: "off"
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --compatibility pypi --out dist
+
+      - name: Smoke test wheel
+        if: runner.os != 'Windows' && matrix.target != 'aarch64-unknown-linux-gnu'
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
+          UV_CACHE_DIR: ${{ runner.temp }}/r-lib-ir-cache
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          uv tool install --no-index --find-links dist r-lib-ir
+          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
+          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
+          "$UV_TOOL_BIN_DIR/ir" --help >/dev/null
+          "$UV_TOOL_BIN_DIR/rx" --help >/dev/null
+
+      - name: Smoke test wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}\r-lib-ir-tool
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}\r-lib-ir-bin
+          UV_CACHE_DIR: ${{ runner.temp }}\r-lib-ir-cache
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
+          uv tool install --no-index --find-links dist r-lib-ir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ir = Join-Path $env:UV_TOOL_BIN_DIR 'ir.exe'
+          $rx = Join-Path $env:UV_TOOL_BIN_DIR 'rx.exe'
+          $irVersion = & $ir --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($irVersion -ne "ir $version") { throw 'wrong ir version' }
+          $rxVersion = & $rx --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($rxVersion -ne "rx $version") { throw 'wrong rx version' }
+          & $ir --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $rx --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  pypi-smoke-linux-aarch64:
+    name: pypi-aarch64-unknown-linux-gnu smoke test
+    needs: pypi
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-aarch64-unknown-linux-gnu
+          path: dist
+
+      - name: Smoke test wheel
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
+          UV_CACHE_DIR: ${{ runner.temp }}/r-lib-ir-cache
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          uv tool install --no-index --find-links dist r-lib-ir
+          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
+          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
+          "$UV_TOOL_BIN_DIR/ir" --help >/dev/null
+          "$UV_TOOL_BIN_DIR/rx" --help >/dev/null
+
   publish:
     name: publish
-    needs: build
+    needs: [build, pypi-smoke-linux-aarch64]
     # Only publish for a real tag: a tag push, or a manual run given a tag.
     if: ${{ github.ref_type == 'tag' || inputs.tag != '' }}
     runs-on: ubuntu-22.04
@@ -143,6 +277,14 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "tag must be semver like v0.1.0 or v0.1.0-rc1, got: $TAG" >&2
+            exit 1
+          fi
+          package_version="$(awk '
+            $0 == "[package]" { package = 1; next }
+            package && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }
+          ' Cargo.toml)"
+          if [ "$TAG" != "v$package_version" ]; then
+            echo "tag $TAG does not match Cargo.toml version v$package_version" >&2
             exit 1
           fi
           git rev-parse "refs/tags/$TAG" >/dev/null
@@ -185,3 +327,41 @@ jobs:
           else
             gh release create "$TAG" dist/* --title "$TAG" --generate-notes "${prerelease_args[@]}"
           fi
+
+  publish-pypi:
+    name: publish PyPI
+    needs: publish
+    if: ${{ github.ref_type == 'tag' || inputs.tag != '' }}
+    runs-on: ubuntu-22.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify wheel set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t wheels < <(find dist -maxdepth 1 -type f -name 'r_lib_ir-*.whl' -print)
+          if [ "${#wheels[@]}" -ne 5 ]; then
+            printf 'expected 5 r-lib-ir wheels, found %s\n' "${#wheels[@]}" >&2
+            printf '%s\n' "${wheels[@]}" >&2
+            exit 1
+          fi
+          printf '%s\n' "${wheels[@]}"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8
+
+      - name: Publish wheels to PyPI
+        run: |
+          uv publish \
+            --trusted-publishing always \
+            --check-url https://pypi.org/simple \
+            dist/*.whl

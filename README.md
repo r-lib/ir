@@ -60,6 +60,15 @@ pak selects the Bioconductor release compatible with the selected R.
 
 ## Install
 
+Install from PyPI with `uv`:
+
+```sh
+uv tool install r-lib-ir
+```
+
+This installs both `ir` and `rx`. If the `uv` tool executable directory is
+not already on `PATH`, run `uv tool update-shell`.
+
 Install a pre-built binary on Linux or macOS:
 
 ```sh
