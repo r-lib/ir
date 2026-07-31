@@ -150,7 +150,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -225,7 +225,7 @@ jobs:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Download wheel
         uses: actions/download-artifact@v4
@@ -357,7 +357,7 @@ jobs:
           printf '%s\n' "${wheels[@]}"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Publish wheels to PyPI
         run: |

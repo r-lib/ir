@@ -101,6 +101,33 @@ fn release_workflow_publishes_pypi_wheels() {
 }
 
 #[test]
+fn workflows_pin_setup_uv_to_exact_release() {
+    for file in [".github/workflows/ci.yml", ".github/workflows/release.yml"] {
+        let workflow = fs::read_to_string(repo_root().join(file)).unwrap();
+        let versions: Vec<_> = workflow
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let line = line.strip_prefix("- ").unwrap_or(line);
+                line.strip_prefix("uses: astral-sh/setup-uv@v")
+            })
+            .collect();
+
+        assert!(!versions.is_empty(), "{file} should set up uv");
+        for version in versions {
+            let parts: Vec<_> = version.split('.').collect();
+            assert_eq!(parts.len(), 3, "{file} should pin setup-uv to vX.Y.Z");
+            assert!(
+                parts
+                    .iter()
+                    .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())),
+                "{file} should pin setup-uv to vX.Y.Z"
+            );
+        }
+    }
+}
+
+#[test]
 fn release_process_documents_pypi_setup_and_verification() {
     let release = fs::read_to_string(repo_root().join("RELEASE.md")).unwrap();
 
