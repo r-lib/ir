@@ -13,6 +13,7 @@ use crate::spec::PythonSpec;
 
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
+const UV_CACHE_DIR_ENV: &str = "UV_CACHE_DIR";
 
 pub(crate) struct EnvRequest {
     pub(crate) packages: Vec<String>,
@@ -39,13 +40,13 @@ pub(crate) fn request(
         None
     };
     let source = cache_source(python.exclude_newer.as_deref())?;
-    let uv_config_parts = uv_config_cache_key_parts();
+    let uv_cache_key_parts = uv_cache_key_parts();
     let marker = if packages
         .iter()
         .all(|package| python_package_spec_cacheable(package))
         && python_resolver_env_cacheable()
     {
-        uv_config_parts.map(|parts| {
+        uv_cache_key_parts.map(|parts| {
             cache_dir.join("python").join(cache_key(
                 &packages,
                 python.python_version.as_deref(),
@@ -182,8 +183,24 @@ fn python_resolver_env_cacheable() -> bool {
 }
 
 fn python_resolver_env_var(name: &OsStr) -> bool {
-    name.to_str()
-        .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
+    name.to_str().is_some_and(|name| {
+        name == "RETICULATE_UV" || (name.starts_with("UV_") && name != UV_CACHE_DIR_ENV)
+    })
+}
+
+fn uv_cache_key_parts() -> Option<Vec<String>> {
+    let mut parts = uv_config_cache_key_parts()?;
+    let Some(cache_dir) = env_os_nonempty(UV_CACHE_DIR_ENV) else {
+        return Some(parts);
+    };
+    let cache_dir = PathBuf::from(cache_dir);
+    let cache_dir = if cache_dir.is_absolute() {
+        cache_dir
+    } else {
+        env::current_dir().ok()?.join(cache_dir)
+    };
+    parts.push(format!("uv-cache-dir: {}", cache_dir.to_str()?));
+    Some(parts)
 }
 
 fn uv_config_cache_key_parts() -> Option<Vec<String>> {
@@ -264,7 +281,7 @@ fn cache_key(
     packages: &[String],
     python_version: Option<&str>,
     exclude_newer: Option<&str>,
-    uv_config_parts: &[String],
+    uv_cache_key_parts: &[String],
 ) -> String {
     let mut parts = packages.to_vec();
     parts.sort();
@@ -278,7 +295,7 @@ fn cache_key(
             .map(|date| format!("exclude-newer: {date}"))
             .unwrap_or_else(|| "latest".to_string()),
     );
-    parts.extend(uv_config_parts.iter().cloned());
+    parts.extend(uv_cache_key_parts.iter().cloned());
     sha256_fields(&parts)
 }
 

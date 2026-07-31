@@ -1134,6 +1134,97 @@ printf 'ir.fixture=python-local-cache\\n'\n",
 
 #[cfg(unix)]
 #[test]
+fn run_python_uv_cache_dir_keys_python_resolution_cache() {
+    let cache_dir = temp_dir("ir-run-python-uv-cache-dir-cache");
+    let first_uv_cache_dir = temp_dir("ir-run-python-uv-cache-dir-first");
+    let second_uv_cache_dir = temp_dir("ir-run-python-uv-cache-dir-second");
+    let bin_dir = temp_dir("ir-run-python-uv-cache-dir-bin");
+    let script = temp_path("ir-run-python-uv-cache-dir", "R");
+    let rscript = bin_dir.join("Rscript");
+    let resolver_count = temp_path("ir-run-python-uv-cache-dir-count", "txt");
+
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env -S ir run
+#| python-packages:
+#|   - pandas
+
+cat("ignored\n")
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  if [ -n \"${{IR_RESOLUTION_MARKER:-}}\" ]; then\n\
+    mkdir -p \"$(dirname \"$IR_RESOLUTION_MARKER\")\"\n\
+    printf 'latest: %s\\n%s\\n' \"$(date +%s)\" \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLUTION_MARKER\"\n\
+  fi\n\
+  if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+    printf 'python\\n' >> {}\n\
+    python=\"$UV_CACHE_DIR/environment/bin/python\"\n\
+    mkdir -p \"$(dirname \"$python\")\"\n\
+    printf '#!/bin/sh\\nexit 0\\n' > \"$python\"\n\
+    chmod +x \"$python\"\n\
+    printf '%s\\n' \"$python\" > \"$IR_PYTHON_RESULT_FILE\"\n\
+  fi\n\
+  exit 0\n\
+fi\n\
+if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
+  printf 'python\\n' >> {}\n\
+  python=\"$UV_CACHE_DIR/environment/bin/python\"\n\
+  mkdir -p \"$(dirname \"$python\")\"\n\
+  printf '#!/bin/sh\\nexit 0\\n' > \"$python\"\n\
+  chmod +x \"$python\"\n\
+  printf '%s\\n' \"$python\" > \"$IR_PYTHON_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+printf 'ir.fixture=python-uv-cache-dir\n'\n\
+printf 'reticulate_python=%s\\n' \"${{RETICULATE_PYTHON:-}}\"",
+            resolver_count.display(),
+            resolver_count.display()
+        ),
+    );
+
+    for uv_cache_dir in [&first_uv_cache_dir, &second_uv_cache_dir] {
+        for _ in 0..2 {
+            let mut command = ir();
+            remove_uv_resolver_env(&mut command);
+            let out = command
+                .env("IR_CACHE_DIR", &cache_dir)
+                .env("UV_CACHE_DIR", uv_cache_dir)
+                .args(["run", "--rscript"])
+                .arg(&rscript)
+                .arg(&script)
+                .output()
+                .unwrap();
+            assert_success(&out);
+            assert_stdout_contains(&out, "ir.fixture=python-uv-cache-dir");
+            assert_stdout_contains(
+                &out,
+                &format!(
+                    "reticulate_python={}",
+                    uv_cache_dir.join("environment/bin/python").display()
+                ),
+            );
+        }
+    }
+
+    let count = fs::read_to_string(&resolver_count).unwrap();
+    assert_eq!(
+        count.lines().count(),
+        2,
+        "each uv cache location should resolve once\n{count}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn run_python_uv_resolver_env_bypasses_python_resolution_cache() {
     let cache_dir = temp_dir("ir-run-python-uv-env-cache");
     let bin_dir = temp_dir("ir-run-python-uv-env-bin");
