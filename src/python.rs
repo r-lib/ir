@@ -13,7 +13,10 @@ use crate::spec::PythonSpec;
 
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
-const UV_CACHE_DIR_ENV: &str = "UV_CACHE_DIR";
+const UV_PATH_ENV_VARS: [(&str, &str); 2] = [
+    ("UV_CACHE_DIR", "uv-cache-dir"),
+    ("UV_PYTHON_INSTALL_DIR", "uv-python-install-dir"),
+];
 
 pub(crate) struct EnvRequest {
     pub(crate) packages: Vec<String>,
@@ -184,22 +187,26 @@ fn python_resolver_env_cacheable() -> bool {
 
 fn python_resolver_env_var(name: &OsStr) -> bool {
     name.to_str().is_some_and(|name| {
-        name == "RETICULATE_UV" || (name.starts_with("UV_") && name != UV_CACHE_DIR_ENV)
+        name == "RETICULATE_UV"
+            || (name.starts_with("UV_")
+                && !UV_PATH_ENV_VARS.iter().any(|(env_var, _)| name == *env_var))
     })
 }
 
 fn uv_cache_key_parts() -> Option<Vec<String>> {
     let mut parts = uv_config_cache_key_parts()?;
-    let Some(cache_dir) = env_os_nonempty(UV_CACHE_DIR_ENV) else {
-        return Some(parts);
-    };
-    let cache_dir = PathBuf::from(cache_dir);
-    let cache_dir = if cache_dir.is_absolute() {
-        cache_dir
-    } else {
-        env::current_dir().ok()?.join(cache_dir)
-    };
-    parts.push(format!("uv-cache-dir: {}", cache_dir.to_str()?));
+    for (env_var, label) in UV_PATH_ENV_VARS {
+        let Some(path) = env_os_nonempty(env_var) else {
+            continue;
+        };
+        let path = PathBuf::from(path);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            env::current_dir().ok()?.join(path)
+        };
+        parts.push(format!("{label}: {}", path.to_str()?));
+    }
     Some(parts)
 }
 

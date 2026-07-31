@@ -1134,14 +1134,16 @@ printf 'ir.fixture=python-local-cache\\n'\n",
 
 #[cfg(unix)]
 #[test]
-fn run_python_uv_cache_dir_keys_python_resolution_cache() {
-    let cache_dir = temp_dir("ir-run-python-uv-cache-dir-cache");
-    let first_uv_cache_dir = temp_dir("ir-run-python-uv-cache-dir-first");
-    let second_uv_cache_dir = temp_dir("ir-run-python-uv-cache-dir-second");
-    let bin_dir = temp_dir("ir-run-python-uv-cache-dir-bin");
-    let script = temp_path("ir-run-python-uv-cache-dir", "R");
+fn run_python_uv_path_settings_key_python_resolution_cache() {
+    let cache_dir = temp_dir("ir-run-python-uv-path-cache");
+    let first_uv_cache_dir = temp_dir("ir-run-python-uv-path-cache-first");
+    let second_uv_cache_dir = temp_dir("ir-run-python-uv-path-cache-second");
+    let first_uv_python_dir = temp_dir("ir-run-python-uv-path-python-first");
+    let second_uv_python_dir = temp_dir("ir-run-python-uv-path-python-second");
+    let bin_dir = temp_dir("ir-run-python-uv-path-bin");
+    let script = temp_path("ir-run-python-uv-path", "R");
     let rscript = bin_dir.join("Rscript");
-    let resolver_count = temp_path("ir-run-python-uv-cache-dir-count", "txt");
+    let resolver_count = temp_path("ir-run-python-uv-path-count", "txt");
 
     fs::write(
         &script,
@@ -1167,7 +1169,7 @@ if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
   fi\n\
   if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
     printf 'python\\n' >> {}\n\
-    python=\"$UV_CACHE_DIR/environment/bin/python\"\n\
+    python=\"$UV_CACHE_DIR/$(basename \"$UV_PYTHON_INSTALL_DIR\")/bin/python\"\n\
     mkdir -p \"$(dirname \"$python\")\"\n\
     printf '#!/bin/sh\\nexit 0\\n' > \"$python\"\n\
     chmod +x \"$python\"\n\
@@ -1177,39 +1179,47 @@ if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
 fi\n\
 if [ -n \"${{IR_PYTHON_RESULT_FILE:-}}\" ]; then\n\
   printf 'python\\n' >> {}\n\
-  python=\"$UV_CACHE_DIR/environment/bin/python\"\n\
+  python=\"$UV_CACHE_DIR/$(basename \"$UV_PYTHON_INSTALL_DIR\")/bin/python\"\n\
   mkdir -p \"$(dirname \"$python\")\"\n\
   printf '#!/bin/sh\\nexit 0\\n' > \"$python\"\n\
   chmod +x \"$python\"\n\
   printf '%s\\n' \"$python\" > \"$IR_PYTHON_RESULT_FILE\"\n\
   exit 0\n\
 fi\n\
-printf 'ir.fixture=python-uv-cache-dir\n'\n\
+printf 'ir.fixture=python-uv-path\n'\n\
 printf 'reticulate_python=%s\\n' \"${{RETICULATE_PYTHON:-}}\"",
             resolver_count.display(),
             resolver_count.display()
         ),
     );
 
-    for uv_cache_dir in [&first_uv_cache_dir, &second_uv_cache_dir] {
+    for (uv_cache_dir, uv_python_dir) in [
+        (&first_uv_cache_dir, &first_uv_python_dir),
+        (&second_uv_cache_dir, &first_uv_python_dir),
+        (&second_uv_cache_dir, &second_uv_python_dir),
+    ] {
         for _ in 0..2 {
             let mut command = ir();
             remove_uv_resolver_env(&mut command);
             let out = command
                 .env("IR_CACHE_DIR", &cache_dir)
                 .env("UV_CACHE_DIR", uv_cache_dir)
+                .env("UV_PYTHON_INSTALL_DIR", uv_python_dir)
                 .args(["run", "--rscript"])
                 .arg(&rscript)
                 .arg(&script)
                 .output()
                 .unwrap();
             assert_success(&out);
-            assert_stdout_contains(&out, "ir.fixture=python-uv-cache-dir");
+            assert_stdout_contains(&out, "ir.fixture=python-uv-path");
             assert_stdout_contains(
                 &out,
                 &format!(
                     "reticulate_python={}",
-                    uv_cache_dir.join("environment/bin/python").display()
+                    uv_cache_dir
+                        .join(uv_python_dir.file_name().unwrap())
+                        .join("bin/python")
+                        .display()
                 ),
             );
         }
@@ -1218,8 +1228,8 @@ printf 'reticulate_python=%s\\n' \"${{RETICULATE_PYTHON:-}}\"",
     let count = fs::read_to_string(&resolver_count).unwrap();
     assert_eq!(
         count.lines().count(),
-        2,
-        "each uv cache location should resolve once\n{count}"
+        3,
+        "each combination of uv path settings should resolve once\n{count}"
     );
 }
 
