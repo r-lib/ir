@@ -167,6 +167,7 @@ function Add-PathIfExists {
 function Add-KnownInstallPaths {
     Add-PathIfExists (Join-Path $HOME ".cargo\bin")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps")
+    Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "R\bin")
@@ -363,6 +364,11 @@ if (-not $SkipPython -and -not (Test-AnyRunnableTool @("python", "python3"))) {
     Add-KnownInstallPaths
 }
 
+if (-not $SkipPython -and -not (Test-RunnableTool "uv")) {
+    Install-WingetPackage "astral-sh.uv"
+    Add-KnownInstallPaths
+}
+
 if (-not (Test-Tool "rig")) {
     Install-Rig
     Add-KnownInstallPaths
@@ -389,6 +395,7 @@ Set-TestRMetadata
 Invoke-Step "cargo" @("--version")
 Invoke-Step "rustc" @("--version")
 Invoke-Step (Get-PythonTool) @("--version")
+Invoke-Step "uv" @("--version")
 Invoke-Step "rig" @("--version")
 Invoke-Step "Rscript" @("--version")
 if (-not $SkipTestR) {

@@ -233,6 +233,8 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "apt-get install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
+    assert_stdout_contains(&out, "https://astral.sh/uv/install.sh");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(&out, "https://rig.r-pkg.org/deb/rig.gpg");
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
@@ -260,6 +262,8 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "xcode-select --install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
+    assert_stdout_contains(&out, "https://astral.sh/uv/install.sh");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(
         &out,
         "https://github.com/r-lib/rig/releases/download/<latest-rig-tag>/rig-<latest-rig-version>-macOS-<macos-arch>.pkg",
@@ -308,6 +312,10 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("https://sh.rustup.rs"), "{stdout}");
     assert!(!stdout.contains("python3 python3-venv"), "{stdout}");
+    assert!(
+        !stdout.contains("https://astral.sh/uv/install.sh"),
+        "{stdout}"
+    );
     assert!(!stdout.contains("quarto-linux-"), "{stdout}");
     assert!(!stdout.contains("rig add release"), "{stdout}");
 }
@@ -738,6 +746,8 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "rustup-init-");
     assert_stdout_contains(&out, "-y --default-toolchain stable");
     assert!(!String::from_utf8_lossy(&out.stdout).contains("Rustlang.Rustup"));
+    assert_stdout_contains(&out, "winget install --id astral-sh.uv");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(&out, "winget install --id posit.rig");
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
@@ -785,6 +795,10 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("choco install rig"), "{stdout}");
     assert!(
+        !stdout.contains("winget install --id astral-sh.uv"),
+        "{stdout}"
+    );
+    assert!(
         !stdout.contains("winget install --id posit.rig"),
         "{stdout}"
     );
@@ -825,6 +839,8 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("Microsoft.VisualStudio.2022.BuildTools"));
     assert!(script.contains("https://win.rustup.rs"));
     assert!(!script.contains("Rustlang.Rustup"));
+    assert!(script.contains("Install-WingetPackage \"astral-sh.uv\""));
+    assert!(script.contains("Invoke-Step \"uv\" @(\"--version\")"));
     assert!(script.contains("posit.rig"));
     assert!(!script.contains("choco"));
     assert!(script.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
@@ -843,6 +859,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
         "Windows CI must not require winget before honoring skipped components"
     );
     assert!(script.contains("Microsoft\\WindowsApps"));
+    assert!(script.contains("Microsoft\\WinGet\\Links"));
     assert!(script.contains(r#"Test-AnyRunnableTool @("python", "python3")"#));
     assert!(!script.contains(r#"Test-AnyTool @("python", "python3")"#));
     assert!(!script.contains(r#"@("python", "python3", "py")"#));
