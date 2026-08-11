@@ -2869,6 +2869,139 @@ cat("ir.fixture=transitive-source\n")
 }
 
 #[test]
+fn run_no_local_sources_rejects_direct_and_transitive_local_packages() {
+    let cache_dir = temp_dir("ir-no-local-sources-cache");
+    let package_dir = temp_dir("ir-no-local-sources-packages");
+    let dep = write_r_source_package(&package_dir, "irnolocaldep", &[]);
+    let parent = write_r_source_package(
+        &package_dir,
+        "irnolocalparent",
+        &[
+            "Imports: irnolocaldep, cli".to_string(),
+            format!("Remotes: irnolocaldep=local::{}", renviron_path(&dep)),
+        ],
+    );
+    let script = temp_path("ir-no-local-sources", "R");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - local::{}
+
+library(irnolocalparent)
+library(irnolocaldep)
+cat("ir.fixture=no-local-sources\n")
+"#,
+            renviron_path(&parent)
+        ),
+    )
+    .unwrap();
+
+    let unrestricted = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("IR_NO_LOCAL_SOURCES")
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&unrestricted);
+    assert_stdout_contains(&unrestricted, "ir.fixture=no-local-sources");
+    only_resolution_marker_text(&cache_dir);
+
+    let restricted = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!restricted.status.success(), "{}", output_text(&restricted));
+    let error = String::from_utf8_lossy(&restricted.stderr);
+    assert!(
+        error.contains("IR_NO_LOCAL_SOURCES is set")
+            && error.contains("irnolocalparent")
+            && error.contains("irnolocaldep")
+            && error.contains("remote package source"),
+        "{}",
+        output_text(&restricted)
+    );
+    assert!(!stdout(&restricted).contains("ir.fixture=no-local-sources"));
+}
+
+#[test]
+fn run_no_local_sources_rejects_packages_from_file_repositories() {
+    let cache_dir = temp_dir("ir-no-local-repository-cache");
+    let package_dir = temp_dir("ir-no-local-repository-packages");
+    let repository = temp_dir("ir-no-local-repository");
+    let profile = temp_path("ir-no-local-repository-profile", "R");
+    let package = write_r_source_package(&package_dir, "irnolocalrepo", &[]);
+    write_r_repository_package(&package, &repository.join("src").join("contrib"));
+    fs::write(
+        &profile,
+        format!(
+            "options(repos = c(CRAN = {}))\n",
+            serde_json::to_string(&r_repository_url(&repository)).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "irnolocalrepo",
+            "-e",
+            "cat('ir.fixture=no-local-repository-should-not-run\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        error.contains("IR_NO_LOCAL_SOURCES is set")
+            && error.contains("irnolocalrepo")
+            && error.contains("remote package source"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(!stdout(&out).contains("ir.fixture=no-local-repository-should-not-run"));
+}
+
+#[test]
+fn run_no_local_sources_allows_remote_package_sources() {
+    let cache_dir = temp_dir("ir-no-local-sources-remote-cache");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env_remove("R_PROFILE_USER")
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "--with",
+            "cli",
+            "-e",
+            "cat('ir.fixture=no-local-sources-remote\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=no-local-sources-remote");
+}
+
+#[test]
 fn run_frontmatter_local_ref_reruns_resolution_when_package_changes() {
     let cache_dir = temp_dir("ir-local-ref-cache");
     let package_dir = temp_dir("ir-local-ref-packages");

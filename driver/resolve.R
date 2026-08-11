@@ -154,6 +154,7 @@ ir_input_key <- function(deps,
                          exclude_newer = NULL,
                          quarto        = FALSE,
                          quarto_reticulate = FALSE,
+                         no_local_sources = FALSE,
                          library_root  = NULL) {
   source_key <- if (is.null(exclude_newer))
     "latest"
@@ -168,6 +169,8 @@ ir_input_key <- function(deps,
                              if (quarto) "quarto" else NULL,
                              if (quarto_reticulate)
                                "quarto-reticulate" else NULL,
+                             if (no_local_sources)
+                               "no-local-sources" else NULL,
                              if (!is.null(library_root))
                                paste0("library-root: ", library_root) else NULL,
                              as.character(rversion),
@@ -209,6 +212,52 @@ ir_is_network_locator <- function(locator) {
     !grepl("^file:", locator, ignore.case = TRUE)
   scp <- grepl("^[^/@:[:space:]]+@[^/@:[:space:]]+:.+", locator)
   uri || scp
+}
+
+ir_resolved_locators <- function(res, i) {
+  locators <- res$sources[[i]]
+  if ("mirror" %in% names(res))
+    locators <- c(locators, res$mirror[[i]])
+  locators <- as.character(locators)
+  locators[!is.na(locators) & nzchar(locators)]
+}
+
+ir_assert_remote_sources <- function(res) {
+  if (is.null(res) || !nrow(res)) return(invisible())
+
+  stopifnot(
+    is.data.frame(res),
+    all(c("ref", "type", "direct", "package", "sources") %in% names(res)),
+    is.list(res$sources),
+    all(!is.na(res$ref)),
+    all(!is.na(res$type)),
+    all(!is.na(res$direct)),
+    all(!is.na(res$package))
+  )
+
+  file_sources <- vapply(seq_len(nrow(res)), function(i) {
+    any(grepl("^file:", ir_resolved_locators(res, i), ignore.case = TRUE))
+  }, logical(1))
+  local <- tolower(res$type) == "local" | file_sources
+  if (!any(local)) return(invisible())
+
+  rows <- which(local)
+  origins <- vapply(rows, function(i) {
+    locators <- ir_resolved_locators(res, i)
+    files <- locators[grepl("^file:", locators, ignore.case = TRUE)]
+    if (length(files)) files[[1L]] else res$ref[[i]]
+  }, character(1))
+  roles <- ifelse(res$direct[rows], "requested package", "dependency")
+  details <- unique(sprintf("%s `%s` from `%s`",
+                            roles, res$package[rows], origins))
+
+  stop(
+    "IR_NO_LOCAL_SOURCES is set, but pak resolved packages from ",
+    "the local file system:\n- ",
+    paste(details, collapse = "\n- "),
+    "\nUse a remote package source or unset IR_NO_LOCAL_SOURCES.",
+    call. = FALSE
+  )
 }
 
 ir_resolution_is_cacheable <- function(res) {
@@ -329,6 +378,7 @@ ir_resolve_main <- function() {
   # already provide it. (Distinct from IR_QUARTO, the quarto executable path.)
   quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
   quarto_reticulate <- !is.null(ir_env_optional("IR_QUARTO_RETICULATE"))
+  no_local_sources <- !is.null(ir_env_optional("IR_NO_LOCAL_SOURCES"))
 
   ## 1b. Resolution cache: Rust checks its marker before launching this resolver.
   ## Wrapper Rscript CLI runs and direct driver invocations use an R-derived
@@ -342,6 +392,7 @@ ir_resolve_main <- function() {
                         ir_input_key(deps, exclude_newer = exclude_newer,
                                      quarto = quarto,
                                      quarto_reticulate = quarto_reticulate,
+                                     no_local_sources = no_local_sources,
                                      library_root = library_root))
   }
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
@@ -407,6 +458,9 @@ ir_resolve_main <- function() {
       res <- ir_resolve_refs(refs_in)
     }
   }
+
+  if (no_local_sources)
+    ir_assert_remote_sources(res)
 
   cache_resolution <- ir_resolution_is_cacheable(res)
   if (cache_resolution)
