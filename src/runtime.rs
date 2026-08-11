@@ -401,10 +401,15 @@ fn resolve_library_inner(
         if refresh {
             Ok((None, None))
         } else {
-            Ok((
-                resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?,
-                python::read_cache(python_request)?,
-            ))
+            // R startup profiles can change the effective repositories after
+            // this Rust cache check. Restricted runs must launch the resolver
+            // so pak's current manifest can be validated.
+            let cached_library = if no_local_sources {
+                None
+            } else {
+                resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?
+            };
+            Ok((cached_library, python::read_cache(python_request)?))
         }
     };
     let (cached_library, cached_python) = read_caches()?;

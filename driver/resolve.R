@@ -407,7 +407,9 @@ ir_resolve_main <- function() {
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!marker_from_rust && !refresh) {
+  # Restricted runs must validate the manifest selected by the current startup
+  # profile. This also covers Rscript wrappers without a Rust-owned marker.
+  if (!marker_from_rust && !refresh && !no_local_sources) {
     cache_marker <- if (is.null(package_result_file)) marker else package_marker
     required_lines <- if (is.null(package_result_file)) 2L else 3L
     cached <- if (!is.null(cache_marker) && file.exists(cache_marker))

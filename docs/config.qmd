@@ -76,6 +76,7 @@ Future snapshot dates also resolve latest packages.
 Use `--refresh` or set `IR_REFRESH` to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries.
 Set `IR_NO_LOCAL_SOURCES` to a nonempty value to require direct and transitive R package sources to come from remote repositories.
 Local package refs, `file:` URLs, and packages from `file:` repositories are rejected after pak resolves the complete dependency set.
+Restricted invocations rerun R package resolution so sources selected by the current repository configuration are validated before a cached library is used.
 `exclude-newer` dates the default CRAN and Bioconductor repositories with PPM snapshots.
 When Python metadata is present, the selected `exclude-newer` value is also used during Python environment resolution unless `--python-exclude-newer` or frontmatter `python-exclude-newer` is set.
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.
