@@ -47,9 +47,9 @@ ul.task-list li input[type="checkbox"] {
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-64a204ab8560d761af7679ceaba22944.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-953b800d9952cad34f3dacfb44715a02.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="site_libs/bootstrap/bootstrap-dark-4ed19646e448f51b124ecd4727e6ff6b.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="site_libs/bootstrap/bootstrap-953b800d9952cad34f3dacfb44715a02.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-8b4acc9e858250717d89728bfb1b0732.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-dark-b47d5aebbf81f843d1208c4514cbc867.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="site_libs/bootstrap/bootstrap-8b4acc9e858250717d89728bfb1b0732.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -388,66 +388,71 @@ ul.task-list li input[type="checkbox"] {
 <td><code>86400</code> seconds</td>
 </tr>
 <tr class="even">
+<td><code>IR_NO_LOCAL_SOURCES</code></td>
+<td>dependency-resolving commands</td>
+<td>unset; any nonempty value prevents installing R packages from local sources</td>
+</tr>
+<tr class="odd">
 <td><code>IR_REFRESH</code></td>
 <td>dependency-resolving commands</td>
 <td>unset; any nonempty value bypasses resolution markers</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>IR_R_VERSION</code></td>
 <td>R version selected through <code>rig</code></td>
 <td>unset</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>IR_RSCRIPT</code></td>
 <td>Rscript executable path or command</td>
 <td><code>Rscript</code> on <code>PATH</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>IR_QUARTO</code></td>
 <td>Quarto rendering and preview</td>
 <td><code>quarto</code> on <code>PATH</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>IR_TOOL_STORE_DIR</code></td>
 <td><code>ir tool install</code></td>
 <td>durable installed-tool library store</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>IR_TOOL_BIN_DIR</code></td>
 <td><code>ir tool install</code></td>
 <td>first executable install directory override</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>IR_NO_MODIFY_PATH</code></td>
 <td>install scripts, <code>ir tool install</code></td>
 <td>disables automatic PATH setup when nonempty</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>RAPP_BIN_DIR</code></td>
 <td><code>ir tool install</code></td>
 <td>second executable install directory override</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>RAPP_NO_MODIFY_PATH</code></td>
 <td><code>ir tool install</code></td>
 <td>also disables automatic executable install directory PATH setup when nonempty</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>XDG_BIN_HOME</code></td>
 <td><code>ir tool install</code> on Unix</td>
 <td>third executable install directory override</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>XDG_DATA_HOME</code></td>
 <td><code>ir tool install</code> on Unix</td>
 <td><code>&lt;parent of XDG_DATA_HOME&gt;/bin</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>LOCALAPPDATA</code></td>
 <td><code>ir tool install</code> on Windows</td>
 <td><code>%LOCALAPPDATA%\Programs\R\ir\bin</code></td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>USERPROFILE</code></td>
 <td><code>ir tool install</code> on Windows</td>
 <td>fallback under <code>%USERPROFILE%\AppData</code></td>
@@ -455,7 +460,7 @@ ul.task-list li input[type="checkbox"] {
 </tbody>
 </table>
 <p>The default cache directory is computed before launching R. <code>IR_CACHE_DIR</code> is authoritative; otherwise <code>ir</code> uses the process <code>R_USER_CACHE_DIR</code>, process <code>XDG_CACHE_HOME</code>, or a platform default and appends <code>R/ir</code>. The selected path is passed to the resolver R session, so R startup files do not redirect the <code>ir</code> cache. Installed tool libraries use <code>IR_TOOL_STORE_DIR</code>. When unset, the default is <code>$XDG_DATA_HOME/ir/tools</code> or <code>~/.local/share/ir/tools</code> on Unix and macOS, and <code>%LOCALAPPDATA%\Programs\R\ir\tools</code> or <code>%USERPROFILE%\AppData\Local\Programs\R\ir\tools</code> on Windows. This store is persistent state and is not removed by <code>ir cache clean</code>.</p>
-<p>Package snapshot date precedence for <code>ir run</code>, <code>ir render</code>, and <code>ir preview</code> is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>exclude-newer</code>. <code>IR_EXCLUDE_NEWER</code> is ignored when <code>--exclude-newer</code> is supplied. Set <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> to an empty string to override frontmatter <code>exclude-newer</code> and resolve latest packages. Future snapshot dates also resolve latest packages. Use <code>--refresh</code> or set <code>IR_REFRESH</code> to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries. <code>exclude-newer</code> dates the default CRAN and Bioconductor repositories with PPM snapshots. When Python metadata is present, the selected <code>exclude-newer</code> value is also used during Python environment resolution unless <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> is set. Set <code>python-exclude-newer</code> to <code>null</code>, or set <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> to an empty string, to resolve latest Python packages while keeping <code>exclude-newer</code> for R. R selection precedence is command line, then environment, then frontmatter <code>r-version</code>. Use <code>--rscript</code> or <code>IR_RSCRIPT</code> to select a specific Rscript executable. Use <code>--r-version</code>, <code>IR_R_VERSION</code>, or frontmatter <code>r-version</code> to select an installed R through <code>rig</code>. Requirements that can match more than one R minor select released versions; use <code>devel</code> to select R-devel explicitly. Do not set both <code>--rscript</code> and <code>--r-version</code>, or both <code>IR_RSCRIPT</code> and <code>IR_R_VERSION</code>. Frontmatter <code>rscript</code> is rejected. When <code>exclude-newer</code> is set without an explicit R selector, <code>ir</code> uses <code>rig</code> to select the latest R minor version released by that date. When <code>r-version</code> can match more than one R minor, <code>exclude-newer</code> limits selection to minor versions released by that date. An exact <code>r-version</code> or explicit Rscript selection remains authoritative. <code>--bin-dir &lt;dir&gt;</code> overrides the executable install directory environment variables for <code>ir tool install</code>. On macOS, <code>ir tool install</code> adds the default <code>~/.local/bin</code> directory to the zsh profile when needed. On Windows, it adds the default or environment-selected executable install directory to the user <code>Path</code>.</p>
+<p>Package snapshot date precedence for <code>ir run</code>, <code>ir render</code>, and <code>ir preview</code> is <code>--exclude-newer</code>, then <code>IR_EXCLUDE_NEWER</code>, then frontmatter <code>exclude-newer</code>. <code>IR_EXCLUDE_NEWER</code> is ignored when <code>--exclude-newer</code> is supplied. Set <code>--exclude-newer</code> or <code>IR_EXCLUDE_NEWER</code> to an empty string to override frontmatter <code>exclude-newer</code> and resolve latest packages. Future snapshot dates also resolve latest packages. Use <code>--refresh</code> or set <code>IR_REFRESH</code> to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries. Set <code>IR_NO_LOCAL_SOURCES</code> to a nonempty value to prevent IR from installing direct or transitive R packages from local package refs, <code>file:</code> URLs, or <code>file:</code> repositories. IR checks the complete pak manifest before asking renv to materialise packages. Resolution markers and materialised libraries are shared with unrestricted invocations; the option does not verify the original source of packages reused without running package installation code. <code>exclude-newer</code> dates the default CRAN and Bioconductor repositories with PPM snapshots. When Python metadata is present, the selected <code>exclude-newer</code> value is also used during Python environment resolution unless <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> is set. Set <code>python-exclude-newer</code> to <code>null</code>, or set <code>--python-exclude-newer</code> or frontmatter <code>python-exclude-newer</code> to an empty string, to resolve latest Python packages while keeping <code>exclude-newer</code> for R. R selection precedence is command line, then environment, then frontmatter <code>r-version</code>. Use <code>--rscript</code> or <code>IR_RSCRIPT</code> to select a specific Rscript executable. Use <code>--r-version</code>, <code>IR_R_VERSION</code>, or frontmatter <code>r-version</code> to select an installed R through <code>rig</code>. Requirements that can match more than one R minor select released versions; use <code>devel</code> to select R-devel explicitly. Do not set both <code>--rscript</code> and <code>--r-version</code>, or both <code>IR_RSCRIPT</code> and <code>IR_R_VERSION</code>. Frontmatter <code>rscript</code> is rejected. When <code>exclude-newer</code> is set without an explicit R selector, <code>ir</code> uses <code>rig</code> to select the latest R minor version released by that date. When <code>r-version</code> can match more than one R minor, <code>exclude-newer</code> limits selection to minor versions released by that date. An exact <code>r-version</code> or explicit Rscript selection remains authoritative. <code>--bin-dir &lt;dir&gt;</code> overrides the executable install directory environment variables for <code>ir tool install</code>. On macOS, <code>ir tool install</code> adds the default <code>~/.local/bin</code> directory to the zsh profile when needed. On Windows, it adds the default or environment-selected executable install directory to the user <code>Path</code>.</p>
 
 
 </section>
