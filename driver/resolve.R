@@ -324,6 +324,11 @@ ir_resolve_main <- function() {
 
   cache_dir <- ir_cache_dir()
   library_root <- ir_env_optional("IR_LIBRARY_ROOT")
+  # Rust decides this policy before R startup profiles can mutate the
+  # resolver's environment.
+  driver_args <- base::commandArgs(trailingOnly = TRUE)
+  stopifnot(all(driver_args %in% "--ir-no-local-sources"))
+  no_local_sources <- "--ir-no-local-sources" %in% driver_args
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
@@ -378,7 +383,6 @@ ir_resolve_main <- function() {
   # already provide it. (Distinct from IR_QUARTO, the quarto executable path.)
   quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
   quarto_reticulate <- !is.null(ir_env_optional("IR_QUARTO_RETICULATE"))
-  no_local_sources <- !is.null(ir_env_optional("IR_NO_LOCAL_SOURCES"))
 
   ## 1b. Resolution cache: Rust checks its marker before launching this resolver.
   ## Wrapper Rscript CLI runs and direct driver invocations use an R-derived
@@ -480,8 +484,11 @@ ir_resolve_main <- function() {
 
   ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
-  # renv cache, whose layout is itself keyed by R version and platform.
+  # renv cache, whose layout is itself keyed by R version and platform. Keep
+  # restricted libraries separate from artifacts materialised without the
+  # remote-only policy.
   key <- paste(c(install_specs,
+                 if (no_local_sources) "no-local-sources" else NULL,
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
