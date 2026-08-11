@@ -155,6 +155,8 @@ jobs:
         env:
           GITHUB_PAT: ${{ github.token }}
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+          UV_CACHE_DIR: ""
+          UV_PYTHON_INSTALL_DIR: ""
 
   lint:
     name: rustfmt + clippy
