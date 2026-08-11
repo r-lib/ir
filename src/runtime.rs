@@ -29,6 +29,8 @@ const RESOLVE_DRIVER: &str = concat!(
 const TOOLING_RESTART_STATUS: i32 = 86;
 const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
 const REFRESH_ENV: &str = "IR_REFRESH";
+const NO_LOCAL_SOURCES_ENV: &str = "IR_NO_LOCAL_SOURCES";
+const NO_LOCAL_SOURCES_DRIVER_ARG: &str = "--ir-no-local-sources";
 
 /// Resolve dependencies for `source`, then run it against the resulting
 /// library. Exits the process with the program's own exit code.
@@ -380,6 +382,7 @@ fn resolve_library_inner(
         refresh,
     } = request;
     let refresh = refresh || nonempty_env(REFRESH_ENV).is_some();
+    let no_local_sources = nonempty_env(NO_LOCAL_SOURCES_ENV).is_some();
     let dependencies = normalized_dependencies(&spec.dependencies);
     let resolution_cache_paths = resolve_cache::paths(
         cache_dir,
@@ -489,6 +492,7 @@ fn resolve_library_inner(
             .env_remove("IR_PYTHON_EXCLUDE_NEWER")
             .env_remove("IR_TOOLING_RESTART_FILE")
             .env_remove(REFRESH_ENV)
+            .env_remove(NO_LOCAL_SOURCES_ENV)
             .env_remove(TOOLING_SAFE_MODE_ENV)
             .env("IR_TOOLING_RESTART_FILE", &restart_file);
         if let Some(library_root) = library_root {
@@ -499,6 +503,9 @@ fn resolve_library_inner(
         }
         if refresh {
             cmd.env(REFRESH_ENV, "1");
+        }
+        if no_local_sources {
+            cmd.arg(NO_LOCAL_SOURCES_DRIVER_ARG);
         }
         if resolve_r {
             if let Some(result_file) = &result_file {

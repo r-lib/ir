@@ -2869,6 +2869,439 @@ cat("ir.fixture=transitive-source\n")
 }
 
 #[test]
+fn run_no_local_sources_rejects_direct_and_transitive_local_packages() {
+    let cache_dir = temp_dir("ir-no-local-sources-cache");
+    let package_dir = temp_dir("ir-no-local-sources-packages");
+    let dep = write_r_source_package(&package_dir, "irnolocaldep", &[]);
+    let parent = write_r_source_package(
+        &package_dir,
+        "irnolocalparent",
+        &[
+            "Imports: irnolocaldep, cli".to_string(),
+            format!("Remotes: irnolocaldep=local::{}", renviron_path(&dep)),
+        ],
+    );
+    let script = temp_path("ir-no-local-sources", "R");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env -S ir run
+#| packages:
+#|   - local::{}
+
+library(irnolocalparent)
+library(irnolocaldep)
+cat("ir.fixture=no-local-sources\n")
+"#,
+            renviron_path(&parent)
+        ),
+    )
+    .unwrap();
+
+    let restricted = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(!restricted.status.success(), "{}", output_text(&restricted));
+    let error = String::from_utf8_lossy(&restricted.stderr);
+    assert!(
+        error.contains("IR_NO_LOCAL_SOURCES is set")
+            && error.contains("irnolocalparent")
+            && error.contains("irnolocaldep")
+            && error.contains("remote package source"),
+        "{}",
+        output_text(&restricted)
+    );
+    assert!(!stdout(&restricted).contains("ir.fixture=no-local-sources"));
+
+    let unrestricted = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env_remove("IR_NO_LOCAL_SOURCES")
+        .env_remove("R_PROFILE_USER")
+        .args(["run", "--isolated", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&unrestricted);
+    assert_stdout_contains(&unrestricted, "ir.fixture=no-local-sources");
+}
+
+#[test]
+fn run_no_local_sources_cannot_be_unset_by_r_profile() {
+    let cache_dir = temp_dir("ir-no-local-sources-profile-cache");
+    let package_dir = temp_dir("ir-no-local-sources-profile-packages");
+    let package = write_r_source_package(&package_dir, "irnolocalprofile", &[]);
+    let profile = temp_path("ir-no-local-sources-profile", "R");
+    fs::write(&profile, "Sys.unsetenv('IR_NO_LOCAL_SOURCES')\n").unwrap();
+    let package_ref = format!("local::{}", renviron_path(&package));
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--isolated", "--with"])
+        .arg(package_ref)
+        .args([
+            "-e",
+            "cat('ir.fixture=no-local-sources-profile-should-not-run\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        error.contains("IR_NO_LOCAL_SOURCES is set") && error.contains("irnolocalprofile"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(!stdout(&out).contains("ir.fixture=no-local-sources-profile-should-not-run"));
+}
+
+#[test]
+fn run_no_local_sources_rejects_packages_from_file_repositories() {
+    let cache_dir = temp_dir("ir-no-local-repository-cache");
+    let package_dir = temp_dir("ir-no-local-repository-packages");
+    let repository = temp_dir("ir-no-local-repository");
+    let profile = temp_path("ir-no-local-repository-profile", "R");
+    let package = write_r_source_package(&package_dir, "irnolocalrepo", &[]);
+    write_r_repository_package(&package, &repository.join("src").join("contrib"));
+    fs::write(
+        &profile,
+        format!(
+            "options(repos = c(CRAN = {}))\n",
+            serde_json::to_string(&r_repository_url(&repository)).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "irnolocalrepo",
+            "-e",
+            "cat('ir.fixture=no-local-repository-should-not-run\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        error.contains("IR_NO_LOCAL_SOURCES is set")
+            && error.contains("irnolocalrepo")
+            && error.contains("remote package source"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(!stdout(&out).contains("ir.fixture=no-local-repository-should-not-run"));
+}
+
+#[test]
+fn run_no_local_sources_reuses_cached_library_when_repositories_change() {
+    let cache_dir = temp_dir("ir-no-local-sources-repository-cache");
+    let fake_library = temp_dir("ir-no-local-sources-repository-tooling");
+    let local_repository = temp_dir("ir-no-local-sources-cached-local-repository");
+    let profile = temp_path("ir-no-local-sources-repository-profile", "R");
+    let resolutions = temp_path("ir-no-local-sources-repository-resolutions", "txt");
+    let installs = temp_path("ir-no-local-sources-repository-installs", "txt");
+
+    install_fake_r_package(
+        &fake_library,
+        "pak",
+        "export(pkg_deps)\nexport(repo_get)\nexport(repo_resolve)\n",
+        r#"
+load_private_cli <- function() TRUE
+
+repo_resolve <- function(spec) {
+  c(CRAN = "https://packagemanager.posit.co/cran/latest")
+}
+
+repo_get <- function(...) {
+  repositories <- getOption("repos")
+  data.frame(
+    name = names(repositories),
+    url = unname(repositories),
+    stringsAsFactors = FALSE
+  )
+}
+
+pkg_deps <- function(refs, ...) {
+  cat("resolve\n", file = Sys.getenv("IR_TEST_RESOLUTIONS"), append = TRUE)
+  repository <- sub("/+$", "", getOption("repos")[["CRAN"]])
+  source <- paste0(repository, "/src/contrib/irrepositories_1.0.0.tar.gz")
+  res <- data.frame(
+    ref = refs[[1L]],
+    status = "OK",
+    package = "irrepositories",
+    version = "1.0.0",
+    type = "standard",
+    priority = NA_character_,
+    direct = TRUE,
+    stringsAsFactors = FALSE
+  )
+  res$sources <- list(source)
+  res$params <- list(character())
+  res
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "renv",
+        "export(use)\n",
+        r#"
+use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
+  cat("install\n", file = Sys.getenv("IR_TEST_INSTALLS"), append = TRUE)
+  dir.create(file.path(library, "irrepositories"),
+             recursive = TRUE, showWarnings = FALSE)
+  invisible(TRUE)
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "secretbase",
+        "export(sha256)\n",
+        r#"
+sha256 <- function(x) "restricted-repository-library"
+"#,
+    );
+    fs::write(
+        &profile,
+        format!(
+            ".libPaths(c({}, .libPaths()))\noptions(repos = c(CRAN = Sys.getenv('IR_TEST_REPOSITORY')))\n",
+            serde_json::to_string(&renviron_path(&fake_library)).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let invoke = |cache_dir: &Path, repository: &str, rscript_override: Option<&Path>| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", cache_dir)
+            .env("IR_NO_LOCAL_SOURCES", "1")
+            .env("IR_TEST_REPOSITORY", repository)
+            .env("IR_TEST_RESOLUTIONS", &resolutions)
+            .env("IR_TEST_INSTALLS", &installs)
+            .env("R_LIBS_USER", &fake_library)
+            .env("R_PROFILE_USER", &profile)
+            .arg("run");
+        if let Some(rscript) = rscript_override {
+            command.arg("--rscript").arg(rscript);
+        }
+        command
+            .args([
+                "--isolated",
+                "--with",
+                "irrepositories",
+                "-e",
+                "cat('ir.fixture=no-local-sources-repository-cache\\n')",
+            ])
+            .output()
+            .unwrap()
+    };
+    let local_repository_url = r_repository_url(&local_repository);
+    let reuses = |cache_dir: &Path, rscript_override: Option<&Path>| {
+        let resolutions_before = fs::read_to_string(&resolutions)
+            .map(|contents| contents.lines().count())
+            .unwrap_or(0);
+        let installs_before = fs::read_to_string(&installs)
+            .map(|contents| contents.lines().count())
+            .unwrap_or(0);
+        let remote = invoke(cache_dir, "https://example.test/cran", rscript_override);
+        assert_success(&remote);
+        assert_stdout_contains(&remote, "ir.fixture=no-local-sources-repository-cache");
+        only_resolution_marker_text(cache_dir);
+        assert_eq!(resolver_probe_count(&resolutions), resolutions_before + 1);
+        assert_eq!(resolver_probe_count(&installs), installs_before + 1);
+
+        let local = invoke(cache_dir, &local_repository_url, rscript_override);
+
+        assert_success(&local);
+        assert_stdout_contains(&local, "ir.fixture=no-local-sources-repository-cache");
+        assert_eq!(resolver_probe_count(&resolutions), resolutions_before + 1);
+        assert_eq!(resolver_probe_count(&installs), installs_before + 1);
+    };
+
+    reuses(&cache_dir, None);
+
+    #[cfg(unix)]
+    {
+        let wrapper_cache = temp_dir("ir-no-local-sources-repository-wrapper-cache");
+        let wrapper_dir = temp_dir("ir-no-local-sources-repository-wrapper-bin");
+        let wrapper = wrapper_dir.join("Rscript");
+        write_executable(
+            &wrapper,
+            &format!("#!/bin/sh\nexec '{}' \"$@\"\n", rscript().to_string_lossy()),
+        );
+        reuses(&wrapper_cache, Some(&wrapper));
+    }
+}
+
+#[test]
+fn run_no_local_sources_allows_remote_package_sources() {
+    let cache_dir = temp_dir("ir-no-local-sources-remote-cache");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_NO_LOCAL_SOURCES", "1")
+        .env_remove("R_PROFILE_USER")
+        .args([
+            "run",
+            "--isolated",
+            "--vanilla",
+            "--with",
+            "cli",
+            "-e",
+            "cat('ir.fixture=no-local-sources-remote\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=no-local-sources-remote");
+}
+
+#[test]
+fn run_no_local_sources_reuses_complete_unrestricted_library() {
+    let cache_dir = temp_dir("ir-no-local-sources-library-cache");
+    let fake_library = temp_dir("ir-no-local-sources-library-tooling");
+    let profile = temp_path("ir-no-local-sources-library-profile", "R");
+    let script = temp_path("ir-no-local-sources-library", "R");
+    let resolutions = temp_path("ir-no-local-sources-library-resolutions", "txt");
+    let installs = temp_path("ir-no-local-sources-library-installs", "txt");
+
+    install_fake_r_package(
+        &fake_library,
+        "pak",
+        "export(pkg_deps)\nexport(repo_get)\nexport(repo_resolve)\n",
+        r#"
+load_private_cli <- function() TRUE
+
+repo_resolve <- function(spec) {
+  c(CRAN = "https://packagemanager.posit.co/cran/latest")
+}
+
+repo_get <- function(...) {
+  data.frame(
+    name = "CRAN",
+    url = "https://packagemanager.posit.co/cran/latest",
+    stringsAsFactors = FALSE
+  )
+}
+
+pkg_deps <- function(refs, ...) {
+  cat("resolve\n", file = Sys.getenv("IR_TEST_RESOLUTIONS"), append = TRUE)
+  source <- Sys.getenv("IR_TEST_PACKAGE_SOURCE")
+  res <- data.frame(
+    ref = refs[[1L]],
+    status = "OK",
+    package = "irprovenance",
+    version = "1.0.0",
+    type = "standard",
+    priority = NA_character_,
+    direct = TRUE,
+    stringsAsFactors = FALSE
+  )
+  res$sources <- list(source)
+  res$params <- list(character())
+  res
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "renv",
+        "export(use)\n",
+        r#"
+use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
+  cat("install\n", file = Sys.getenv("IR_TEST_INSTALLS"), append = TRUE)
+  package <- file.path(library, "irprovenance")
+  dir.create(package, recursive = TRUE, showWarnings = FALSE)
+  writeLines(Sys.getenv("IR_TEST_PACKAGE_SOURCE"), file.path(package, "source"))
+  invisible(TRUE)
+}
+"#,
+    );
+    install_fake_r_package(
+        &fake_library,
+        "secretbase",
+        "export(sha256)\n",
+        r#"
+sha256 <- function(x) {
+  if (grepl("no-local-sources", x, fixed = TRUE))
+    "restricted-library"
+  else
+    "unrestricted-library"
+}
+"#,
+    );
+    fs::write(
+        &profile,
+        format!(
+            ".libPaths(c({}, .libPaths()))\n",
+            serde_json::to_string(&renviron_path(&fake_library)).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &script,
+        r#"lib <- strsplit(Sys.getenv("R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1]][[1]]
+source <- readLines(file.path(lib, "irprovenance", "source"))
+cat("ir.fixture.package_source=", source, "\n", sep = "")
+"#,
+    )
+    .unwrap();
+
+    let invoke = |source: &str, no_local_sources: bool| {
+        let mut command = ir();
+        command
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("R_LIBS_USER", &fake_library)
+            .env("R_PROFILE_USER", &profile)
+            .env("IR_TEST_PACKAGE_SOURCE", source)
+            .env("IR_TEST_RESOLUTIONS", &resolutions)
+            .env("IR_TEST_INSTALLS", &installs)
+            .args(["run", "--isolated", "--with", "irprovenance"])
+            .arg(&script);
+        if no_local_sources {
+            command.env("IR_NO_LOCAL_SOURCES", "1");
+        }
+        command.output().unwrap()
+    };
+
+    let unrestricted = invoke("file:///tmp/irprovenance_1.0.0.tar.gz", false);
+    assert_success(&unrestricted);
+    assert_stdout_contains(
+        &unrestricted,
+        "ir.fixture.package_source=file:///tmp/irprovenance_1.0.0.tar.gz",
+    );
+    assert_eq!(resolver_probe_count(&resolutions), 1);
+    assert_eq!(resolver_probe_count(&installs), 1);
+
+    let restricted = invoke("file:///tmp/irprovenance_1.0.0.tar.gz", true);
+    assert_success(&restricted);
+    assert_stdout_contains(
+        &restricted,
+        "ir.fixture.package_source=file:///tmp/irprovenance_1.0.0.tar.gz",
+    );
+    assert_eq!(resolver_probe_count(&resolutions), 2);
+    assert_eq!(resolver_probe_count(&installs), 1);
+}
+
+#[test]
 fn run_frontmatter_local_ref_reruns_resolution_when_package_changes() {
     let cache_dir = temp_dir("ir-local-ref-cache");
     let package_dir = temp_dir("ir-local-ref-packages");

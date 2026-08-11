@@ -58,6 +58,8 @@ pak does not currently resolve minimum-version refs such as `pkg>=1.2`; use an e
 Source refs are resolved with pak and then passed through to renv, including GitHub, GitLab, Bitbucket, git, URL, and local package refs in forms both tools accept.
 GitHub packages should use package refs such as `github::owner/repo@ref` or `github::owner/repo/subdir@ref`, not browser URLs copied from GitHub.
 Local packages may be written as `local::path`, as a bare file-system path in pak-supported forms such as `./path`, or with a package prefix such as `mypkg=local::C:/path` for Windows absolute paths.
+Set `IR_NO_LOCAL_SOURCES` to a nonempty value to prevent an install from using direct or transitive packages resolved from local package refs, `file:` URLs, or `file:` repositories.
+Existing materialised libraries may be reused regardless of where their packages were originally resolved.
 `packages` must be a YAML sequence; each sequence entry is one package ref.
 Omit `packages`, use `packages: []`, or use `packages: null` when no package refs are needed.
 Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.

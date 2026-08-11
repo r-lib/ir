@@ -211,6 +211,52 @@ ir_is_network_locator <- function(locator) {
   uri || scp
 }
 
+ir_resolved_locators <- function(res, i) {
+  locators <- res$sources[[i]]
+  if ("mirror" %in% names(res))
+    locators <- c(locators, res$mirror[[i]])
+  locators <- as.character(locators)
+  locators[!is.na(locators) & nzchar(locators)]
+}
+
+ir_assert_remote_install_sources <- function(res) {
+  if (is.null(res) || !nrow(res)) return(invisible())
+
+  stopifnot(
+    is.data.frame(res),
+    all(c("ref", "type", "direct", "package", "sources") %in% names(res)),
+    is.list(res$sources),
+    all(!is.na(res$ref)),
+    all(!is.na(res$type)),
+    all(!is.na(res$direct)),
+    all(!is.na(res$package))
+  )
+
+  file_sources <- vapply(seq_len(nrow(res)), function(i) {
+    any(grepl("^file:", ir_resolved_locators(res, i), ignore.case = TRUE))
+  }, logical(1))
+  local <- tolower(res$type) == "local" | file_sources
+  if (!any(local)) return(invisible())
+
+  rows <- which(local)
+  origins <- vapply(rows, function(i) {
+    locators <- ir_resolved_locators(res, i)
+    files <- locators[grepl("^file:", locators, ignore.case = TRUE)]
+    if (length(files)) files[[1L]] else res$ref[[i]]
+  }, character(1))
+  roles <- ifelse(res$direct[rows], "requested package", "dependency")
+  details <- unique(sprintf("%s `%s` from `%s`",
+                            roles, res$package[rows], origins))
+
+  stop(
+    "IR_NO_LOCAL_SOURCES is set, but installing this environment would use ",
+    "packages from the local file system:\n- ",
+    paste(details, collapse = "\n- "),
+    "\nUse a remote package source or unset IR_NO_LOCAL_SOURCES.",
+    call. = FALSE
+  )
+}
+
 ir_resolution_is_cacheable <- function(res) {
   if (is.null(res) || !nrow(res))
     return(TRUE)
@@ -275,6 +321,11 @@ ir_resolve_main <- function() {
 
   cache_dir <- ir_cache_dir()
   library_root <- ir_env_optional("IR_LIBRARY_ROOT")
+  # Rust decides this policy before R startup profiles can mutate the
+  # resolver's environment.
+  driver_args <- base::commandArgs(trailingOnly = TRUE)
+  stopifnot(all(driver_args %in% "--ir-no-local-sources"))
+  no_local_sources <- "--ir-no-local-sources" %in% driver_args
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
@@ -440,6 +491,11 @@ ir_resolve_main <- function() {
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
   have <- list.files(library_path)
   if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
+    # Cache and complete-library reuse do not run package installation code.
+    # Check sources only when this invocation will ask renv to materialise them.
+    if (no_local_sources)
+      ir_assert_remote_install_sources(res)
+
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.
