@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "r-lib-ir"
 dynamic = ["version"]
-description = "Run standalone R scripts from embedded dependency metadata."
+description = "Run portable R scripts, render Quarto documents, and launch R package tools."
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
