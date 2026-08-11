@@ -154,7 +154,6 @@ ir_input_key <- function(deps,
                          exclude_newer = NULL,
                          quarto        = FALSE,
                          quarto_reticulate = FALSE,
-                         no_local_sources = FALSE,
                          library_root  = NULL) {
   source_key <- if (is.null(exclude_newer))
     "latest"
@@ -169,8 +168,6 @@ ir_input_key <- function(deps,
                              if (quarto) "quarto" else NULL,
                              if (quarto_reticulate)
                                "quarto-reticulate" else NULL,
-                             if (no_local_sources)
-                               "no-local-sources" else NULL,
                              if (!is.null(library_root))
                                paste0("library-root: ", library_root) else NULL,
                              as.character(rversion),
@@ -222,7 +219,7 @@ ir_resolved_locators <- function(res, i) {
   locators[!is.na(locators) & nzchar(locators)]
 }
 
-ir_assert_remote_sources <- function(res) {
+ir_assert_remote_install_sources <- function(res) {
   if (is.null(res) || !nrow(res)) return(invisible())
 
   stopifnot(
@@ -252,8 +249,8 @@ ir_assert_remote_sources <- function(res) {
                             roles, res$package[rows], origins))
 
   stop(
-    "IR_NO_LOCAL_SOURCES is set, but pak resolved packages from ",
-    "the local file system:\n- ",
+    "IR_NO_LOCAL_SOURCES is set, but installing this environment would use ",
+    "packages from the local file system:\n- ",
     paste(details, collapse = "\n- "),
     "\nUse a remote package source or unset IR_NO_LOCAL_SOURCES.",
     call. = FALSE
@@ -396,7 +393,6 @@ ir_resolve_main <- function() {
                         ir_input_key(deps, exclude_newer = exclude_newer,
                                      quarto = quarto,
                                      quarto_reticulate = quarto_reticulate,
-                                     no_local_sources = no_local_sources,
                                      library_root = library_root))
   }
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
@@ -407,9 +403,7 @@ ir_resolve_main <- function() {
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  # Restricted runs must validate the manifest selected by the current startup
-  # profile. This also covers Rscript wrappers without a Rust-owned marker.
-  if (!marker_from_rust && !refresh && !no_local_sources) {
+  if (!marker_from_rust && !refresh) {
     cache_marker <- if (is.null(package_result_file)) marker else package_marker
     required_lines <- if (is.null(package_result_file)) 2L else 3L
     cached <- if (!is.null(cache_marker) && file.exists(cache_marker))
@@ -465,9 +459,6 @@ ir_resolve_main <- function() {
     }
   }
 
-  if (no_local_sources)
-    ir_assert_remote_sources(res)
-
   cache_resolution <- ir_resolution_is_cacheable(res)
   if (cache_resolution)
     ir_latest_resolution_max_age_seconds()
@@ -486,11 +477,8 @@ ir_resolve_main <- function() {
 
   ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
-  # renv cache, whose layout is itself keyed by R version and platform. Keep
-  # restricted libraries separate from artifacts materialised without the
-  # remote-only policy.
+  # renv cache, whose layout is itself keyed by R version and platform.
   key <- paste(c(install_specs,
-                 if (no_local_sources) "no-local-sources" else NULL,
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
@@ -503,6 +491,11 @@ ir_resolve_main <- function() {
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
   have <- list.files(library_path)
   if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
+    # Cache and complete-library reuse do not run package installation code.
+    # Check sources only when this invocation will ask renv to materialise them.
+    if (no_local_sources)
+      ir_assert_remote_install_sources(res)
+
     # renv::use() installs into the renv cache and links the packages into
     # `library` as symlinks. Because `library` lives in our cache (not the R
     # temp dir), renv leaves it in place when the session ends.

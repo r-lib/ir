@@ -47,7 +47,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
 | `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also chooses the R minor when no R selector is set and limits multi-minor `r-version` requirements by date | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache; `0` disables reuse of time-bounded resolution markers | `86400` seconds |
-| `IR_NO_LOCAL_SOURCES` | dependency-resolving commands | unset; any nonempty value rejects R packages resolved from the local file system |
+| `IR_NO_LOCAL_SOURCES` | dependency-resolving commands | unset; any nonempty value prevents installing R packages from local sources |
 | `IR_REFRESH` | dependency-resolving commands | unset; any nonempty value bypasses resolution markers |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
@@ -74,9 +74,9 @@ Package snapshot date precedence for `ir run`, `ir render`, and `ir preview` is 
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
 Use `--refresh` or set `IR_REFRESH` to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries.
-Set `IR_NO_LOCAL_SOURCES` to a nonempty value to require direct and transitive R package sources to come from remote repositories.
-Local package refs, `file:` URLs, and packages from `file:` repositories are rejected after pak resolves the complete dependency set.
-Restricted invocations rerun R package resolution so sources selected by the current repository configuration are validated before a cached library is used.
+Set `IR_NO_LOCAL_SOURCES` to a nonempty value to prevent IR from installing direct or transitive R packages from local package refs, `file:` URLs, or `file:` repositories.
+IR checks the complete pak manifest before asking renv to materialise packages.
+Resolution markers and materialised libraries are shared with unrestricted invocations; the option does not verify the original source of packages reused without running package installation code.
 `exclude-newer` dates the default CRAN and Bioconductor repositories with PPM snapshots.
 When Python metadata is present, the selected `exclude-newer` value is also used during Python environment resolution unless `--python-exclude-newer` or frontmatter `python-exclude-newer` is set.
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.

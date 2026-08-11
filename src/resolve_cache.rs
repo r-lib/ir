@@ -23,10 +23,9 @@ pub(crate) struct CachedResolution {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ResolutionCacheFlags {
+pub(crate) struct QuartoCacheFlags {
     pub(crate) render: bool,
     pub(crate) reticulate: bool,
-    pub(crate) no_local_sources: bool,
 }
 
 pub(crate) fn paths(
@@ -35,7 +34,7 @@ pub(crate) fn paths(
     rscript_args: &[String],
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    flags: ResolutionCacheFlags,
+    quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
     let Some(rscript_identity) = rscript_identity(rscript) else {
@@ -45,7 +44,7 @@ pub(crate) fn paths(
     let marker = cache_dir.join("resolutions").join(resolution_cache_key(
         dependencies,
         exclude_newer,
-        flags,
+        quarto,
         &rscript_identity,
         rscript_args,
         library_root,
@@ -116,7 +115,7 @@ pub(crate) fn read(
 fn resolution_cache_key(
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    flags: ResolutionCacheFlags,
+    quarto: QuartoCacheFlags,
     rscript_identity: &str,
     rscript_args: &[String],
     library_root: Option<&Path>,
@@ -127,18 +126,15 @@ fn resolution_cache_key(
     let mut parts = dependencies.to_vec();
     parts.sort();
     parts.push(source_key);
-    if flags.render {
+    if quarto.render {
         parts.push("quarto".to_string());
     }
-    if flags.reticulate {
+    if quarto.reticulate {
         parts.push("quarto-reticulate".to_string());
     }
     parts.push(format!("rscript: {rscript_identity}"));
     for arg in rscript_args {
         parts.push(format!("rscript-arg: {arg}"));
-    }
-    if flags.no_local_sources {
-        parts.push("no-local-sources".to_string());
     }
     if let Some(library_root) = library_root {
         parts.push(format!("library-root: {}", library_root.display()));
@@ -351,11 +347,10 @@ mod tests {
         path
     }
 
-    fn default_cache_flags() -> ResolutionCacheFlags {
-        ResolutionCacheFlags {
+    fn default_quarto_flags() -> QuartoCacheFlags {
+        QuartoCacheFlags {
             render: false,
             reticulate: false,
-            no_local_sources: false,
         }
     }
 
@@ -380,7 +375,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            default_cache_flags(),
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -394,7 +389,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            default_cache_flags(),
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -409,7 +404,7 @@ mod tests {
             &[],
             &dependencies,
             None,
-            default_cache_flags(),
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -436,7 +431,7 @@ mod tests {
             &[],
             &dependencies,
             Some("2026-06-01"),
-            default_cache_flags(),
+            default_quarto_flags(),
             None,
         )
         .unwrap()
@@ -448,7 +443,7 @@ mod tests {
             &[],
             &dependencies,
             Some("2026-06-01"),
-            default_cache_flags(),
+            default_quarto_flags(),
             Some(&dir.join("tool-store")),
         )
         .unwrap()
