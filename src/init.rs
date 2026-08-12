@@ -1,0 +1,454 @@
+use std::env;
+use std::error::Error;
+use std::ffi::OsStr;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use tempfile::NamedTempFile;
+use time::OffsetDateTime;
+
+use crate::driver;
+use crate::lock::{resolver_lock_path, FileLock};
+use crate::runtime::{ir_cache_dir, nonempty_env, resolve_rscript_command, rscript_command};
+use crate::script;
+
+const INIT_DRIVER: &str = concat!(
+    include_str!("../driver/tooling.R"),
+    "\n",
+    include_str!("../driver/init.R")
+);
+const TOOLING_RESTART_STATUS: i32 = 86;
+const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
+
+struct InitResult {
+    refs: Vec<String>,
+    r_version: String,
+    lockfile: Option<PathBuf>,
+}
+
+pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dyn Error>> {
+    let path = PathBuf::from(file);
+    let metadata =
+        fs::symlink_metadata(&path).map_err(|e| format!("cannot read script `{file}`: {e}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("cannot initialize symbolic link `{file}`").into());
+    }
+    if !metadata.is_file() {
+        return Err(format!("script `{file}` is not a regular file").into());
+    }
+    if !is_r_script(&path) {
+        return Err(format!("script `{file}` must have a `.R` extension").into());
+    }
+
+    let contents = fs::read(&path).map_err(|e| format!("cannot read script `{file}`: {e}"))?;
+    if contents.starts_with(b"\xef\xbb\xbf") {
+        return Err(
+            format!("script `{file}` starts with an unsupported UTF-8 byte order mark").into(),
+        );
+    }
+    let header = script::r_script_header(&contents);
+    if header.frontmatter.is_some() {
+        return Err(format!("`{file}` already contains ir frontmatter").into());
+    }
+    let metadata_start = header.shebang_end.unwrap_or(0);
+    if contents[metadata_start..].starts_with(b"#|") {
+        return Err(format!("`{file}` already starts with a #| metadata marker").into());
+    }
+
+    let absolute = absolute_path(&path)?;
+    let lockfile = if no_project {
+        None
+    } else {
+        let discovery_path =
+            non_verbatim_path(fs::canonicalize(&absolute).map_err(|e| {
+                format!("cannot resolve script `{file}` for project discovery: {e}")
+            })?);
+        nearest_renv_lockfile(&discovery_path)
+    };
+    let result = discover_dependencies(&absolute, lockfile.as_deref())?;
+    let exclude_newer = OffsetDateTime::now_utc().date().to_string();
+    let newline = newline_sequence(&contents);
+    let replacement = initialized_contents(
+        &contents,
+        header.shebang_end,
+        &result,
+        &exclude_newer,
+        newline,
+    );
+    let current = fs::read(&path)
+        .map_err(|e| format!("cannot recheck script `{file}` before replacing it: {e}"))?;
+    if current != contents {
+        return Err(format!("script `{file}` changed during initialization").into());
+    }
+    let current_metadata = fs::symlink_metadata(&path)
+        .map_err(|e| format!("cannot recheck script `{file}` before replacing it: {e}"))?;
+    if current_metadata.file_type().is_symlink() || !current_metadata.is_file() {
+        return Err(format!("script `{file}` changed during initialization").into());
+    }
+    replace_file(
+        &path,
+        &replacement,
+        executable_permissions(current_metadata.permissions()),
+    )?;
+
+    if let Some(shebang_end) = header.shebang_end {
+        let shebang = String::from_utf8_lossy(&contents[..shebang_end]);
+        if !shebang_invokes_ir(&shebang) {
+            eprintln!("warning: the existing shebang bypasses ir metadata");
+            eprintln!("help: replace it with: #!/usr/bin/env -S ir run");
+        }
+    }
+    if let Some(lockfile) = result.lockfile {
+        eprintln!("Using renv lockfile at `{}`", lockfile.display());
+    }
+    println!("Initialized script at `{}`", path.display());
+    Ok(())
+}
+
+fn is_r_script(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("r"))
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    Ok(env::current_dir()?.join(path))
+}
+
+#[cfg(not(windows))]
+fn non_verbatim_path(path: PathBuf) -> PathBuf {
+    path
+}
+
+#[cfg(windows)]
+fn non_verbatim_path(path: PathBuf) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+
+    const VERBATIM: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const VERBATIM_UNC: &[u16] = &[
+        b'\\' as u16,
+        b'\\' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+
+    let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let normal = if let Some(rest) = wide.strip_prefix(VERBATIM_UNC) {
+        [b'\\' as u16, b'\\' as u16]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .collect()
+    } else if let Some(rest) = wide.strip_prefix(VERBATIM) {
+        rest.to_vec()
+    } else {
+        return path;
+    };
+    PathBuf::from(OsString::from_wide(&normal))
+}
+
+fn nearest_renv_lockfile(script: &Path) -> Option<PathBuf> {
+    script.parent()?.ancestors().find_map(|directory| {
+        let candidate = directory.join("renv.lock");
+        candidate.is_file().then_some(candidate)
+    })
+}
+
+fn discover_dependencies(
+    script: &Path,
+    lockfile: Option<&Path>,
+) -> Result<InitResult, Box<dyn Error>> {
+    let cache_dir = ir_cache_dir()?;
+    let _resolver_lock = FileLock::acquire(&resolver_lock_path(&cache_dir))?;
+    let driver = driver::cached_path(&cache_dir, driver::INIT_FILE, INIT_DRIVER)?;
+    let result_path = unique_path(&env::temp_dir(), "ir-init", "txt");
+    let restart_path = unique_path(&env::temp_dir(), "ir-init-restart", "txt");
+    let result_file = TempResultFile::new(result_path);
+    let restart_file = TempResultFile::new(restart_path);
+    let rscript = nonempty_env("IR_RSCRIPT")
+        .map(|command| resolve_rscript_command(&command))
+        .unwrap_or_else(rscript_command);
+    let mut retried_restart = false;
+    let mut retried_safe_mode = false;
+    let mut safe_mode = false;
+
+    let status = loop {
+        result_file.clear();
+        restart_file.clear();
+
+        let mut command = Command::new(&rscript);
+        command
+            .args(["--vanilla"])
+            .arg(&driver)
+            .stdin(Stdio::null())
+            .stdout(io::stderr())
+            .stderr(Stdio::inherit())
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("IR_INIT_SCRIPT", script)
+            .env("IR_INIT_RESULT_FILE", result_file.path())
+            .env("IR_TOOLING_RESTART_FILE", restart_file.path())
+            .env_remove("IR_INIT_LOCKFILE")
+            .env_remove(TOOLING_SAFE_MODE_ENV);
+        if let Some(lockfile) = lockfile {
+            command.env("IR_INIT_LOCKFILE", lockfile);
+        }
+        if safe_mode {
+            command.env(TOOLING_SAFE_MODE_ENV, "1");
+        }
+
+        let status = command.status().map_err(|e| spawn_error(&rscript, e))?;
+        if tooling_restart_requested(&status, restart_file.path()) {
+            if !retried_restart {
+                retried_restart = true;
+                continue;
+            }
+            let packages = fs::read_to_string(restart_file.path()).unwrap_or_default();
+            let packages = packages.trim();
+            let suffix = if packages.is_empty() {
+                String::new()
+            } else {
+                format!(" for {packages}")
+            };
+            return Err(format!(
+                "script initialization repeatedly requested a tooling restart{suffix}"
+            )
+            .into());
+        }
+        if process_crashed(&status) && !safe_mode && !retried_safe_mode {
+            retried_safe_mode = true;
+            safe_mode = true;
+            continue;
+        }
+        break status;
+    };
+
+    if !status.success() {
+        return Err("script dependency discovery failed".into());
+    }
+    parse_init_result(result_file.path(), lockfile)
+}
+
+fn parse_init_result(path: &Path, lockfile: Option<&Path>) -> Result<InitResult, Box<dyn Error>> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| format!("script dependency discovery produced no result: {e}"))?;
+    let mut lines = text.lines();
+    let r_version = lines
+        .next()
+        .and_then(|line| line.strip_prefix("r-version="))
+        .filter(|value| !value.is_empty())
+        .ok_or("script dependency discovery produced an invalid R version")?
+        .to_string();
+    let reported_lockfile = lines
+        .next()
+        .and_then(|line| line.strip_prefix("lockfile="))
+        .ok_or("script dependency discovery produced an invalid lockfile result")?;
+    if lockfile.is_some() != !reported_lockfile.is_empty() {
+        return Err("script dependency discovery reported the wrong lockfile state".into());
+    }
+    let refs: Vec<String> = lines.map(str::to_string).collect();
+    if refs.iter().any(|reference| reference.is_empty()) {
+        return Err("script dependency discovery produced an empty package ref".into());
+    }
+    Ok(InitResult {
+        refs,
+        r_version,
+        lockfile: lockfile.map(Path::to_path_buf),
+    })
+}
+
+fn initialized_contents(
+    contents: &[u8],
+    shebang_end: Option<usize>,
+    result: &InitResult,
+    exclude_newer: &str,
+    newline: &[u8],
+) -> Vec<u8> {
+    let shebang_end = shebang_end.unwrap_or(0);
+    let mut output = Vec::with_capacity(contents.len() + 160 + result.refs.len() * 24);
+    if shebang_end == 0 {
+        // Linux passes the shebang tail to env as one argument. `-S` asks env
+        // to split `ir run`; without it, env searches for a binary named `ir run`.
+        push_line(&mut output, b"#!/usr/bin/env -S ir run", newline);
+    } else {
+        output.extend_from_slice(&contents[..shebang_end]);
+        if !output.ends_with(b"\n") {
+            output.extend_from_slice(newline);
+        }
+    }
+
+    if result.refs.is_empty() {
+        push_line(&mut output, b"#| packages: []", newline);
+    } else {
+        push_line(&mut output, b"#| packages:", newline);
+        for reference in &result.refs {
+            output.extend_from_slice(b"#|   - ");
+            serde_json::to_writer(&mut output, reference)
+                .expect("serializing a string into memory cannot fail");
+            output.extend_from_slice(newline);
+        }
+    }
+    output.extend_from_slice(b"#| r-version: \"");
+    output.extend_from_slice(result.r_version.as_bytes());
+    output.extend_from_slice(b"\"");
+    output.extend_from_slice(newline);
+    push_line(&mut output, b"#| isolated: true", newline);
+    output.extend_from_slice(b"#| exclude-newer: \"");
+    output.extend_from_slice(exclude_newer.as_bytes());
+    output.extend_from_slice(b"\"");
+    output.extend_from_slice(newline);
+    output.extend_from_slice(newline);
+    output.extend_from_slice(&contents[shebang_end..]);
+    output
+}
+
+fn push_line(output: &mut Vec<u8>, line: &[u8], newline: &[u8]) {
+    output.extend_from_slice(line);
+    output.extend_from_slice(newline);
+}
+
+fn newline_sequence(contents: &[u8]) -> &'static [u8] {
+    let first_newline = contents.iter().position(|byte| *byte == b'\n');
+    if first_newline.is_some_and(|position| position > 0 && contents[position - 1] == b'\r') {
+        b"\r\n"
+    } else {
+        b"\n"
+    }
+}
+
+fn shebang_invokes_ir(shebang: &str) -> bool {
+    let words: Vec<_> = shebang
+        .trim_end_matches(['\r', '\n'])
+        .strip_prefix("#!")
+        .unwrap_or(shebang)
+        .split_ascii_whitespace()
+        .collect();
+    match words.as_slice() {
+        [ir, "run"] => command_is(ir, "ir"),
+        [env, "-S", ir, "run"] => command_is(env, "env") && command_is(ir, "ir"),
+        _ => false,
+    }
+}
+
+fn command_is(word: &str, command: &str) -> bool {
+    word.rsplit(['/', '\\']).next() == Some(command)
+}
+
+#[cfg(unix)]
+fn executable_permissions(mut permissions: fs::Permissions) -> fs::Permissions {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    permissions.set_mode(permissions.mode() | 0o111);
+    permissions
+}
+
+#[cfg(not(unix))]
+fn executable_permissions(permissions: fs::Permissions) -> fs::Permissions {
+    permissions
+}
+
+fn replace_file(
+    path: &Path,
+    contents: &[u8],
+    permissions: fs::Permissions,
+) -> Result<(), Box<dyn Error>> {
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = NamedTempFile::new_in(parent).map_err(|e| {
+        format!(
+            "failed to create temporary file beside `{}`: {e}",
+            path.display()
+        )
+    })?;
+    temporary.write_all(contents)?;
+    temporary.as_file().set_permissions(permissions)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|e| {
+        format!(
+            "failed to replace script `{}` atomically: {}",
+            path.display(),
+            e.error
+        )
+    })?;
+    Ok(())
+}
+
+fn unique_path(parent: &Path, prefix: &str, extension: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    parent.join(format!(
+        "{prefix}-{}-{nanos}.{extension}",
+        std::process::id()
+    ))
+}
+
+struct TempResultFile(PathBuf);
+
+impl TempResultFile {
+    fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn clear(&self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+impl Drop for TempResultFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn tooling_restart_requested(status: &ExitStatus, restart_file: &Path) -> bool {
+    status.code() == Some(TOOLING_RESTART_STATUS) && restart_file.exists()
+}
+
+fn process_crashed(status: &ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if status.signal().is_some() {
+            return true;
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(code) = status.code() {
+        let code = code as u32;
+        if matches!(
+            code,
+            0xC0000005 | 0xC00000FD | 0xC000001D | 0xC0000374 | 0xC0000409
+        ) {
+            return true;
+        }
+    }
+
+    status.code().is_none()
+}
+
+fn spawn_error(rscript: &OsStr, error: io::Error) -> String {
+    let rscript = Path::new(rscript).display();
+    if error.kind() == io::ErrorKind::NotFound {
+        format!("could not find `{rscript}` on PATH. Install R or set IR_RSCRIPT.")
+    } else {
+        format!("failed to start Rscript `{rscript}` for script dependency discovery: {error}")
+    }
+}

@@ -5,6 +5,46 @@ title: Scripts
 `ir run` executes R scripts whose package metadata is embedded at the top of the file.
 The metadata block is YAML, with each line prefixed by `#| ` after an optional shebang.
 
+## Initialize an existing script
+
+Add metadata to an existing `.R` file in place:
+
+```console
+$ ir init --file analysis.R
+```
+
+`ir` statically scans that file for direct package uses, including
+`library()`, `require()`, and `pkg::fun()` calls. It inserts a canonical
+`ir run` shebang when the script has no shebang, and sets `isolated: true`. For
+a released R, it records the inspecting Rscript's major and minor as a lower
+bound; development and prerelease builds retain their `devel` or `next`
+channel. It also records the current UTC date as `exclude-newer`. `IR_RSCRIPT`
+selects that Rscript when set; otherwise `ir` uses `Rscript` on `PATH`. Packages
+supplied by that R installation, including base and recommended packages such
+as `stats`, are omitted. An existing shebang is preserved with a warning when
+it does not invoke `ir`.
+
+Project discovery starts from the script's directory. If `ir` finds an
+`renv.lock` there or in a parent directory, each detected direct package is
+written using the version and supported remote source recorded in that lockfile.
+Transitive packages that the script does not use directly are not copied.
+Initialization fails without modifying the script when a detected package is
+missing from the lockfile or its source cannot be represented portably.
+Static analysis cannot discover package names computed at runtime; inspect the
+generated frontmatter before relying on it.
+
+Use `--no-project` to skip lockfile discovery and write bare package names:
+
+```console
+$ ir init --file analysis.R --no-project
+```
+
+Initialization requires an existing `.R` file and refuses files that already
+start with ir frontmatter. Remove a UTF-8 byte order mark before initialization;
+it cannot remain at the start of the R body after metadata is inserted. The
+rewrite is atomic and preserves the original body byte-for-byte and, on Unix,
+makes the script executable without removing its existing mode bits.
+
 ```r
 #!/usr/bin/env -S ir run
 #| packages:

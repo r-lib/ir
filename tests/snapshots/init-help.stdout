@@ -1,0 +1,12 @@
+Add ir metadata to an existing script
+
+Usage: ir init [OPTIONS] --file <FILE>
+
+Options:
+      --file <FILE>  Existing R script to modify in place
+      --no-project   Do not use a renv.lock discovered above the script
+  -h, --help         Print help
+
+Examples:
+  ir init --file analysis.R
+  ir init --file analysis.R --no-project
