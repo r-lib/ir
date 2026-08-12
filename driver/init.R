@@ -193,10 +193,6 @@ ir_init_main <- function() {
     refs <- vapply(packages, function(package) {
       ir_init_locked_ref(package, records[[package]], lock$R$Repositories)
     }, character(1), USE.NAMES = FALSE)
-    locked_r <- lock$R$Version
-    if (is.null(locked_r))
-      stop("renv lockfile `", lockfile, "` has no R version", call. = FALSE)
-    r_version <- paste(">=", ir_init_minor_version(locked_r))
     lockfile_used <- lockfile
   }
 

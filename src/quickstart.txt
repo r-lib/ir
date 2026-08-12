@@ -66,7 +66,9 @@ Package tools:
 Workflow:
   To convert an existing .R file, run `ir init --script FILE`. It statically
   discovers direct package uses and consults the nearest renv.lock above the
-  script. Use `--no-project` to write bare package names instead.
+  script. It omits packages supplied by R and records the inspecting Rscript's
+  major.minor as a lower bound. Use `--no-project` to write bare package names
+  instead.
   Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
   Use `exclude-newer` for reproducible CRAN and Bioconductor state.
   Write ordinary R after the metadata. Do not embed package-manager ceremony.

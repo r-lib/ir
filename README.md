@@ -33,9 +33,12 @@ ir init --script analysis.R
 ```
 
 `ir` statically discovers direct package uses and inserts the shebang and
-frontmatter. When the script is inside an renv project, `ir` uses the nearest
-`renv.lock` to pin those direct requirements and supported remote sources. Use
-`--no-project` to generate bare package requirements instead.
+frontmatter. The generated R requirement uses the inspecting Rscript's current
+major and minor as a lower bound, while packages supplied by that R are
+omitted. On Unix, `ir` also makes the script executable. When the script is
+inside an renv project, `ir` uses the nearest `renv.lock` to pin those direct
+requirements and supported remote sources. Use `--no-project` to generate bare
+package requirements instead.
 
 Full documentation: <https://r-lib.github.io/ir/>
 

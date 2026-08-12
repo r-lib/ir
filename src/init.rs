@@ -64,7 +64,11 @@ pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dy
     let result = discover_dependencies(&absolute, lockfile.as_deref())?;
     let newline = newline_sequence(&contents);
     let replacement = initialized_contents(&contents, header.shebang_end, &result, newline);
-    replace_file(&path, &replacement, metadata.permissions())?;
+    replace_file(
+        &path,
+        &replacement,
+        executable_permissions(metadata.permissions()),
+    )?;
 
     if let Some(shebang_end) = header.shebang_end {
         let shebang = String::from_utf8_lossy(&contents[..shebang_end]);
@@ -211,6 +215,8 @@ fn initialized_contents(
     let shebang_end = shebang_end.unwrap_or(0);
     let mut output = Vec::with_capacity(contents.len() + 160 + result.refs.len() * 24);
     if shebang_end == 0 {
+        // Linux passes the shebang tail to env as one argument. `-S` asks env
+        // to split `ir run`; without it, env searches for a binary named `ir run`.
         push_line(&mut output, b"#!/usr/bin/env -S ir run", newline);
     } else {
         output.extend_from_slice(&contents[..shebang_end]);
@@ -258,6 +264,19 @@ fn shebang_invokes_ir(shebang: &str) -> bool {
         .trim_end_matches(['\r', '\n'])
         .split_ascii_whitespace()
         .any(|word| word == "ir" || word.ends_with("/ir"))
+}
+
+#[cfg(unix)]
+fn executable_permissions(mut permissions: fs::Permissions) -> fs::Permissions {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    permissions.set_mode(permissions.mode() | 0o111);
+    permissions
+}
+
+#[cfg(not(unix))]
+fn executable_permissions(permissions: fs::Permissions) -> fs::Permissions {
+    permissions
 }
 
 fn replace_file(

@@ -5,6 +5,7 @@ mod support;
 use support::*;
 
 use std::fs;
+use std::process::Command;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
@@ -23,6 +24,19 @@ fn assert_stderr_contains(output: &std::process::Output, expected: &str) {
         "stderr did not contain {expected:?}\n{}",
         output_text(output)
     );
+}
+
+fn active_r_minor() -> String {
+    let out = Command::new(rscript())
+        .args([
+            "--vanilla",
+            "-e",
+            "cat(paste(R.version$major, strsplit(R.version$minor, '.', fixed = TRUE)[[1L]][[1L]], sep = '.'))",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    String::from_utf8(out.stdout).unwrap()
 }
 
 #[test]
@@ -90,7 +104,7 @@ fn init_script_uses_locked_direct_dependencies_from_nearest_renv_project() {
     fs::write(
         project.join("renv.lock"),
         r#"{
-  "R": {"Version": "4.3.2"},
+  "R": {"Version": "9.9.9"},
   "Packages": {
     "dplyr": {
       "Package": "dplyr",
@@ -132,10 +146,9 @@ fn init_script_uses_locked_direct_dependencies_from_nearest_renv_project() {
         "{initialized}"
     );
     assert!(!initialized.contains("rlang"), "{initialized}");
-    assert!(
-        initialized.contains("#| r-version: \">= 4.3\"\n"),
-        "{initialized}"
-    );
+    let expected_r = format!("#| r-version: \">= {}\"\n", active_r_minor());
+    assert!(initialized.contains(&expected_r), "{initialized}");
+    assert!(!initialized.contains("#| r-version: \">= 9.9\""));
 }
 
 #[test]
@@ -510,6 +523,37 @@ fn initialized_script_runs_through_public_cli() {
     assert_stdout_contains(&out, "ir.fixture=initialized-script");
 }
 
+#[cfg(unix)]
+#[test]
+fn initialized_script_is_directly_executable() {
+    let script = temp_path("ir-init-direct-execution", "R");
+    let cache = temp_cache("ir-init-direct-execution-cache");
+    fs::write(&script, "cat('ir.fixture=direct-execution\\n')\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let initialized = init(&script);
+    assert_success(&initialized);
+
+    let mode = fs::metadata(&script).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
+    let ir_dir = std::path::Path::new(env!("CARGO_BIN_EXE_ir"))
+        .parent()
+        .unwrap();
+    let path = std::env::join_paths(std::iter::once(ir_dir.to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let out = Command::new(&*script)
+        .env("PATH", path)
+        .env("IR_CACHE_DIR", &*cache)
+        .env("IR_RSCRIPT", rscript())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=direct-execution");
+}
+
 #[test]
 fn init_script_missing_file_does_not_create_it() {
     let script = temp_path("ir-init-missing", "R");
@@ -560,7 +604,7 @@ fn init_without_script_mode_is_reserved_for_projects() {
 
 #[cfg(unix)]
 #[test]
-fn init_script_preserves_unix_file_mode() {
+fn init_script_preserves_existing_unix_executable_mode() {
     let script = temp_path("ir-init-mode", "R");
     fs::write(&script, "cat('ok')\n").unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o751)).unwrap();
