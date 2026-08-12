@@ -151,6 +151,18 @@ ir_init_locked_ref <- function(package, record, lock_repositories) {
     repository <- ir_init_record_value(record, "Repository")
     lock_names <- names(lock_repositories)
     lock_urls <- unlist(lock_repositories, use.names = FALSE)
+    if (is.null(repository)) {
+      known <- vapply(lock_urls, function(url) {
+        ir_init_repository_url_supported("CRAN", url) ||
+          ir_init_repository_url_supported(
+            "Bioconductor", url, bioconductor = TRUE
+          )
+      }, logical(1L))
+      if (any(!known))
+        stop("locked Bioconductor package `", package,
+             "` has ambiguous Bioconductor repository provenance",
+             call. = FALSE)
+    }
     lock_names_lower <- tolower(lock_names)
     matches_record <- if (is.null(repository)) {
       rep(FALSE, length(lock_names))

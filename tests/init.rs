@@ -234,8 +234,8 @@ fn init_script_preserves_bioconductor_lockfile_source() {
     "Version": "4.4.3",
     "Repositories": [
       {
-        "Name": "InternalCRAN",
-        "URL": "https://biocache.example.com/cran"
+        "Name": "CRAN",
+        "URL": "https://cloud.r-project.org"
       },
       {
         "Name": "BioCsoft",
@@ -270,6 +270,80 @@ fn init_script_preserves_bioconductor_lockfile_source() {
         initialized.contains("#|   - \"bioc::BiocGenerics@0.52.0\"\n"),
         "{initialized}"
     );
+}
+
+#[test]
+fn init_script_preserves_default_bioconductor_with_public_cran_repository() {
+    let project = temp_dir("ir-init-default-bioc-project");
+    let script = project.join("analysis.R");
+    fs::write(&script, "BiocGenerics::combine(1, 2)\n").unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://cloud.r-project.org"
+      }
+    ]
+  },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.52.0",
+      "Source": "Bioconductor"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert_success(&out);
+    let initialized = fs::read_to_string(&script).unwrap();
+    assert!(
+        initialized.contains("#|   - \"bioc::BiocGenerics@0.52.0\"\n"),
+        "{initialized}"
+    );
+}
+
+#[test]
+fn init_script_rejects_unidentified_custom_bioconductor_repository() {
+    let project = temp_dir("ir-init-unidentified-bioc-project");
+    let script = project.join("analysis.R");
+    let original = b"BiocGenerics::combine(1, 2)\n";
+    fs::write(&script, original).unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "Internal",
+        "URL": "https://packages.example.com/r"
+      }
+    ]
+  },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.52.0",
+      "Source": "Bioconductor"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "ambiguous Bioconductor repository provenance");
+    assert_eq!(fs::read(&script).unwrap(), original);
 }
 
 #[test]
