@@ -64,7 +64,7 @@ Package tools:
   `ir render` or `ir preview` with frontmatter.
 
 Workflow:
-  To convert an existing .R file, run `ir init --script FILE`. It statically
+  To convert an existing .R file, run `ir init --file FILE`. It statically
   discovers direct package uses and consults the nearest renv.lock above the
   script. It omits packages supplied by R and records the inspecting Rscript's
   major.minor as a lower bound. It records the current UTC date as
@@ -82,7 +82,7 @@ System requirements:
   compilers required by packages remain system dependencies.
 
 Commands:
-  ir init --script script.R
+  ir init --file script.R
   ir run script.R
   ir render report.qmd
   ir preview report.qmd

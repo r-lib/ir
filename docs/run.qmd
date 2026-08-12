@@ -10,7 +10,7 @@ The metadata block is YAML, with each line prefixed by `#| ` after an optional s
 Add metadata to an existing `.R` file in place:
 
 ```console
-$ ir init --script analysis.R
+$ ir init --file analysis.R
 ```
 
 `ir` statically scans that file for direct package uses, including
@@ -35,7 +35,7 @@ generated frontmatter before relying on it.
 Use `--no-project` to skip lockfile discovery and write bare package names:
 
 ```console
-$ ir init --script analysis.R --no-project
+$ ir init --file analysis.R --no-project
 ```
 
 Initialization requires an existing `.R` file and refuses files that already

@@ -29,7 +29,7 @@ transitive dependencies.
 To convert an existing R script, initialize it in place:
 
 ```sh
-ir init --script analysis.R
+ir init --file analysis.R
 ```
 
 `ir` statically discovers direct package uses and inserts the shebang and
@@ -57,7 +57,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 ## Common commands
 
 ```sh
-ir init --script script.R
+ir init --file script.R
 ir run script.R
 ir run --vanilla script.R
 ir render report.qmd --to html

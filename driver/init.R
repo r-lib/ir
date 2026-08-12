@@ -37,6 +37,48 @@ ir_init_remote_prefix <- function(package, repo) {
   if (identical(package, repo)) "" else paste0(package, "=")
 }
 
+ir_init_repository_url_supported <- function(repository, url) {
+  if (!is.character(url) || length(url) != 1L || is.na(url) || !nzchar(url))
+    return(FALSE)
+
+  repository <- tolower(repository)
+  pattern <- if (repository %in% c("cran", "rspm", "ppm", "p3m")) {
+    paste0(
+      "^https://(?:",
+      "(?:cloud|cran)\\.r-project\\.org|",
+      "cran\\.rstudio\\.com|",
+      "(?:packagemanager\\.posit\\.co|",
+      "packagemanager\\.rstudio\\.com|p3m\\.dev)/(?:cran|all)",
+      ")(?:/|$)"
+    )
+  } else {
+    paste0(
+      "^https://(?:bioconductor\\.org/packages|",
+      "packagemanager\\.posit\\.co/bioconductor)(?:/|$)"
+    )
+  }
+  grepl(pattern, url, ignore.case = TRUE, perl = TRUE)
+}
+
+ir_init_validate_repository_urls <- function(package, repositories,
+                                              lock_repositories) {
+  lock_names <- names(lock_repositories)
+  if (!length(lock_names))
+    return(invisible())
+
+  for (repository in repositories) {
+    index <- match(tolower(repository), tolower(lock_names))
+    if (is.na(index))
+      next
+    url <- lock_repositories[[index]]
+    if (!ir_init_repository_url_supported(repository, url))
+      stop("locked repository package `", package,
+           "` uses unsupported repository URL for `", repository, "`",
+           call. = FALSE)
+  }
+  invisible()
+}
+
 ir_init_hosted_ref <- function(package, record, type) {
   user <- ir_init_record_value(record, "RemoteUsername")
   repo <- ir_init_record_value(record, "RemoteRepo")
@@ -102,6 +144,7 @@ ir_init_locked_ref <- function(package, record, lock_repositories) {
     } else {
       repository
     }
+    ir_init_validate_repository_urls(package, repositories, lock_repositories)
     repositories <- tolower(repositories)
     if (!length(repositories) || any(!nzchar(repositories)))
       stop("locked repository package `", package,
@@ -124,8 +167,10 @@ ir_init_locked_ref <- function(package, record, lock_repositories) {
     url <- ir_init_record_value(record, "RemoteUrl")
     ref <- ir_init_record_value(record, "RemoteSha")
     subdir <- ir_init_record_value(record, "RemoteSubdir")
-    portable_url <- !is.null(url) &&
-      grepl("^(https?|git|ssh)://[^@]+$", url)
+    portable_url <- !is.null(url) && grepl(
+      "^(https?|git|ssh)://[^/[:space:]]+/[^@[:space:]]+$",
+      url
+    )
     if (!portable_url || is.null(ref) || !is.null(subdir))
       stop("locked git package `", package,
            "` cannot be represented as a portable ir package ref",

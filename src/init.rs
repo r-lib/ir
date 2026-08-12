@@ -72,6 +72,11 @@ pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dy
         &exclude_newer,
         newline,
     );
+    let current = fs::read(&path)
+        .map_err(|e| format!("cannot recheck script `{file}` before replacing it: {e}"))?;
+    if current != contents {
+        return Err(format!("script `{file}` changed during initialization").into());
+    }
     replace_file(
         &path,
         &replacement,

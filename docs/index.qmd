@@ -26,7 +26,7 @@ transitive dependencies.
 
 ## Features
 
-- Convert an existing R script in place with `ir init --script`, using static dependency discovery and the nearest `renv.lock` when present.
+- Convert an existing R script in place with `ir init --file`, using static dependency discovery and the nearest `renv.lock` when present.
 - Declare package requirements in script frontmatter and run the file directly with `ir run`.
 - Resolve packages once, then reuse content-addressed cached libraries on later runs.
 - Pin the default CRAN and Bioconductor repositories to Posit Package Manager snapshots with `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer`.
@@ -42,7 +42,7 @@ transitive dependencies.
 ## Common commands
 
 ```console
-$ ir init --script script.R
+$ ir init --file script.R
 $ ir run script.R
 $ ir run --with cli -e 'cli::cli_alert_success("hi")'
 $ ir run --with BiocGenerics -e 'library(BiocGenerics)'

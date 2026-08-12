@@ -1,4 +1,4 @@
-//! Integration tests for `ir init --script`.
+//! Integration tests for `ir init --file`.
 
 mod support;
 
@@ -12,10 +12,7 @@ use time::OffsetDateTime;
 use std::os::unix::fs::PermissionsExt as _;
 
 fn init(script: &std::path::Path) -> std::process::Output {
-    ir().args(["init", "--script"])
-        .arg(script)
-        .output()
-        .unwrap()
+    ir().args(["init", "--file"]).arg(script).output().unwrap()
 }
 
 fn assert_stderr_contains(output: &std::process::Output, expected: &str) {
@@ -25,6 +22,29 @@ fn assert_stderr_contains(output: &std::process::Output, expected: &str) {
         "stderr did not contain {expected:?}\n{}",
         output_text(output)
     );
+}
+
+#[cfg(unix)]
+fn wait_for_marker(
+    mut child: std::process::Child,
+    marker: &std::path::Path,
+) -> std::process::Child {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() && std::time::Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "initializer exited before reaching the test checkpoint\n{}",
+                output_text(&output)
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        marker.exists(),
+        "initializer should reach the test checkpoint"
+    );
+    child
 }
 
 fn active_r_minor() -> String {
@@ -209,7 +229,7 @@ fn init_script_uses_lock_repository_when_record_omits_repository() {
     "Repositories": [
       {
         "Name": "PPM",
-        "URL": "https://packagemanager.posit.co/cran/2025-01-01"
+        "URL": "https://packagemanager.rstudio.com/all/latest"
       }
     ]
   },
@@ -232,6 +252,43 @@ fn init_script_uses_lock_repository_when_record_omits_repository() {
         initialized.contains("#|   - jsonlite==1.9.1\n"),
         "{initialized}"
     );
+}
+
+#[test]
+fn init_script_rejects_custom_url_for_cran_named_repository() {
+    let project = temp_dir("ir-init-custom-cran-project");
+    let script = project.join("analysis.R");
+    let original = b"privatepkg::run()\n";
+    fs::write(&script, original).unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://packages.example.com/cran"
+      }
+    ]
+  },
+  "Packages": {
+    "privatepkg": {
+      "Package": "privatepkg",
+      "Version": "1.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "unsupported repository URL");
+    assert_eq!(fs::read(&script).unwrap(), original);
 }
 
 #[test]
@@ -307,6 +364,41 @@ fn init_script_preserves_supported_git_lockfile_sources() {
 }
 
 #[test]
+fn init_script_preserves_ssh_git_url_with_user_information() {
+    let project = temp_dir("ir-init-ssh-git-project");
+    let script = project.join("analysis.R");
+    fs::write(&script, "gitpkg::run()\n").unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {"Version": "4.4.3"},
+  "Packages": {
+    "gitpkg": {
+      "Package": "gitpkg",
+      "Version": "3.0.0",
+      "Source": "git",
+      "RemoteType": "git",
+      "RemoteUrl": "ssh://git@example.com/owner/project.git",
+      "RemoteSha": "3333333333333333"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert_success(&out);
+    let initialized = fs::read_to_string(&script).unwrap();
+    assert!(
+        initialized.contains(
+            "#|   - gitpkg=git::ssh://git@example.com/owner/project.git@3333333333333333\n"
+        ),
+        "{initialized}"
+    );
+}
+
+#[test]
 fn init_script_no_project_ignores_nearest_renv_lockfile() {
     let project = temp_dir("ir-init-no-project");
     let script = project.join("analysis.R");
@@ -318,7 +410,7 @@ fn init_script_no_project_ignores_nearest_renv_lockfile() {
     .unwrap();
 
     let out = ir()
-        .args(["init", "--script"])
+        .args(["init", "--file"])
         .arg(&script)
         .arg("--no-project")
         .output()
@@ -569,6 +661,47 @@ fn initialized_script_is_directly_executable() {
     assert_stdout_contains(&out, "ir.fixture=direct-execution");
 }
 
+#[cfg(unix)]
+#[test]
+fn init_script_does_not_overwrite_concurrent_edits() {
+    use std::process::Stdio;
+
+    let script = temp_path("ir-init-concurrent-edit", "R");
+    let wrapper = temp_path("ir-init-concurrent-edit-rscript", "sh");
+    let entered = temp_path("ir-init-concurrent-edit-entered", "txt");
+    let release = temp_path("ir-init-concurrent-edit-release", "txt");
+    let cache = temp_cache("ir-init-concurrent-edit-cache");
+    let original = b"library(dplyr)\n";
+    let edited = b"library(glue)\n";
+    fs::write(&script, original).unwrap();
+    write_executable(
+        &wrapper,
+        "#!/bin/sh\nprintf 'entered\\n' > \"$IR_TEST_ENTERED\"\nwhile [ ! -e \"$IR_TEST_RELEASE\" ]; do\n  sleep 0.02\ndone\nexec \"$IR_TEST_REAL_RSCRIPT\" \"$@\"\n",
+    );
+
+    let mut command = ir();
+    command
+        .env("IR_CACHE_DIR", &*cache)
+        .env("IR_RSCRIPT", &*wrapper)
+        .env("IR_TEST_ENTERED", &*entered)
+        .env("IR_TEST_RELEASE", &*release)
+        .env("IR_TEST_REAL_RSCRIPT", rscript())
+        .args(["init", "--file"])
+        .arg(&*script)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command.spawn().unwrap();
+    let child = wait_for_marker(child, &entered);
+
+    fs::write(&script, edited).unwrap();
+    fs::write(&release, "continue\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "changed during initialization");
+    assert_eq!(fs::read(&script).unwrap(), edited);
+}
+
 #[test]
 fn init_script_missing_file_does_not_create_it() {
     let script = temp_path("ir-init-missing", "R");
@@ -596,7 +729,7 @@ fn init_script_honors_ir_rscript() {
         .env("IR_RSCRIPT", &*wrapper)
         .env("IR_TEST_MARKER", &*marker)
         .env("IR_TEST_REAL_RSCRIPT", rscript())
-        .args(["init", "--script"])
+        .args(["init", "--file"])
         .arg(&*script)
         .output()
         .unwrap();
@@ -606,14 +739,14 @@ fn init_script_honors_ir_rscript() {
 }
 
 #[test]
-fn init_without_script_mode_is_reserved_for_projects() {
+fn init_without_file_target_is_reserved_for_projects() {
     let script = temp_path("ir-init-reserved", "R");
     fs::write(&script, "cat('ok')\n").unwrap();
 
     let out = ir().arg("init").arg(&*script).output().unwrap();
 
     assert!(!out.status.success(), "{}", output_text(&out));
-    assert_stderr_contains(&out, "--script");
+    assert_stderr_contains(&out, "--file");
     assert_eq!(fs::read_to_string(&script).unwrap(), "cat('ok')\n");
 }
 
