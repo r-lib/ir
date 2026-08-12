@@ -417,7 +417,7 @@ $ ./script.R</code></pre>
 <li>It activates the environment for subprocesses, like <code>source &lt;env&gt;/bin/activate</code> on Unix.</li>
 <li>It sets <code>RETICULATE_PYTHON</code> to the resolved Python executable.</li>
 </ul>
-<p>Declare <code>reticulate</code> under <code>packages</code> when the R script loads reticulate.</p>
+<p>Declare <code>reticulate</code> under <code>packages</code> when the R script loads reticulate. When Python metadata is absent, <code>ir run</code> sets <code>RETICULATE_PYTHON=managed</code> if <code>RETICULATE_PYTHON</code> is unset. This lets reticulate create its lazy managed environment from <code>py_require()</code> declarations made by R packages. This portable default intentionally takes precedence over reticulate’s other Python selectors. To opt out, set <code>RETICULATE_PYTHON</code> to a concrete interpreter before launch, or unset it in the script before configuring reticulate.</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/usr/bin/env -S ir run</span></span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="co">#| packages:</span></span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co">#|   - reticulate</span></span>
