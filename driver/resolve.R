@@ -347,7 +347,10 @@ ir_resolve_main <- function() {
 
     ## Ensure the rest of the resolver's own tooling is available before any
     ## secretbase/pak/renv use below.
-    ir_ensure_tooling(cache_dir = cache_dir)
+    ir_ensure_tooling(
+      min_versions = c(renv = "1.2.0"),
+      cache_dir = cache_dir
+    )
 
     if (!is.null(exclude_newer)) {
       options(

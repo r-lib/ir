@@ -89,6 +89,68 @@ utils::assignInNamespace("install.packages", function(...) {{
 }
 
 #[test]
+fn resolver_tooling_replaces_old_renv_before_passing_repositories() {
+    let cache_dir = temp_dir("ir-old-renv-cache");
+    let pak_library = real_pak_library("ir-old-renv-pak-library");
+    let user_library = temp_dir("ir-old-renv-user-library");
+    let install_marker = temp_path("ir-old-renv-installed", "txt");
+    let profile = temp_path("ir-old-renv-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+{}
+.libPaths(c(Sys.getenv("IR_TEST_PAK_LIB"), Sys.getenv("R_LIBS_USER")))
+
+ir_test_write_secretbase(Sys.getenv("R_LIBS_USER"))
+ir_test_write_renv(
+  Sys.getenv("R_LIBS_USER"),
+  code = "use <- function(...) stop('old renv should be replaced', call. = FALSE)",
+  version = "1.1.7"
+)
+
+loadNamespace("pak")
+utils::assignInNamespace("pkg_install", function(refs, lib, ...) {{
+  if (!identical(refs, "renv"))
+    stop("expected ir to install renv", call. = FALSE)
+  writeLines("renv", {})
+  ir_test_write_renv(lib, version = "1.2.0")
+  invisible(TRUE)
+}}, ns = "pak")
+"#,
+            resolver_tooling_fixture_source(),
+            r_string(&install_marker)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_TEST_PAK_LIB", &pak_library)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .args([
+            "run",
+            "--isolated",
+            "--with",
+            "cli",
+            "--vanilla",
+            "-e",
+            "cat('ir.fixture=renv-minimum-version\\n')",
+        ])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=renv-minimum-version");
+    assert!(
+        install_marker.exists(),
+        "resolver should replace renv versions without use(repos = )"
+    );
+}
+
+#[test]
 fn resolver_tooling_installs_missing_packages_with_real_pak() {
     let cache_dir = temp_dir("ir-real-pak-tooling-cache");
     let pak_library = real_pak_library("ir-real-pak-tooling-pak-library");
