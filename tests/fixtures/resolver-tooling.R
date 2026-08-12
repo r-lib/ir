@@ -1,11 +1,12 @@
 ir_test_write_pkg <- function(lib, pkg, namespace, code,
+                              version = "0.0.1",
                               built = as.character(getRversion())) {
   path <- file.path(lib, pkg)
   dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
 
   description <- c(
     Package = pkg,
-    Version = "0.0.1",
+    Version = version,
     Title = pkg,
     Description = paste0(pkg, "."),
     License = "MIT"
@@ -59,8 +60,10 @@ ir_test_renv_code <- function() {
 }
 
 ir_test_write_renv <- function(lib, code = ir_test_renv_code(),
+                               version = "1.2.0",
                                built = as.character(getRversion())) {
-  ir_test_write_pkg(lib, "renv", "export(use)", code, built = built)
+  ir_test_write_pkg(lib, "renv", "export(use)", code,
+                    version = version, built = built)
 }
 
 ir_test_write_secretbase <- function(lib, marker = NULL, hash = "privatehash",
