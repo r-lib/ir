@@ -37,12 +37,14 @@ ir_init_remote_prefix <- function(package, repo) {
   if (identical(package, repo)) "" else paste0(package, "=")
 }
 
-ir_init_repository_url_supported <- function(repository, url) {
+ir_init_repository_url_supported <- function(repository, url,
+                                             bioconductor = FALSE) {
   if (!is.character(url) || length(url) != 1L || is.na(url) || !nzchar(url))
     return(FALSE)
 
   repository <- tolower(repository)
-  pattern <- if (repository %in% c("cran", "rspm", "ppm", "p3m")) {
+  pattern <- if (!bioconductor &&
+                 repository %in% c("cran", "rspm", "ppm", "p3m")) {
     paste0(
       "^https://(?:",
       "(?:cloud|cran)\\.r-project\\.org|",
@@ -54,14 +56,17 @@ ir_init_repository_url_supported <- function(repository, url) {
   } else {
     paste0(
       "^https://(?:bioconductor\\.org/packages|",
-      "packagemanager\\.posit\\.co/bioconductor)(?:/|$)"
+      "(?:packagemanager\\.posit\\.co|",
+      "packagemanager\\.rstudio\\.com|p3m\\.dev)/bioconductor|",
+      "bioc-[a-z0-9.-]+\\.r-universe\\.dev)(?:/|$)"
     )
   }
   grepl(pattern, url, ignore.case = TRUE, perl = TRUE)
 }
 
 ir_init_validate_repository_urls <- function(package, repositories,
-                                              lock_repositories) {
+                                              lock_repositories,
+                                              bioconductor = FALSE) {
   lock_names <- names(lock_repositories)
   if (!length(lock_names))
     return(invisible())
@@ -71,7 +76,9 @@ ir_init_validate_repository_urls <- function(package, repositories,
     if (is.na(index))
       next
     url <- lock_repositories[[index]]
-    if (!ir_init_repository_url_supported(repository, url))
+    if (!ir_init_repository_url_supported(
+          repository, url, bioconductor = bioconductor
+        ))
       stop("locked repository package `", package,
            "` uses unsupported repository URL for `", repository, "`",
            call. = FALSE)
@@ -132,6 +139,27 @@ ir_init_locked_ref <- function(package, record, lock_repositories) {
   )
 
   if (source == "bioconductor") {
+    repository <- ir_init_record_value(record, "Repository")
+    lock_names <- names(lock_repositories)
+    lock_urls <- unlist(lock_repositories, use.names = FALSE)
+    lock_names_lower <- tolower(lock_names)
+    matches_record <- if (is.null(repository)) {
+      rep(FALSE, length(lock_names))
+    } else {
+      repository_lower <- tolower(repository)
+      lock_names_lower == repository_lower |
+        startsWith(repository_lower, paste0(lock_names_lower, " "))
+    }
+    is_bioconductor <- grepl("bioc", lock_names, ignore.case = TRUE) |
+      grepl("/bioconductor(?:/|$)|/bioc(?:/|$)", lock_urls,
+            ignore.case = TRUE, perl = TRUE) |
+      grepl("^https://bioc-[^/]+\\.r-universe\\.dev(?:/|$)", lock_urls,
+            ignore.case = TRUE, perl = TRUE) |
+      matches_record
+    repositories <- unique(c(repository, lock_names[is_bioconductor]))
+    ir_init_validate_repository_urls(
+      package, repositories, lock_repositories, bioconductor = TRUE
+    )
     return(paste0("bioc::", package, "@", version))
   }
 

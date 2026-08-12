@@ -245,7 +245,8 @@ fn initialized_contents(
         push_line(&mut output, b"#| packages:", newline);
         for reference in &result.refs {
             output.extend_from_slice(b"#|   - ");
-            output.extend_from_slice(reference.as_bytes());
+            serde_json::to_writer(&mut output, reference)
+                .expect("serializing a string into memory cannot fail");
             output.extend_from_slice(newline);
         }
     }
@@ -387,5 +388,9 @@ fn process_crashed(status: &ExitStatus) -> bool {
 
 fn spawn_error(rscript: &OsStr, error: io::Error) -> String {
     let rscript = Path::new(rscript).display();
-    format!("failed to start Rscript `{rscript}` for script dependency discovery: {error}")
+    if error.kind() == io::ErrorKind::NotFound {
+        format!("could not find `{rscript}` on PATH. Install R or set IR_RSCRIPT.")
+    } else {
+        format!("failed to start Rscript `{rscript}` for script dependency discovery: {error}")
+    }
 }

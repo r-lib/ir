@@ -79,8 +79,8 @@ fn init_script_adds_frontmatter_and_preserves_body() {
     assert!(initialized.starts_with(
         b"#!/usr/bin/env -S ir run\n\
 #| packages:\n\
-#|   - dplyr\n\
-#|   - jsonlite\n\
+#|   - \"dplyr\"\n\
+#|   - \"jsonlite\"\n\
 #| r-version: \""
     ));
     assert!(
@@ -111,8 +111,8 @@ fn init_script_omits_packages_supplied_by_r() {
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(initialized.contains("#| packages: []\n"), "{initialized}");
-    assert!(!initialized.contains("#|   - MASS"), "{initialized}");
-    assert!(!initialized.contains("#|   - stats"), "{initialized}");
+    assert!(!initialized.contains("#|   - \"MASS\""), "{initialized}");
+    assert!(!initialized.contains("#|   - \"stats\""), "{initialized}");
 }
 
 #[test]
@@ -124,8 +124,8 @@ fn init_script_includes_only_statically_referenced_packages() {
 
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
-    assert!(initialized.contains("#|   - DBI\n"), "{initialized}");
-    assert!(initialized.contains("#|   - dplyr\n"), "{initialized}");
+    assert!(initialized.contains("#|   - \"DBI\"\n"), "{initialized}");
+    assert!(initialized.contains("#|   - \"dplyr\"\n"), "{initialized}");
     assert!(!initialized.contains("dbplyr"), "{initialized}");
 }
 
@@ -173,11 +173,11 @@ fn init_script_uses_locked_direct_dependencies_from_nearest_renv_project() {
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(
-        initialized.contains("#|   - dplyr==1.1.4\n"),
+        initialized.contains("#|   - \"dplyr==1.1.4\"\n"),
         "{initialized}"
     );
     assert!(
-        initialized.contains("#|   - github::tidyverse/glue@0123456789abcdef\n"),
+        initialized.contains("#|   - \"github::tidyverse/glue@0123456789abcdef\"\n"),
         "{initialized}"
     );
     assert!(!initialized.contains("rlang"), "{initialized}");
@@ -194,7 +194,27 @@ fn init_script_preserves_bioconductor_lockfile_source() {
     fs::write(
         project.join("renv.lock"),
         r#"{
-  "R": {"Version": "4.4.3"},
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "InternalCRAN",
+        "URL": "https://biocache.example.com/cran"
+      },
+      {
+        "Name": "BioCsoft",
+        "URL": "https://packagemanager.rstudio.com/bioconductor/latest/packages/3.20/bioc"
+      },
+      {
+        "Name": "P3M",
+        "URL": "https://p3m.dev/bioconductor/latest/packages/3.20/annotation"
+      },
+      {
+        "Name": "BiocBinary",
+        "URL": "https://bioc-release.r-universe.dev"
+      }
+    ]
+  },
   "Packages": {
     "BiocGenerics": {
       "Package": "BiocGenerics",
@@ -211,9 +231,46 @@ fn init_script_preserves_bioconductor_lockfile_source() {
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(
-        initialized.contains("#|   - bioc::BiocGenerics@0.52.0\n"),
+        initialized.contains("#|   - \"bioc::BiocGenerics@0.52.0\"\n"),
         "{initialized}"
     );
+}
+
+#[test]
+fn init_script_rejects_custom_bioconductor_repository_url() {
+    let project = temp_dir("ir-init-custom-bioc-project");
+    let script = project.join("analysis.R");
+    let original = b"BiocGenerics::combine(1, 2)\n";
+    fs::write(&script, original).unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "Internal",
+        "URL": "https://packages.example.com/r"
+      }
+    ]
+  },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.52.0",
+      "Source": "Bioconductor",
+      "Repository": "Internal Bioconductor 3.20"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "unsupported repository URL");
+    assert_eq!(fs::read(&script).unwrap(), original);
 }
 
 #[test]
@@ -249,7 +306,7 @@ fn init_script_uses_lock_repository_when_record_omits_repository() {
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(
-        initialized.contains("#|   - jsonlite==1.9.1\n"),
+        initialized.contains("#|   - \"jsonlite==1.9.1\"\n"),
         "{initialized}"
     );
 }
@@ -345,19 +402,19 @@ fn init_script_preserves_supported_git_lockfile_sources() {
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(
         initialized.contains(
-            "#|   - bitbucketpkg=git::https://bitbucket.org/owner/project.git@2222222222222222\n"
+            "#|   - \"bitbucketpkg=git::https://bitbucket.org/owner/project.git@2222222222222222\"\n"
         ),
         "{initialized}"
     );
     assert!(
         initialized.contains(
-            "#|   - gitlabpkg=gitlab::https://gitlab.com/group/subgroup/project/-/r/pkg@1111111111111111\n"
+            "#|   - \"gitlabpkg=gitlab::https://gitlab.com/group/subgroup/project/-/r/pkg@1111111111111111\"\n"
         ),
         "{initialized}"
     );
     assert!(
         initialized.contains(
-            "#|   - gitpkg=git::https://example.com/owner/project.git@3333333333333333\n"
+            "#|   - \"gitpkg=git::https://example.com/owner/project.git@3333333333333333\"\n"
         ),
         "{initialized}"
     );
@@ -392,9 +449,83 @@ fn init_script_preserves_ssh_git_url_with_user_information() {
     let initialized = fs::read_to_string(&script).unwrap();
     assert!(
         initialized.contains(
-            "#|   - gitpkg=git::ssh://git@example.com/owner/project.git@3333333333333333\n"
+            "#|   - \"gitpkg=git::ssh://git@example.com/owner/project.git@3333333333333333\"\n"
         ),
         "{initialized}"
+    );
+}
+
+#[test]
+fn init_script_quotes_yaml_sensitive_package_refs() {
+    let project = temp_dir("ir-init-yaml-ref-project");
+    let script = project.join("analysis.R");
+    let cache = temp_cache("ir-init-yaml-ref-cache");
+    let library = temp_dir("ir-init-yaml-ref-library");
+    let profile = temp_path("ir-init-yaml-ref-profile", "R");
+    let captured_refs = temp_path("ir-init-yaml-ref-captured", "txt");
+    let reference = "quotedpkg=github::owner/project/r/pkg #fragment@4444444444444444";
+    fs::write(
+        &script,
+        "if (FALSE) quotedpkg::run()\ncat('ir.fixture=yaml-ref\\n')\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {"Version": "4.4.3"},
+  "Packages": {
+    "quotedpkg": {
+      "Package": "quotedpkg",
+      "Version": "1.0.0",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteUsername": "owner",
+      "RemoteRepo": "project",
+      "RemoteSubdir": "r/pkg #fragment",
+      "RemoteSha": "4444444444444444"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        &profile,
+        r#"
+if (nzchar(Sys.getenv("IR_RESOLVE_RESULT_FILE"))) {
+  refs <- readLines(file("stdin"))
+  writeLines(refs, Sys.getenv("IR_TEST_REFS"))
+  writeLines(Sys.getenv("IR_TEST_LIBRARY"),
+             Sys.getenv("IR_RESOLVE_RESULT_FILE"))
+  q(save = "no", status = 0L, runLast = FALSE)
+}
+"#,
+    )
+    .unwrap();
+
+    let initialized = init(&script);
+    assert_success(&initialized);
+    let initialized = fs::read_to_string(&script).unwrap();
+    assert!(
+        initialized.contains(&format!("#|   - \"{reference}\"\n")),
+        "{initialized}"
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &*cache)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_TEST_LIBRARY", &*library)
+        .env("IR_TEST_REFS", &*captured_refs)
+        .env("R_PROFILE_USER", &*profile)
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "ir.fixture=yaml-ref");
+    assert_eq!(
+        fs::read_to_string(&captured_refs).unwrap().trim(),
+        reference
     );
 }
 
@@ -418,7 +549,7 @@ fn init_script_no_project_ignores_nearest_renv_lockfile() {
 
     assert_success(&out);
     let initialized = fs::read_to_string(&script).unwrap();
-    assert!(initialized.contains("#|   - dplyr\n"), "{initialized}");
+    assert!(initialized.contains("#|   - \"dplyr\"\n"), "{initialized}");
     assert!(!initialized.contains("dplyr=="), "{initialized}");
 }
 
@@ -711,6 +842,25 @@ fn init_script_missing_file_does_not_create_it() {
     assert!(!out.status.success(), "{}", output_text(&out));
     assert_stderr_contains(&out, "cannot read script");
     assert!(!script.exists());
+}
+
+#[test]
+fn init_script_reports_actionable_error_when_rscript_is_missing() {
+    let script = temp_path("ir-init-missing-rscript", "R");
+    let missing_rscript = temp_path("ir-init-nonexistent-rscript", "exe");
+    let original = b"cat('ok')\n";
+    fs::write(&script, original).unwrap();
+
+    let out = ir()
+        .env("IR_RSCRIPT", &*missing_rscript)
+        .args(["init", "--file"])
+        .arg(&*script)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "Install R or set IR_RSCRIPT");
+    assert_eq!(fs::read(&script).unwrap(), original);
 }
 
 #[cfg(unix)]
