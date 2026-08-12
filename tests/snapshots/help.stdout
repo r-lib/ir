@@ -4,6 +4,7 @@ Usage: ir [COMMAND]
 
 Commands:
   run         Run a script or inline R expression
+  init        Add ir metadata to an existing script
   render      Render a Quarto document or script
   preview     Preview a Quarto document or script
   tool        Run package executables
@@ -17,6 +18,7 @@ Options:
 
 Examples:
   ir run script.R
+  ir init --script script.R
   ir render report.qmd
   ir preview report.qmd
   ir tool run btw

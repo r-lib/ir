@@ -205,6 +205,8 @@ fn help_outputs_match_snapshots() {
     for (name, args) in [
         ("help", &["--help"][..]),
         ("help", &["-h"]),
+        ("init-help", &["init", "--help"]),
+        ("init-help", &["init", "-h"]),
         ("run-help", &["run", "--help"]),
         ("run-help", &["run", "-h"]),
         ("render-help", &["render", "--help"]),
@@ -295,6 +297,7 @@ fn help_section_headings_are_colored() {
     let colored_examples = "\u{1b}[1m\u{1b}[94mExamples:\u{1b}[0m";
     for args in [
         &["--help"][..],
+        &["init", "--help"],
         &["run", "--help"],
         &["render", "--help"],
         &["preview", "--help"],

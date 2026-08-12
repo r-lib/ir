@@ -25,12 +25,14 @@ pub(crate) fn root() -> ClapCommand {
         .arg_required_else_help(true)
         .after_help(examples_help(concat!(
             "  ir run script.R\n",
+            "  ir init --script script.R\n",
             "  ir render report.qmd\n",
             "  ir preview report.qmd\n",
             "  ir tool run btw\n",
             "  ir cache dir",
         )))
         .subcommand(run_command())
+        .subcommand(init_command())
         .subcommand(render_command())
         .subcommand(preview_command())
         .subcommand(tool_command())
@@ -183,6 +185,34 @@ fn run_command() -> ClapCommand {
         .arg(raw_args_arg(
             "Rscript options, script path, and script arguments",
         ))
+}
+
+fn init_command() -> ClapCommand {
+    ClapCommand::new("init")
+        .about("Add ir metadata to an existing script")
+        .after_help(examples_help(concat!(
+            "  ir init --script analysis.R\n",
+            "  ir init --script analysis.R --no-project",
+        )))
+        .arg(
+            Arg::new("script")
+                .long("script")
+                .required(true)
+                .action(ArgAction::SetTrue)
+                .help("Initialize a standalone R script"),
+        )
+        .arg(
+            Arg::new("no-project")
+                .long("no-project")
+                .action(ArgAction::SetTrue)
+                .help("Do not use a renv.lock discovered above the script"),
+        )
+        .arg(
+            Arg::new("file")
+                .value_name("FILE")
+                .required(true)
+                .help("Existing R script to modify in place"),
+        )
 }
 
 fn render_command() -> ClapCommand {

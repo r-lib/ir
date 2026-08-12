@@ -64,11 +64,15 @@ Package tools:
   `ir render` or `ir preview` with frontmatter.
 
 Workflow:
+  To convert an existing .R file, run `ir init --script FILE`. It statically
+  discovers direct package uses and consults the nearest renv.lock above the
+  script. Use `--no-project` to write bare package names instead.
   Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
   Use `exclude-newer` for reproducible CRAN and Bioconductor state.
   Write ordinary R after the metadata. Do not embed package-manager ceremony.
 
 System requirements:
+  `ir init` requires Rscript on PATH or selected through IR_RSCRIPT.
   R/Rscript must be available, either on PATH or selected with `--rscript`/`IR_RSCRIPT`.
   Use rig for `r-version` selection; `exclude-newer` can choose the R minor or
   limit a requirement that matches more than one R minor by date.
@@ -76,6 +80,7 @@ System requirements:
   compilers required by packages remain system dependencies.
 
 Commands:
+  ir init --script script.R
   ir run script.R
   ir render report.qmd
   ir preview report.qmd
@@ -100,6 +105,7 @@ Argument boundaries:
 
 Inspection commands:
   ir --help
+  ir init --help
   ir run --help
   ir render --help
   ir preview --help
