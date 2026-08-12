@@ -24,13 +24,13 @@ usage() {
   cat <<EOF
 Usage: scripts/install-dev-deps.sh [--dry-run] [--platform macos|linux-deb] [--skip COMPONENT]
 
-Installs Rust, Python, uv, rig, R release, R ${TEST_R_SPEC} for tests, and Quarto.
+Installs Rust, Python, rig, R release, R ${TEST_R_SPEC} for tests, and Quarto.
 Use scripts/install-dev-deps.ps1 on Windows.
 
 Options:
   --dry-run           Print the commands without running them.
   --platform PLATFORM Print or run the plan for a supported platform.
-  --skip COMPONENT    Skip installing rust, python (including uv), quarto, r-release, or test-r.
+  --skip COMPONENT    Skip installing rust, python, quarto, r-release, or test-r.
   -h, --help          Show this help.
 EOF
 }
@@ -233,26 +233,6 @@ install_rust() {
   fi
 }
 
-install_uv() {
-  if have_command uv; then
-    echo "uv already installed"
-    return
-  fi
-
-  require_command curl
-  if [ "$DRY_RUN" -eq 1 ]; then
-    uv_installer="/tmp/ir-uv-installer.sh"
-  else
-    uv_installer="${TMPDIR:-/tmp}/ir-uv-installer.$$"
-  fi
-  run curl -LsSf https://astral.sh/uv/install.sh -o "$uv_installer"
-  run env UV_INSTALL_DIR="${HOME}/.local/bin" sh "$uv_installer"
-  if [ "$DRY_RUN" -eq 0 ]; then
-    rm -f "$uv_installer"
-  fi
-  export PATH="${HOME}/.local/bin:${PATH}"
-}
-
 install_macos() {
   if [ "$SKIP_RUST" -eq 0 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -267,12 +247,9 @@ install_macos() {
     install_rust
   fi
 
-  if [ "$SKIP_PYTHON" -eq 0 ]; then
-    if ! have_command python3; then
-      require_command brew
-      run brew install python
-    fi
-    install_uv
+  if [ "$SKIP_PYTHON" -eq 0 ] && ! have_command python3; then
+    require_command brew
+    run brew install python
   fi
 
   if ! have_command rig; then
@@ -302,7 +279,6 @@ install_linux_deb() {
 
   if [ "$SKIP_PYTHON" -eq 0 ]; then
     run_root apt-get install -y --no-install-recommends python3 python3-venv
-    install_uv
   fi
 
   if [ "$SKIP_RUST" -eq 0 ]; then
@@ -386,7 +362,6 @@ verify_install() {
   run cargo --version
   run rustc --version
   run python3 --version
-  run uv --version
   run rig --version
   run Rscript --version
   if [ "$SKIP_TEST_R" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then

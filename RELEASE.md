@@ -16,8 +16,8 @@ owner `r-lib`, repository `ir`, workflow `release.yml`, and environment `pypi`.
 A pending publisher does not reserve the project name, so configure it shortly
 before the release.
 
-The command requires authenticated `git` and `gh` access, `uv`, and the local
-tools used by `scripts/check.sh`. It:
+The command requires authenticated `git` and `gh` access, plus the local tools
+used by `scripts/check.sh`. It:
 
 1. Changes both Cargo files to the stable version and runs the complete local
    check.
@@ -27,9 +27,7 @@ tools used by `scripts/check.sh`. It:
    workflow to publish the GitHub Release and PyPI wheels.
 4. Confirms that the GitHub Release is public, downloads the archive for the
    current host, verifies its checksum, and smoke-tests `ir`, `rx`, and a short
-   R execution. It then retries `uv tool install r-lib-ir==VERSION` from PyPI
-   until the package is visible and repeats the command and R smoke tests using
-   that installation.
+   R execution.
 5. Changes both Cargo files to `VERSION+dev`, commits and pushes that change,
    then waits for its CI run.
 
@@ -37,7 +35,7 @@ The release workflow builds and validates five platform archives and five
 platform wheels. It publishes `SHA256SUMS.txt` with the GitHub Release, then
 publishes the wheels to PyPI through Trusted Publishing. It does not publish a
 source distribution. The local script tests the archive for its host and the
-wheel selected by `uv` from public PyPI.
+workflow verifies each wheel before publishing it.
 
 The script follows one happy path and stops at the first failure. It does not
 undo or resume partial releases. Inspect the Git commits, tag, Actions runs,
@@ -48,6 +46,5 @@ Actions job while its original wheel artifacts are retained. Do not use a fresh
 workflow dispatch to resume a partial PyPI upload: it rebuilds the wheels, while
 PyPI filenames are immutable. If the artifacts have expired after any wheel was
 uploaded, inspect the PyPI project and release a new version. Do not rerun
-`scripts/release.sh` after its tag exists. If a public smoke test fails, inspect
-both release channels and complete the development-version commit manually once
-they are correct.
+`scripts/release.sh` after its tag exists. After recovering a partial release,
+complete the development-version commit manually.

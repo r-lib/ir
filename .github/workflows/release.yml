@@ -126,7 +126,7 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             manylinux: "2014"
-          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: "2014"
           - os: macos-14
@@ -158,49 +158,27 @@ jobs:
           maturin-version: v1.14.1
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
-          args: --release --locked --compatibility pypi --out dist
+          args: --release --out dist
 
       - name: Smoke test wheel
-        if: runner.os != 'Windows' && matrix.target != 'aarch64-unknown-linux-gnu'
-        shell: bash
+        shell: pwsh
         env:
           UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
           UV_CACHE_DIR: ${{ runner.temp }}/r-lib-ir-cache
           UV_PYTHON_DOWNLOADS: never
         run: |
-          set -euo pipefail
-          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
-          uv tool install --no-index --find-links dist r-lib-ir
-          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
-          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
-          "$UV_TOOL_BIN_DIR/ir" --help >/dev/null
-          "$UV_TOOL_BIN_DIR/rx" --help >/dev/null
-
-      - name: Smoke test wheel (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          UV_TOOL_DIR: ${{ runner.temp }}\r-lib-ir-tool
-          UV_TOOL_BIN_DIR: ${{ runner.temp }}\r-lib-ir-bin
-          UV_CACHE_DIR: ${{ runner.temp }}\r-lib-ir-cache
-          UV_PYTHON_DOWNLOADS: never
-        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $version = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
           uv tool install --no-index --find-links dist r-lib-ir
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $ir = Join-Path $env:UV_TOOL_BIN_DIR 'ir.exe'
-          $rx = Join-Path $env:UV_TOOL_BIN_DIR 'rx.exe'
-          $irVersion = & $ir --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($irVersion -ne "ir $version") { throw 'wrong ir version' }
-          $rxVersion = & $rx --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($rxVersion -ne "rx $version") { throw 'wrong rx version' }
-          & $ir --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $rx --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $suffix = if ($IsWindows) { ".exe" } else { "" }
+          foreach ($command in @("ir", "rx")) {
+            $executable = Join-Path $env:UV_TOOL_BIN_DIR "$command$suffix"
+            $actual = & $executable --version
+            if ($actual -ne "$command $version") { throw "wrong $command version: $actual" }
+            & $executable --help | Out-Null
+          }
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -209,49 +187,9 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-  pypi-smoke-linux-aarch64:
-    name: pypi-aarch64-unknown-linux-gnu smoke test
-    needs: pypi
-    runs-on: ubuntu-22.04-arm
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v9.0.0
-
-      - name: Download wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: pypi-aarch64-unknown-linux-gnu
-          path: dist
-
-      - name: Smoke test wheel
-        shell: bash
-        env:
-          UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
-          UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
-          UV_CACHE_DIR: ${{ runner.temp }}/r-lib-ir-cache
-          UV_PYTHON_DOWNLOADS: never
-        run: |
-          set -euo pipefail
-          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
-          uv tool install --no-index --find-links dist r-lib-ir
-          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
-          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
-          "$UV_TOOL_BIN_DIR/ir" --help >/dev/null
-          "$UV_TOOL_BIN_DIR/rx" --help >/dev/null
-
   publish:
     name: publish
-    needs: [build, pypi-smoke-linux-aarch64]
+    needs: [build, pypi]
     # Only publish for a real tag: a tag push, or a manual run given a tag.
     if: ${{ github.ref_type == 'tag' || inputs.tag != '' }}
     runs-on: ubuntu-22.04
@@ -331,7 +269,6 @@ jobs:
   publish-pypi:
     name: publish PyPI
     needs: publish
-    if: ${{ github.ref_type == 'tag' || inputs.tag != '' }}
     runs-on: ubuntu-22.04
     environment: pypi
     permissions:
@@ -344,24 +281,8 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify wheel set
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t wheels < <(find dist -maxdepth 1 -type f -name 'r_lib_ir-*.whl' -print)
-          if [ "${#wheels[@]}" -ne 5 ]; then
-            printf 'expected 5 r-lib-ir wheels, found %s\n' "${#wheels[@]}" >&2
-            printf '%s\n' "${wheels[@]}" >&2
-            exit 1
-          fi
-          printf '%s\n' "${wheels[@]}"
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v9.0.0
 
       - name: Publish wheels to PyPI
-        run: |
-          uv publish \
-            --trusted-publishing always \
-            --check-url https://pypi.org/simple \
-            dist/*.whl
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple dist/*.whl

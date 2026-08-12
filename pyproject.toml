@@ -26,4 +26,3 @@ Issues = "https://github.com/r-lib/ir/issues"
 bindings = "bin"
 compatibility = "pypi"
 locked = true
-strip = true
