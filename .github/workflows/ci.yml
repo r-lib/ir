@@ -155,6 +155,23 @@ jobs:
           GITHUB_PAT: ${{ github.token }}
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
 
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: runner.os == 'Linux'
+
+      - name: Smoke test Python package
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          uv build --wheel --out-dir dist
+          uv tool install --no-index --find-links dist r-lib-ir
+          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
+          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
+
   lint:
     name: rustfmt + clippy
     runs-on: ubuntu-latest

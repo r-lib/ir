@@ -73,6 +73,14 @@ fn public_windows_install_guidance_recommends_scoop() {
 }
 
 #[test]
+fn public_install_guidance_includes_uv_tool_install() {
+    for file in ["README.md", "docs/config.qmd"] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        assert!(text.contains("uv tool install r-lib-ir"), "{file}");
+    }
+}
+
+#[test]
 fn public_ir_links_use_r_lib_owner() {
     for file in [
         "README.md",

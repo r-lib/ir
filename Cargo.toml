@@ -2,7 +2,7 @@
 name = "ir"
 version = "0.3.0+dev"
 edition = "2021"
-description = "Run standalone R scripts from embedded dependency metadata."
+description = "Run portable R scripts, render Quarto documents, and launch R package tools."
 license = "MIT"
 
 [dependencies]
