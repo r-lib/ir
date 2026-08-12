@@ -33,8 +33,9 @@ ir init --file analysis.R
 ```
 
 `ir` statically discovers direct package uses and inserts the shebang and
-frontmatter. The generated R requirement uses the inspecting Rscript's current
-major and minor as a lower bound, while packages supplied by that R are
+frontmatter. For a released R, the generated requirement uses the inspecting
+Rscript's current major and minor as a lower bound; development and prerelease
+builds retain their `devel` or `next` channel. Packages supplied by that R are
 omitted. It also records the current UTC date as `exclude-newer`, bounding
 package resolution to the state available when the script was initialized. On
 Unix, `ir` also makes the script executable. When the script is inside an renv
