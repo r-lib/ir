@@ -8,6 +8,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tempfile::NamedTempFile;
+use time::OffsetDateTime;
 
 use crate::driver;
 use crate::lock::{resolver_lock_path, FileLock};
@@ -62,8 +63,15 @@ pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dy
         .then(|| nearest_renv_lockfile(&absolute))
         .flatten();
     let result = discover_dependencies(&absolute, lockfile.as_deref())?;
+    let exclude_newer = OffsetDateTime::now_utc().date().to_string();
     let newline = newline_sequence(&contents);
-    let replacement = initialized_contents(&contents, header.shebang_end, &result, newline);
+    let replacement = initialized_contents(
+        &contents,
+        header.shebang_end,
+        &result,
+        &exclude_newer,
+        newline,
+    );
     replace_file(
         &path,
         &replacement,
@@ -210,6 +218,7 @@ fn initialized_contents(
     contents: &[u8],
     shebang_end: Option<usize>,
     result: &InitResult,
+    exclude_newer: &str,
     newline: &[u8],
 ) -> Vec<u8> {
     let shebang_end = shebang_end.unwrap_or(0);
@@ -240,6 +249,10 @@ fn initialized_contents(
     output.extend_from_slice(b"\"");
     output.extend_from_slice(newline);
     push_line(&mut output, b"#| isolated: true", newline);
+    output.extend_from_slice(b"#| exclude-newer: \"");
+    output.extend_from_slice(exclude_newer.as_bytes());
+    output.extend_from_slice(b"\"");
+    output.extend_from_slice(newline);
     output.extend_from_slice(newline);
     output.extend_from_slice(&contents[shebang_end..]);
     output

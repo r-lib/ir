@@ -6,6 +6,7 @@ use support::*;
 
 use std::fs;
 use std::process::Command;
+use time::OffsetDateTime;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
@@ -39,13 +40,19 @@ fn active_r_minor() -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+fn utc_date() -> String {
+    OffsetDateTime::now_utc().date().to_string()
+}
+
 #[test]
 fn init_script_adds_frontmatter_and_preserves_body() {
     let script = temp_path("ir-init-script", "R");
     let body = b"library(dplyr)\njsonlite::toJSON(airquality)\n";
     fs::write(&script, body).unwrap();
 
+    let date_before = utc_date();
     let out = init(&script);
+    let date_after = utc_date();
 
     assert_success(&out);
     let initialized = fs::read(&script).unwrap();
@@ -61,8 +68,16 @@ fn init_script_adds_frontmatter_and_preserves_body() {
         "{}",
         String::from_utf8_lossy(&initialized)
     );
-    assert!(initialized
-        .ends_with(b"\"\n#| isolated: true\n\nlibrary(dplyr)\njsonlite::toJSON(airquality)\n"));
+    let initialized_text = String::from_utf8_lossy(&initialized);
+    assert!(
+        [date_before, date_after]
+            .iter()
+            .any(|date| initialized_text.contains(&format!(
+                "#| isolated: true\n#| exclude-newer: \"{date}\"\n"
+            ))),
+        "{initialized_text}"
+    );
+    assert!(initialized.ends_with(b"\n\nlibrary(dplyr)\njsonlite::toJSON(airquality)\n"));
     assert!(String::from_utf8_lossy(&out.stdout).contains("Initialized script"));
 }
 

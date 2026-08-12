@@ -16,11 +16,12 @@ $ ir init --script analysis.R
 `ir` statically scans that file for direct package uses, including
 `library()`, `require()`, and `pkg::fun()` calls. It inserts a canonical
 `ir run` shebang when the script has no shebang, records the major and minor of
-the inspecting Rscript as a lower bound, and sets `isolated: true`.
-`IR_RSCRIPT` selects that Rscript when set; otherwise `ir` uses `Rscript` on
-`PATH`. Packages supplied by that R installation, including base and
-recommended packages such as `stats`, are omitted. An existing shebang is
-preserved with a warning when it does not invoke `ir`.
+the inspecting Rscript as a lower bound, sets `isolated: true`, and records the
+current UTC date as `exclude-newer`. `IR_RSCRIPT` selects that Rscript when set;
+otherwise `ir` uses `Rscript` on `PATH`. Packages supplied by that R
+installation, including base and recommended packages such as `stats`, are
+omitted. An existing shebang is preserved with a warning when it does not invoke
+`ir`.
 
 Project discovery starts from the script's directory. If `ir` finds an
 `renv.lock` there or in a parent directory, each detected direct package is
