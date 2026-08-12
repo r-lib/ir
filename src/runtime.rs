@@ -877,6 +877,11 @@ fn run_script(
         cmd.env("RETICULATE_PYTHON", python);
         activate_python_env(&mut cmd, python)?;
     } else if env::var_os("RETICULATE_PYTHON").is_none() {
+        // `ir run` owns Python selection by default so package-level
+        // `py_require()` declarations produce portable scripts. This
+        // intentionally outranks reticulate's other selectors and requires a
+        // reticulate release that supports `managed`; do not add runtime probes
+        // for older releases or externally managed environments here.
         cmd.env("RETICULATE_PYTHON", "managed");
     }
 
