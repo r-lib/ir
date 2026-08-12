@@ -101,6 +101,42 @@ fn init_script_adds_frontmatter_and_preserves_body() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("Initialized script"));
 }
 
+#[cfg(unix)]
+#[test]
+fn init_script_preserves_development_r_channel() {
+    let wrapper = temp_path("ir-init-development-rscript", "sh");
+    let cache = temp_cache("ir-init-development-r-cache");
+    write_executable(
+        &wrapper,
+        "#!/bin/sh\ndriver=\nfor argument in \"$@\"; do\n  driver=$argument\ndone\nexport IR_TEST_DRIVER=\"$driver\"\nexec \"$IR_TEST_REAL_RSCRIPT\" --vanilla -e 'R.version$status <- Sys.getenv(\"IR_TEST_R_STATUS\"); sys.source(Sys.getenv(\"IR_TEST_DRIVER\"), envir = .GlobalEnv); ir_init_main()'\n",
+    );
+
+    for (status, expected) in [
+        ("Under development (unstable)", "devel"),
+        ("Prerelease", "next"),
+    ] {
+        let script = temp_path(&format!("ir-init-{expected}-r"), "R");
+        fs::write(&script, "cat('ok')\n").unwrap();
+
+        let out = ir()
+            .env("IR_CACHE_DIR", &*cache)
+            .env("IR_RSCRIPT", &*wrapper)
+            .env("IR_TEST_REAL_RSCRIPT", rscript())
+            .env("IR_TEST_R_STATUS", status)
+            .args(["init", "--file"])
+            .arg(&*script)
+            .output()
+            .unwrap();
+
+        assert_success(&out);
+        let initialized = fs::read_to_string(&script).unwrap();
+        assert!(
+            initialized.contains(&format!("#| r-version: \"{expected}\"\n")),
+            "{initialized}"
+        );
+    }
+}
+
 #[test]
 fn init_script_omits_packages_supplied_by_r() {
     let script = temp_path("ir-init-r-supplied", "R");
@@ -855,6 +891,48 @@ fn init_script_does_not_overwrite_concurrent_edits() {
     assert!(!out.status.success(), "{}", output_text(&out));
     assert_stderr_contains(&out, "changed during initialization");
     assert_eq!(fs::read(&script).unwrap(), edited);
+}
+
+#[cfg(unix)]
+#[test]
+fn init_script_preserves_concurrent_permission_changes() {
+    use std::process::Stdio;
+
+    let script = temp_path("ir-init-concurrent-mode", "R");
+    let wrapper = temp_path("ir-init-concurrent-mode-rscript", "sh");
+    let entered = temp_path("ir-init-concurrent-mode-entered", "txt");
+    let release = temp_path("ir-init-concurrent-mode-release", "txt");
+    let cache = temp_cache("ir-init-concurrent-mode-cache");
+    fs::write(&script, "cat('ok')\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+    write_executable(
+        &wrapper,
+        "#!/bin/sh\nprintf 'entered\\n' > \"$IR_TEST_ENTERED\"\nwhile [ ! -e \"$IR_TEST_RELEASE\" ]; do\n  sleep 0.02\ndone\nexec \"$IR_TEST_REAL_RSCRIPT\" \"$@\"\n",
+    );
+
+    let mut command = ir();
+    command
+        .env("IR_CACHE_DIR", &*cache)
+        .env("IR_RSCRIPT", &*wrapper)
+        .env("IR_TEST_ENTERED", &*entered)
+        .env("IR_TEST_RELEASE", &*release)
+        .env("IR_TEST_REAL_RSCRIPT", rscript())
+        .args(["init", "--file"])
+        .arg(&*script)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command.spawn().unwrap();
+    let child = wait_for_marker(child, &entered);
+
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&release, "continue\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        fs::metadata(&script).unwrap().permissions().mode() & 0o777,
+        0o711
+    );
 }
 
 #[test]

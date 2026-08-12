@@ -18,6 +18,15 @@ ir_init_minor_version <- function(version) {
   paste(parts[1:2], collapse = ".")
 }
 
+ir_init_r_requirement <- function() {
+  status <- R.version$status
+  if (identical(status, "Under development (unstable)"))
+    return("devel")
+  if (nzchar(status))
+    return("next")
+  paste(">=", ir_init_minor_version(getRversion()))
+}
+
 ir_init_package_version <- function(package, version) {
   if (is.null(version) || !grepl("^[0-9]+([.-][0-9]+)*$", version))
     stop("locked package `", package, "` has invalid version `",
@@ -248,7 +257,7 @@ ir_init_main <- function() {
     c("R", r_supplied)
   )
 
-  r_version <- paste(">=", ir_init_minor_version(getRversion()))
+  r_version <- ir_init_r_requirement()
   refs <- packages
   lockfile_used <- ""
 

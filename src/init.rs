@@ -77,10 +77,15 @@ pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dy
     if current != contents {
         return Err(format!("script `{file}` changed during initialization").into());
     }
+    let current_metadata = fs::symlink_metadata(&path)
+        .map_err(|e| format!("cannot recheck script `{file}` before replacing it: {e}"))?;
+    if current_metadata.file_type().is_symlink() || !current_metadata.is_file() {
+        return Err(format!("script `{file}` changed during initialization").into());
+    }
     replace_file(
         &path,
         &replacement,
-        executable_permissions(metadata.permissions()),
+        executable_permissions(current_metadata.permissions()),
     )?;
 
     if let Some(shebang_end) = header.shebang_end {
