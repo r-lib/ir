@@ -876,6 +876,8 @@ fn run_script(
     if let Some(python) = python {
         cmd.env("RETICULATE_PYTHON", python);
         activate_python_env(&mut cmd, python)?;
+    } else if env::var_os("RETICULATE_PYTHON").is_none() {
+        cmd.env("RETICULATE_PYTHON", "managed");
     }
 
     if isolated {

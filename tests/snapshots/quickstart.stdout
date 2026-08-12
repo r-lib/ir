@@ -39,6 +39,8 @@ Python:
   `ir preview` also set QUARTO_PYTHON and inject jupyter.
   Add `reticulate` under `packages` when R code loads reticulate; `ir render`
   and `ir preview` add it for knitr-backed Quarto documents with Python chunks.
+  Without Python metadata, `ir run` defaults an unset RETICULATE_PYTHON to
+  managed; set it explicitly to keep another Python selection.
   `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
 
 Bioconductor:

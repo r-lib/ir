@@ -546,6 +546,37 @@ cat("frontmatter.user_library=", Sys.getenv("R_LIBS_USER", unset = "<unset>"), "
     assert_stdout_contains(&out, "frontmatter.user_library=NULL");
 }
 
+#[test]
+fn run_without_python_metadata_defaults_reticulate_python_to_managed() {
+    let script = temp_path("ir-run-reticulate-python-default", "R");
+    fs::write(
+        &script,
+        r#"cat("reticulate_python=", Sys.getenv("RETICULATE_PYTHON", unset = "<unset>"), "\n", sep = "")
+"#,
+    )
+    .unwrap();
+
+    let out = ir()
+        .env_remove("RETICULATE_PYTHON")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "reticulate_python=managed");
+
+    let out = ir()
+        .env("RETICULATE_PYTHON", "configured-python")
+        .args(["run", "--vanilla"])
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, "reticulate_python=configured-python");
+}
+
 #[cfg(unix)]
 #[test]
 fn run_script_frontmatter_sets_reticulate_python_and_activates_env() {

@@ -82,6 +82,9 @@ Use `python-packages` or `python-version` to ask `ir run` for a Python environme
 - It sets `RETICULATE_PYTHON` to the resolved Python executable.
 
 Declare `reticulate` under `packages` when the R script loads reticulate.
+When Python metadata is absent, `ir run` sets `RETICULATE_PYTHON=managed` if `RETICULATE_PYTHON` is unset.
+This lets reticulate create its lazy managed environment from `py_require()` declarations made by R packages.
+Set `RETICULATE_PYTHON` explicitly to keep another Python selection.
 
 ```r
 #!/usr/bin/env -S ir run
