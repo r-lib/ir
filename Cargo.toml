@@ -1,6 +1,6 @@
 [package]
 name = "ir"
-version = "0.4.0"
+version = "0.4.0+dev"
 edition = "2021"
 description = "Run portable R scripts, render Quarto documents, and launch R package tools."
 license = "MIT"
