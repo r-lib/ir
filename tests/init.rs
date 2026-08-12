@@ -649,6 +649,30 @@ fn init_script_preserves_existing_shebang_and_body() {
 }
 
 #[test]
+fn init_script_warns_for_noncanonical_env_shebangs() {
+    let cases = [
+        ("unsplit", "#!/usr/bin/env ir run"),
+        ("extra-source", "#!/usr/bin/env -S ir run other.R"),
+    ];
+
+    for (name, shebang) in cases {
+        let script = temp_path(&format!("ir-init-{name}-env-shebang"), "R");
+        fs::write(&script, format!("{shebang}\ncat('ok')\n")).unwrap();
+
+        let out = init(&script);
+
+        assert_success(&out);
+        let initialized = fs::read_to_string(&script).unwrap();
+        assert!(
+            initialized.starts_with(&format!("{shebang}\n#| packages: []\n")),
+            "{initialized}"
+        );
+        assert_stderr_contains(&out, "existing shebang bypasses ir metadata");
+        assert_stderr_contains(&out, "#!/usr/bin/env -S ir run");
+    }
+}
+
+#[test]
 fn init_script_terminates_shebang_without_newline() {
     let script = temp_path("ir-init-shebang-without-newline", "R");
     fs::write(&script, "#!/usr/bin/Rscript").unwrap();

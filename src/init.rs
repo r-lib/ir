@@ -279,10 +279,21 @@ fn newline_sequence(contents: &[u8]) -> &'static [u8] {
 }
 
 fn shebang_invokes_ir(shebang: &str) -> bool {
-    shebang
+    let words: Vec<_> = shebang
         .trim_end_matches(['\r', '\n'])
+        .strip_prefix("#!")
+        .unwrap_or(shebang)
         .split_ascii_whitespace()
-        .any(|word| word == "ir" || word.ends_with("/ir"))
+        .collect();
+    match words.as_slice() {
+        [ir, "run"] => command_is(ir, "ir"),
+        [env, "-S", ir, "run"] => command_is(env, "env") && command_is(ir, "ir"),
+        _ => false,
+    }
+}
+
+fn command_is(word: &str, command: &str) -> bool {
+    word.rsplit(['/', '\\']).next() == Some(command)
 }
 
 #[cfg(unix)]
