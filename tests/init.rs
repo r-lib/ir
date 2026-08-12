@@ -222,6 +222,54 @@ fn init_script_uses_locked_direct_dependencies_from_nearest_renv_project() {
     assert!(!initialized.contains("#| r-version: \">= 9.9\""));
 }
 
+#[cfg(unix)]
+#[test]
+fn init_script_discovers_renv_project_through_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("ir-init-symlinked-project");
+    let project = root.join("project");
+    let reports = project.join("reports");
+    let work = root.join("work");
+    fs::create_dir_all(&reports).unwrap();
+    fs::create_dir_all(&work).unwrap();
+    let script = reports.join("analysis.R");
+    fs::write(&script, "library(dplyr)\n").unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {"Version": "4.4.3"},
+  "Packages": {
+    "dplyr": {
+      "Package": "dplyr",
+      "Version": "1.1.4",
+      "Source": "Repository",
+      "Repository": "CRAN"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+    let linked_reports = work.join("reports");
+    symlink(&reports, &linked_reports).unwrap();
+
+    let out = init(&linked_reports.join("analysis.R"));
+
+    assert_success(&out);
+    let initialized = fs::read_to_string(&script).unwrap();
+    assert!(
+        initialized.contains("#|   - \"dplyr==1.1.4\"\n"),
+        "{initialized}"
+    );
+    assert!(
+        fs::symlink_metadata(&linked_reports)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "initialization should preserve the parent directory symlink"
+    );
+}
+
 #[test]
 fn init_script_preserves_bioconductor_lockfile_source() {
     let project = temp_dir("ir-init-bioc-project");
@@ -308,6 +356,82 @@ fn init_script_preserves_default_bioconductor_with_public_cran_repository() {
         initialized.contains("#|   - \"bioc::BiocGenerics@0.52.0\"\n"),
         "{initialized}"
     );
+}
+
+#[test]
+fn init_script_preserves_standard_bioconductor_repository_stamp() {
+    let project = temp_dir("ir-init-stamped-bioc-project");
+    let script = project.join("analysis.R");
+    fs::write(&script, "BiocGenerics::combine(1, 2)\n").unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://cloud.r-project.org"
+      }
+    ]
+  },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.52.0",
+      "Source": "Bioconductor",
+      "Repository": "Bioconductor 3.20"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert_success(&out);
+    let initialized = fs::read_to_string(&script).unwrap();
+    assert!(
+        initialized.contains("#|   - \"bioc::BiocGenerics@0.52.0\"\n"),
+        "{initialized}"
+    );
+}
+
+#[test]
+fn init_script_rejects_unmapped_bioconductor_repository_label() {
+    let project = temp_dir("ir-init-unmapped-bioc-project");
+    let script = project.join("analysis.R");
+    let original = b"BiocGenerics::combine(1, 2)\n";
+    fs::write(&script, original).unwrap();
+    fs::write(
+        project.join("renv.lock"),
+        r#"{
+  "R": {
+    "Version": "4.4.3",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://cloud.r-project.org"
+      }
+    ]
+  },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.52.0",
+      "Source": "Bioconductor",
+      "Repository": "Internal"
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let out = init(&script);
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert_stderr_contains(&out, "unmapped Bioconductor repository `Internal`");
+    assert_eq!(fs::read(&script).unwrap(), original);
 }
 
 #[test]

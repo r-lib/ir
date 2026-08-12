@@ -59,9 +59,15 @@ pub(crate) fn cmd_init_script(file: &str, no_project: bool) -> Result<(), Box<dy
     }
 
     let absolute = absolute_path(&path)?;
-    let lockfile = (!no_project)
-        .then(|| nearest_renv_lockfile(&absolute))
-        .flatten();
+    let lockfile = if no_project {
+        None
+    } else {
+        let discovery_path =
+            non_verbatim_path(fs::canonicalize(&absolute).map_err(|e| {
+                format!("cannot resolve script `{file}` for project discovery: {e}")
+            })?);
+        nearest_renv_lockfile(&discovery_path)
+    };
     let result = discover_dependencies(&absolute, lockfile.as_deref())?;
     let exclude_newer = OffsetDateTime::now_utc().date().to_string();
     let newline = newline_sequence(&contents);
@@ -113,6 +119,42 @@ fn absolute_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
         return Ok(path.to_path_buf());
     }
     Ok(env::current_dir()?.join(path))
+}
+
+#[cfg(not(windows))]
+fn non_verbatim_path(path: PathBuf) -> PathBuf {
+    path
+}
+
+#[cfg(windows)]
+fn non_verbatim_path(path: PathBuf) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+
+    const VERBATIM: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const VERBATIM_UNC: &[u16] = &[
+        b'\\' as u16,
+        b'\\' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+
+    let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let normal = if let Some(rest) = wide.strip_prefix(VERBATIM_UNC) {
+        [b'\\' as u16, b'\\' as u16]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .collect()
+    } else if let Some(rest) = wide.strip_prefix(VERBATIM) {
+        rest.to_vec()
+    } else {
+        return path;
+    };
+    PathBuf::from(OsString::from_wide(&normal))
 }
 
 fn nearest_renv_lockfile(script: &Path) -> Option<PathBuf> {

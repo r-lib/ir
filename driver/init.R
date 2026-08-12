@@ -171,6 +171,18 @@ ir_init_locked_ref <- function(package, record, lock_repositories) {
       lock_names_lower == repository_lower |
         startsWith(repository_lower, paste0(lock_names_lower, " "))
     }
+    if (!is.null(repository) && !any(matches_record)) {
+      is_public_repository <- grepl(
+        "^Bioconductor(?: [0-9]+(?:\\.[0-9]+)?)?$",
+        repository, ignore.case = TRUE, perl = TRUE
+      ) || ir_init_repository_url_supported(
+        "Bioconductor", repository, bioconductor = TRUE
+      )
+      if (!is_public_repository)
+        stop("locked Bioconductor package `", package,
+             "` uses unmapped Bioconductor repository `", repository, "`",
+             call. = FALSE)
+    }
     is_bioconductor <- grepl("bioc", lock_names, ignore.case = TRUE) |
       grepl("/bioconductor(?:/|$)|/bioc(?:/|$)", lock_urls,
             ignore.case = TRUE, perl = TRUE) |
