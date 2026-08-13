@@ -27,7 +27,7 @@ const RESOLVE_DRIVER: &str = concat!(
     include_str!("../driver/resolve.R")
 );
 const TOOLING_RESTART_STATUS: i32 = 86;
-const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
+pub(crate) const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
 const REFRESH_ENV: &str = "IR_REFRESH";
 const NO_LOCAL_SOURCES_ENV: &str = "IR_NO_LOCAL_SOURCES";
 const NO_LOCAL_SOURCES_DRIVER_ARG: &str = "--ir-no-local-sources";
@@ -570,7 +570,7 @@ fn resolve_library_inner(
             );
         }
 
-        if resolver_process_crashed(&current_status) && !safe_mode && !retried_safe_mode {
+        if tooling_process_crashed(&current_status) && !safe_mode && !retried_safe_mode {
             retried_safe_mode = true;
             safe_mode = true;
             continue;
@@ -656,11 +656,11 @@ fn resolve_library_inner(
     })
 }
 
-fn tooling_restart_requested(status: &ExitStatus, restart_file: &Path) -> bool {
+pub(crate) fn tooling_restart_requested(status: &ExitStatus, restart_file: &Path) -> bool {
     status.code() == Some(TOOLING_RESTART_STATUS) && restart_file.exists()
 }
 
-fn resolver_process_crashed(status: &ExitStatus) -> bool {
+pub(crate) fn tooling_process_crashed(status: &ExitStatus) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
@@ -686,7 +686,7 @@ fn resolver_process_crashed(status: &ExitStatus) -> bool {
     status.code().is_none()
 }
 
-fn repeated_tooling_restart_error(context: &str, restart_file: &Path) -> String {
+pub(crate) fn repeated_tooling_restart_error(context: &str, restart_file: &Path) -> String {
     let packages = fs::read_to_string(restart_file).unwrap_or_default();
     let packages = packages.trim();
     if packages.is_empty() {

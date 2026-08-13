@@ -1,0 +1,10 @@
+Add ir metadata to an existing script
+
+Usage: ir init --file <FILE>
+
+Options:
+      --file <FILE>  Existing R script to modify in place
+  -h, --help         Print help
+
+Examples:
+  ir init --file analysis.R
