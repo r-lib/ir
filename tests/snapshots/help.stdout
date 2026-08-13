@@ -5,8 +5,8 @@ Usage: ir [COMMAND]
 Commands:
   run         Run a script or inline R expression
   render      Render a Quarto document or script
-  init        Add ir metadata to an existing script
   preview     Preview a Quarto document or script
+  init        Add ir metadata to an existing script
   tool        Run package executables
   quickstart  Show a concise usage guide for AI agents
   cache       Manage ir's cache
@@ -19,7 +19,7 @@ Options:
 Examples:
   ir run script.R
   ir render report.qmd
-  ir init --file script.R
   ir preview report.qmd
+  ir init --file script.R
   ir tool run btw
   ir cache dir

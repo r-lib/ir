@@ -26,19 +26,6 @@ This records a last-known-good environment: tidyr is pinned to the version
 tested with the script, while the snapshot date selects dplyr and the
 transitive dependencies.
 
-To convert an existing R script in place:
-
-```sh
-ir init --file analysis.R
-```
-
-`ir` statically discovers direct package uses, omits packages supplied by R,
-and adds a canonical executable shebang plus frontmatter for the active R and
-current UTC package snapshot. It writes bare package names: initialization does
-not inspect `renv.lock`, pin installed package versions, or preserve package
-source provenance. Inspect the generated metadata because static analysis
-cannot find package names computed at runtime.
-
 Full documentation: <https://r-lib.github.io/ir/>
 
 ## Why use it?
@@ -54,7 +41,6 @@ Full documentation: <https://r-lib.github.io/ir/>
 ## Common commands
 
 ```sh
-ir init --file script.R
 ir run script.R
 ir run --vanilla script.R
 ir render report.qmd --to html
@@ -63,11 +49,17 @@ ir run --with cli -e 'cli::cli_alert_success("works")'
 ir run --with BiocGenerics -e 'library(BiocGenerics)'
 ir run --r-version 4.3 script.R
 ir run --exclude-newer 2024-02-01 script.R
+ir init --file script.R
 rx btw --help
 ir tool run --from btw btw --help
 ir tool install btw
 ir cache dir
 ```
+
+`ir init --file analysis.R` adds metadata to an existing R script. It discovers
+static direct package uses and writes bare package names. It does not inspect
+`renv.lock`, pin installed versions, or preserve package source provenance, so
+inspect the generated metadata before relying on it.
 
 Bioconductor packages use their bare package names.
 pak selects the Bioconductor release compatible with the selected R.
@@ -140,8 +132,8 @@ Windows to inspect the plan.
 
 ## Requirements
 
-- `Rscript` on `PATH`, or `IR_RSCRIPT`, for `ir init` dependency discovery.
 - `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
+- `Rscript` on `PATH`, or `IR_RSCRIPT`, for `ir init` dependency discovery.
 - `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 

@@ -26,15 +26,15 @@ pub(crate) fn root() -> ClapCommand {
         .after_help(examples_help(concat!(
             "  ir run script.R\n",
             "  ir render report.qmd\n",
-            "  ir init --file script.R\n",
             "  ir preview report.qmd\n",
+            "  ir init --file script.R\n",
             "  ir tool run btw\n",
             "  ir cache dir",
         )))
         .subcommand(run_command())
         .subcommand(render_command())
-        .subcommand(init_command())
         .subcommand(preview_command())
+        .subcommand(init_command())
         .subcommand(tool_command())
         .subcommand(quickstart_command())
         .subcommand(cache_command())
