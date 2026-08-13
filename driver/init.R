@@ -35,7 +35,7 @@ ir_init_main <- function() {
 
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
-  ir_ensure_tooling()
+  ir_ensure_tooling(min_versions = c(renv = "1.2.0"))
 
   old_options <- options(renv.dependencies.implied = list())
   on.exit(options(old_options), add = TRUE)

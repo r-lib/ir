@@ -458,6 +458,40 @@ fn initialized_script_runs_directly() {
     assert_stdout_contains(&output, "ir.fixture=direct-execution");
 }
 
+#[test]
+fn init_script_reuses_resolver_tooling_cache() {
+    let cache_dir = temp_dir("ir-init-resolver-tooling-cache");
+    let script = temp_path("ir-init-resolver-tooling-cache", "R");
+    fs::write(&script, "cat('ok')\n").unwrap();
+
+    let output = init_command()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .args(["init", "--file"])
+        .arg(&*script)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    assert_eq!(tooling_contract_count(&cache_dir), 1);
+
+    let output = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", rscript())
+        .args(["run", "--vanilla"])
+        .arg(&*script)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    assert_eq!(tooling_contract_count(&cache_dir), 2);
+}
+
+fn tooling_contract_count(cache_dir: &Path) -> usize {
+    fs::read_dir(cache_dir.join("tooling"))
+        .unwrap()
+        .flat_map(|platform| fs::read_dir(platform.unwrap().path()).unwrap())
+        .filter(|entry| entry.as_ref().unwrap().file_type().unwrap().is_dir())
+        .count()
+}
+
 #[cfg(unix)]
 #[test]
 fn init_script_does_not_overwrite_concurrent_edits() {
