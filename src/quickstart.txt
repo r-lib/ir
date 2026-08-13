@@ -70,8 +70,17 @@ Workflow:
   Use `exclude-newer` for reproducible CRAN and Bioconductor state.
   Write ordinary R after the metadata. Do not embed package-manager ceremony.
 
+Existing scripts:
+  Convert an existing .R file with `ir init --file FILE`. It discovers static
+  direct package uses, omits packages supplied by R, and writes bare package
+  names with the active R requirement and current UTC `exclude-newer` date.
+  It does not inspect renv.lock, pin installed versions, or preserve package
+  source provenance. Inspect the result because computed package names may be
+  missed.
+
 System requirements:
   R/Rscript must be available, either on PATH or selected with `--rscript`/`IR_RSCRIPT`.
+  `ir init` requires Rscript on PATH or selected through IR_RSCRIPT.
   Use rig for `r-version` selection; `exclude-newer` can choose the R minor or
   limit a requirement that matches more than one R minor by date.
   Quarto must be available for `ir render` and `ir preview`. OS libraries and
@@ -83,6 +92,7 @@ Commands:
   ir preview report.qmd
   ir run --with cli -e 'cli::cli_alert_success("ok")'
   ir run --with BiocGenerics -e 'library(BiocGenerics)'
+  ir init --file script.R
   ir tool run btw --help
   rx btw --help
   rx --from btw btw --help
@@ -105,6 +115,7 @@ Inspection commands:
   ir run --help
   ir render --help
   ir preview --help
+  ir init --help
   ir tool run --help
   ir tool install --help
   rx --help

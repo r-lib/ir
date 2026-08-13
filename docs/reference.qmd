@@ -82,6 +82,12 @@ cli_help("render")
 cli_help("preview")
 ```
 
+## `ir init`
+
+```{r}
+cli_help("init")
+```
+
 ## `ir tool`
 
 ```{r}

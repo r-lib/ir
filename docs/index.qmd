@@ -32,6 +32,7 @@ transitive dependencies.
 - Select R with `--rscript`, `--r-version`, environment variables, frontmatter `r-version`, or `exclude-newer`. When `r-version` can match more than one R minor, `exclude-newer` limits the choice to minor versions released by the snapshot date.
 - Evaluate inline expressions with `ir run -e` and add command-line packages with `--with`.
 - Render or preview Quarto documents and Quarto-formatted R scripts through `ir render` or `ir preview`, using the same package metadata model with `rmarkdown` seeded automatically for the knitr engine.
+- Initialize an existing R script in place with `ir init --file` and static direct-dependency discovery.
 - Run executables from R package `exec/`, `bin/`, or `bin/<arch>/` directories with `rx` or `ir tool run`.
 - Install persistent launchers for package tools with `ir tool install`; installed tool libraries live in the durable tool store.
 - Inspect and clear run/render cache state with `ir cache dir` and `ir cache clean`.
@@ -47,6 +48,7 @@ $ ir run --with BiocGenerics -e 'library(BiocGenerics)'
 $ ir run --exclude-newer 2024-02-01 script.R
 $ ir render --r-version 4.3 report.qmd --to html
 $ ir preview report.qmd
+$ ir init --file script.R
 $ rx btw --help
 $ ir tool run --from btw btw --help
 $ ir tool install btw

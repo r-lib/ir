@@ -64,6 +64,39 @@ Existing materialised libraries may be reused regardless of where their packages
 Omit `packages`, use `packages: []`, or use `packages: null` when no package refs are needed.
 Unknown keys are ignored after YAML parsing, so future metadata such as `sys-reqs` can be present before `ir` supports it.
 
+## Initialize an existing script
+
+Add metadata to an existing `.R` file in place:
+
+```console
+$ ir init --file analysis.R
+```
+
+`ir` statically scans the file for direct package uses, including `library()`,
+`require()`, and `pkg::fun()` calls. It omits packages supplied by the active R,
+including base and recommended packages. Package names computed at runtime may
+not be found, so inspect the generated frontmatter before relying on it.
+
+The generated metadata contains quoted, bare package names, `isolated: true`,
+and the current UTC date as `exclude-newer`. For a released R, `r-version` is a
+lower bound on the active major and minor version. R-devel and prerelease builds
+retain their `devel` and `next` channels. `IR_RSCRIPT` selects the Rscript used
+for discovery; otherwise `ir` uses `Rscript` on `PATH`.
+
+Initialization does not inspect `renv.lock`, pin installed package versions, or
+preserve repository or remote-source provenance. The `exclude-newer` date
+instead bounds the default CRAN and Bioconductor repositories to the package
+snapshot available when the script was initialized.
+
+Initialization accepts one existing `.R` file. It refuses files that already
+start with ir frontmatter, malformed `#|` metadata, or a UTF-8 byte order mark.
+Every successful initialization writes the canonical
+`#!/usr/bin/env -S ir run` shebang, replacing any existing shebang while
+preserving the remaining body bytes and line-ending style. The same-directory
+replacement is atomic. It aborts if the file contents change during dependency
+discovery, refuses a final-file symbolic link, and on Unix adds executable bits
+without removing the file's current mode bits.
+
 ## Bioconductor packages
 
 Bioconductor packages use their bare package names.

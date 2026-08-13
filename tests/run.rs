@@ -207,6 +207,8 @@ fn help_outputs_match_snapshots() {
         ("help", &["-h"]),
         ("run-help", &["run", "--help"]),
         ("run-help", &["run", "-h"]),
+        ("init-help", &["init", "--help"]),
+        ("init-help", &["init", "-h"]),
         ("render-help", &["render", "--help"]),
         ("render-help", &["render", "-h"]),
         ("preview-help", &["preview", "--help"]),
