@@ -321,7 +321,6 @@ pub(crate) fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
 }
