@@ -201,6 +201,10 @@ fn default_prefers_older_binary_with_source_only_dependency() {
         "stopifnot(packageVersion('irlag') == '1.0.0', irlag::artifact() == 'binary', irsourceonly::artifact() == 'source'); cat('binary-with-source-dependency\\n')");
     assert_success(&out);
     assert_stdout_contains(&out, "binary-with-source-dependency");
+    assert!(
+        cache.join("renv/source/url").is_dir(),
+        "an explicit RENV_PATHS_SOURCE must be honored"
+    );
     let requests = repo.requests.lock().unwrap();
     assert!(
         requests
@@ -212,6 +216,49 @@ fn default_prefers_older_binary_with_source_only_dependency() {
         !requests.iter().any(|p| p.contains("src/contrib/irlag_")),
         "{requests:?}"
     );
+}
+
+#[test]
+fn separate_ir_caches_do_not_share_mutable_downloads() {
+    let repo = Repository::new();
+    let shared_renv_root = temp_dir("ir-binary-shared-renv-root");
+    let expected_archive = fs::read(
+        fs::read_dir(repo.binary_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("iridentity_")
+            })
+            .unwrap(),
+    )
+    .unwrap();
+
+    for _ in 0..2 {
+        let cache = temp_dir("ir-binary-independent-download-cache");
+        let out = repo
+            .command(&cache, None, &["iridentity"])
+            .env_remove("RENV_PATHS_SOURCE")
+            .env("RENV_PATHS_ROOT", &shared_renv_root)
+            .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        let downloads = cache.join("ir/downloads/url");
+        assert!(
+            downloads.is_dir(),
+            "downloads must belong to the locked IR cache"
+        );
+        let archives: Vec<_> = fs::read_dir(downloads)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(fs::read(&archives[0]).unwrap(), expected_archive);
+        assert!(!shared_renv_root.join("source/url").exists());
+    }
 }
 
 #[test]

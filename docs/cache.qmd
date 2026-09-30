@@ -7,6 +7,8 @@ title: Cache
 Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DIR`.
 This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
 Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of `IR_CACHE_DIR`.
+Downloaded archives are kept under `IR_CACHE_DIR/downloads`, protected by the resolver lock; `RENV_PATHS_SOURCE` can override this location.
+renv's installed-package cache remains shared.
 
 Resolution requests are keyed by declared packages, resolution source, effective binary preference, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
@@ -61,6 +63,6 @@ $ ir cache clean --force
 ```
 
 `ir cache dir` prints the cache root.
-`ir cache clean` removes the whole `ir` cache, including resolver tooling, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
+`ir cache clean` removes the whole `ir` cache, including resolver tooling, downloaded archives, resolution markers, Python environment cache entries, and cache-backed materialised libraries.
 It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.

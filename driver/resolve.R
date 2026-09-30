@@ -425,6 +425,11 @@ ir_resolve_main <- function() {
   exclude_newer <- ir_exclude_newer(ir_env_optional("IR_EXCLUDE_NEWER"))
 
   if (!is.null(result_file)) {
+    # renv's parallel downloader writes directly to its archive paths. Keep
+    # those mutable files under the same cache lock as IR's libraries.
+    if (is.null(ir_env_optional("RENV_PATHS_SOURCE")))
+      Sys.setenv(RENV_PATHS_SOURCE = file.path(cache_dir, "downloads"))
+
     ## 0. Bootstrap pak before repository normalization. On Linux PPM URLs are
     ## resolved through pak::repo_resolve(), so pak must be available first.
     ir_ensure_tooling(packages = "pak", cache_dir = cache_dir)
