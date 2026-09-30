@@ -47,11 +47,13 @@ ir_test_write_pkg <- function(lib, pkg, namespace, code,
 
 ir_test_renv_code <- function() {
   paste(
-    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-    "  specs <- unlist(list(...), use.names = FALSE)",
-    "  for (spec in specs) {",
-    "    pkg <- sub('@.*$', '', spec)",
-    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "install <- function(packages, library, repos, ...) {",
+    "  for (record in packages) {",
+    "    path <- file.path(library, record$Package)",
+    "    dir.create(file.path(path, 'Meta'), recursive = TRUE, showWarnings = FALSE)",
+    "    desc <- c(Package = record$Package, Version = record$Version)",
+    "    writeLines(paste(names(desc), desc, sep = ': '), file.path(path, 'DESCRIPTION'))",
+    "    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(), Platform = R.version$platform)), file.path(path, 'Meta/package.rds'))",
     "  }",
     "  invisible(TRUE)",
     "}",
@@ -62,7 +64,8 @@ ir_test_renv_code <- function() {
 ir_test_write_renv <- function(lib, code = ir_test_renv_code(),
                                version = "1.2.0",
                                built = as.character(getRversion())) {
-  ir_test_write_pkg(lib, "renv", "export(use)", code,
+  namespace <- if (grepl("install <-", code, fixed = TRUE)) "export(install)" else "export(use)"
+  ir_test_write_pkg(lib, "renv", namespace, code,
                     version = version, built = built)
 }
 

@@ -12,6 +12,14 @@ use sha2::{Digest, Sha256};
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
 
+pub(crate) fn prefer_binaries() -> Result<bool, Box<dyn Error>> {
+    match env::var("IR_PREFER_BINARIES").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("") | Ok("1") => Ok(true),
+        Ok("0") => Ok(false),
+        _ => Err("IR_PREFER_BINARIES must be 0 or 1".into()),
+    }
+}
+
 pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
     pub(crate) package_marker: Option<PathBuf>,
@@ -37,18 +45,28 @@ pub(crate) fn paths(
     quarto: QuartoCacheFlags,
     library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
+    let policy = prefer_binaries()?;
     let Some(rscript_identity) = rscript_identity(rscript) else {
         return Ok(None);
     };
 
-    let marker = cache_dir.join("resolutions").join(resolution_cache_key(
+    let request_key = resolution_cache_key(
         dependencies,
         exclude_newer,
         quarto,
         &rscript_identity,
         rscript_args,
         library_root,
-    ));
+    );
+    let marker = cache_dir.join("resolutions").join(sha256_fields(&[
+        "ir-artifact-resolution-v2".to_string(),
+        format!("prefer-binaries: {policy}"),
+        format!(
+            "platforms: {}",
+            env::var("PKG_PLATFORMS").unwrap_or_default()
+        ),
+        request_key,
+    ]));
     let marker_name = marker
         .file_name()
         .and_then(OsStr::to_str)
@@ -92,7 +110,10 @@ pub(crate) fn read(
         return Ok(None);
     }
     let library = lines.next().unwrap_or_default().trim();
-    if library.is_empty() || !Path::new(library).is_dir() {
+    if library.is_empty()
+        || !Path::new(library).is_dir()
+        || Path::new(library).join(".ir-incomplete").exists()
+    {
         return Ok(None);
     }
 

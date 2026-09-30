@@ -51,6 +51,49 @@ fn r_tooling_lib(cache_dir: &Path) -> std::path::PathBuf {
 }
 
 fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str) {
+    // These fixtures model the pak subprocess and renv installation boundaries.
+    // Keep the public-CLI tests independent of their real network clients.
+    let adapter = match name {
+        "pak" => {
+            r#"
+remote <- function(func, args) {
+  res <- pkg_deps(args[[1L]])
+  res$platform <- rep("source", nrow(res))
+  res$sha <- rep("fixture", nrow(res))
+  res$fulltarget <- rep("/absent/fixture.tar.gz", nrow(res))
+  res$deps <- rep(list(data.frame(type = character(), package = character(),
+                                  version = character(), op = character())), nrow(res))
+  res
+}
+"#
+        }
+        "renv" => {
+            r#"
+install <- function(packages, library, repos, ...) {
+  specs <- vapply(seq_along(packages), function(i) {
+    record <- packages[[i]]
+    if (is.list(record)) paste0(record$Package, "@", record$Version) else record
+  }, character(1))
+  do.call(use, c(as.list(unname(specs)), list(library = library, repos = repos,
+            attach = FALSE, sandbox = FALSE, isolate = TRUE, verbose = TRUE)))
+  for (package in names(packages)) {
+    path <- file.path(library, package)
+    dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+    desc <- c(Package = package, Version = "1.0.0")
+    writeLines(paste(names(desc), desc, sep = ": "), file.path(path, "DESCRIPTION"))
+    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(),
+      Platform = R.version$platform)), file.path(path, "Meta/package.rds"))
+  }
+}
+"#
+        }
+        _ => "",
+    };
+    let namespace = if name == "renv" {
+        format!("{namespace}export(install)\n")
+    } else {
+        namespace.to_string()
+    };
     let source_root = temp_dir(&format!("ir-fake-{name}-source"));
     let package = source_root.join(name);
     fs::create_dir_all(package.join("R")).unwrap();
@@ -62,7 +105,11 @@ fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str)
     )
     .unwrap();
     fs::write(package.join("NAMESPACE"), namespace).unwrap();
-    fs::write(package.join("R").join(format!("{name}.R")), r_code).unwrap();
+    fs::write(
+        package.join("R").join(format!("{name}.R")),
+        format!("{r_code}\n{adapter}"),
+    )
+    .unwrap();
 
     let out = Command::new(rscript())
         .args([

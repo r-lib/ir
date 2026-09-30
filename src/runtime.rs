@@ -383,6 +383,7 @@ fn resolve_library_inner(
     } = request;
     let refresh = refresh || nonempty_env(REFRESH_ENV).is_some();
     let no_local_sources = nonempty_env(NO_LOCAL_SOURCES_ENV).is_some();
+    let prefer_binaries = resolve_cache::prefer_binaries()?;
     let dependencies = normalized_dependencies(&spec.dependencies);
     let resolution_cache_paths = resolve_cache::paths(
         cache_dir,
@@ -507,6 +508,11 @@ fn resolve_library_inner(
         if no_local_sources {
             cmd.arg(NO_LOCAL_SOURCES_DRIVER_ARG);
         }
+        cmd.arg(if prefer_binaries {
+            "--ir-prefer-binaries"
+        } else {
+            "--ir-prefer-newest"
+        });
         if resolve_r {
             if let Some(result_file) = &result_file {
                 cmd.env("IR_RESOLVE_RESULT_FILE", result_file);

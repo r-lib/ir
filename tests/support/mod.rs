@@ -42,6 +42,7 @@ pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
     command
         .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
+        .env_remove("IR_PREFER_BINARIES")
         .env_remove("IR_NO_LOCAL_SOURCES");
     command
 }

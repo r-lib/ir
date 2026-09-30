@@ -10,14 +10,14 @@
 #   3. Hash the install refs to derive a content-addressed library path under
 #      <cache_dir>.
 #   4. Materialise that path as a light-weight library of symlinks into
-#      renv's package cache via renv::use().
+#      renv's package cache via renv::install().
 #
 # The resulting library path is written to the temp result file named by
 # IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
 # This session then exits; the Rust process launches the user's script in a
 # fresh R session with the resolved library prepended to `.libPaths()`.
 #
-# The helpers below are pure and side-effect free. The pipeline runs only when
+# The pipeline runs only when
 # this file is executed as a script -- `sys.nframe() == 0L` is false when the
 # file is sourced. End-to-end coverage lives in the Rust CLI tests
 # (tests/run.rs, tests/render.rs, and tests/tool.rs), which drive this resolver
@@ -46,12 +46,153 @@ ir_exclude_newer <- function(value) {
 
 # Resolve dependency refs with pak, stopping if any ref fails to resolve.
 ir_resolve_refs <- function(refs, dependencies = NA) {
-  res <- pak::pkg_deps(refs, dependencies = dependencies, upgrade = TRUE)
-  failed <- res[res$status != "OK", , drop = FALSE]
-  if (nrow(failed))
-    stop("pak could not resolve: ",
-         paste(failed$ref, collapse = ", "), call. = FALSE)
-  res
+  # Run against pak's bundled pkgdepends, in its existing isolated subprocess.
+  # No installed package functions or namespaces are modified.
+  remote <- get("remote", asNamespace("pak"), inherits = FALSE)
+  remote(ir_resolve_artifacts, list(refs, dependencies,
+                                  getOption("ir.prefer.binaries", TRUE)))
+}
+
+ir_resolve_artifacts <- function(refs, dependencies, prefer_binaries) {
+  lib <- tempfile("ir-solve-")
+  dir.create(lib)
+  on.exit(unlink(lib, recursive = TRUE), add = TRUE)
+  parsed <- pkgdepends::parse_pkg_refs(refs)
+  minimum <- vapply(parsed, function(ref)
+    ref$type %in% c("standard", "cran", "bioc") &&
+      identical(ref$atleast, ">="), logical(1))
+  discovery_refs <- refs
+  # pkgdepends parses ranges but its archive lookup rejects them. Discover
+  # current repository candidates, then give the original constraint to its
+  # solver. This does not search historical archives for range requirements.
+  discovery_refs[minimum] <- sub("@>=[0-9][-0-9.]*", "", refs[minimum])
+  proposal <- pkgdepends::new_pkg_installation_proposal(
+    discovery_refs, config = list(library = lib, dependencies = dependencies,
+                       sysreqs = FALSE), policy = "upgrade")
+  proposal$resolve()
+
+  # pkgdepends exposes candidate discovery and downloads, but no public hook
+  # for changing candidate preferences or excluding a failed artifact. Keep
+  # that adaptation here: use its constraint builder, solver and diagnostics.
+  # In particular, dependencies must be rebuilt after removing hard preference
+  # rules, because pkgdepends omits dependencies of candidates it ruled out.
+  ns <- asNamespace("pkgdepends")
+  internal <- function(name) get(name, ns, inherits = FALSE)
+  plan <- proposal$.__enclos_env__$private$plan
+  state <- plan$.__enclos_env__$private
+  candidates <- proposal$get_resolution()
+  # pkgcache appends speculative CRAN archive / mac.cran.dev fallback URLs.
+  # The first URL is the repository's advertised artifact (including a custom
+  # DownloadURL). Other configured repositories have their own candidate rows.
+  # Resolve again from those known candidates if that artifact is unavailable.
+  repository <- candidates$type %in% c("standard", "cran", "bioc")
+  candidates$sources[repository] <- lapply(candidates$sources[repository], head, 1L)
+  constraints <- list()
+  for (j in which(minimum)) {
+    rows <- which(candidates$direct & candidates$ref == discovery_refs[j])
+    constraint <- candidates[rows, , drop = FALSE]
+    constraint$ref <- rep(refs[j], length(rows))
+    constraint$remote <- rep(list(parsed[[j]]), length(rows))
+    constraints[[length(constraints) + 1L]] <- constraint
+  }
+  if (length(constraints)) {
+    # Retain unversioned candidates for dependency edges, but only the actual
+    # user refs impose direct requirements (including multiple minimums).
+    candidates$direct[candidates$ref %in% setdiff(discovery_refs[minimum], refs)] <- FALSE
+    candidates <- do.call(rbind, c(list(candidates), constraints))
+  }
+  artifact_key <- function(data) vapply(seq_len(nrow(data)), function(i)
+    paste(c(data$package[i], data$version[i], data$platform[i],
+            data$sources[[i]]), collapse = "\n"), character(1))
+  keys <- artifact_key(candidates)
+  unavailable <- character()
+
+  missing_artifact <- function(error) {
+    if (inherits(error, c("async_http_404", "async_http_410"))) return(TRUE)
+    if (inherits(error, "download_one_of_error"))
+      return(length(error$errors) > 0L &&
+               all(vapply(error$errors, missing_artifact, logical(1))))
+    if (inherits(error$parent, "condition")) return(missing_artifact(error$parent))
+    FALSE
+  }
+  download_diagnostic <- function(error) {
+    unique(c(conditionMessage(error),
+             unlist(lapply(error$errors, download_diagnostic)),
+             if (inherits(error$parent, "condition"))
+               download_diagnostic(error$parent)))
+  }
+
+  repeat {
+    data <- candidates
+    failed <- keys %in% unavailable
+    data$status[failed] <- "FAILED"
+    data$error[failed] <- lapply(which(failed), function(i)
+      simpleError(paste("Artifact unavailable:", paste(data$sources[[i]], collapse = ", "))))
+    problem <- internal("pkgplan_i_create_lp_problem")(
+      data, state$config, "upgrade")
+    if (prefer_binaries) {
+      preferences <- c("direct-update", "choose-latest", "prefer-binary",
+                       "prefer-new-binary", "dependency")
+      problem$conds <- Filter(function(x) !(x$type %in% preferences), problem$conds)
+      excluded <- Filter(function(x)
+        identical(x$op, "==") && x$rhs == 0 && length(x$vars) == 1L,
+        problem$conds)
+      problem$ruled_out <- unique(unlist(lapply(excluded, `[[`, "vars")))
+      problem <- internal("pkgplan_i_lp_dependencies")(problem, state$config)
+      # Prefer binaries where repositories offer them, then version freshness,
+      # then smaller plans. Source-only dependencies must not penalize a newer
+      # source fallback (or a binary) merely for having more dependencies.
+      n <- nrow(data)
+      cost <- rep(1, n)
+      for (package in unique(data$package[data$status == "OK"])) {
+        rows <- which(data$package == package & data$status == "OK")
+        versions <- rank(package_version(data$version[rows]), ties.method = "min")
+        cost[rows] <- 1 + (max(versions) - versions) * (n + 1)
+      }
+      binaries <- which(data$type %in% c("standard", "cran", "bioc") &
+                          data$platform != "source" & data$status == "OK")
+      binary_packages <- data$package[setdiff(binaries, problem$ruled_out)]
+      avoid_source <- data$platform == "source" & data$package %in% binary_packages
+      cost <- cost + ifelse(avoid_source, n * (n + 1)^2 + 1, 0)
+      dummy_cost <- max(internal("solve_dummy_obj"), sum(cost) + 1)
+      problem$obj <- c(cost, rep(dummy_cost, problem$num_direct))
+    }
+    solved <- if (problem$total == 0L) list(status = 0L, solution = numeric()) else
+      internal("pkgplan_i_solve_lp_problem")(problem)
+    stopifnot(solved$status == 0L)
+    selected <- as.logical(solved$solution[seq_len(nrow(data))])
+    dummy <- tail(solved$solution, problem$num_direct)
+    solution <- list(status = if (any(dummy != 0)) "FAILED" else "OK",
+                     data = data[selected, , drop = FALSE],
+                     problem = problem, solution = solved)
+    if (solution$status != "OK") {
+      solution$failures <- internal("describe_solution_error")(data, solution)
+    }
+    state$solution <- list(result = solution)
+    proposal$stop_for_solution_error()
+    proposal$download()
+    downloads <- proposal$get_downloads()
+    failed <- which(tolower(downloads$download_status) == "failed")
+    if (!length(failed)) {
+      downloads$extra <- NULL
+      return(downloads)
+    }
+    for (i in failed) {
+      error <- downloads$download_error[[i]]
+      binary <- downloads$type[i] %in% c("standard", "cran", "bioc") &&
+        downloads$platform[i] != "source"
+      if (!binary || !missing_artifact(error)) {
+        error$message <- paste(c(paste("Failed to download", downloads$package[i],
+                                      downloads$version[i]),
+                                 download_diagnostic(error)), collapse = "\n")
+        stop(error)
+      }
+      cli::cli_alert_warning("Binary unavailable for {downloads$package[i]} {downloads$version[i]}; resolving again.")
+    }
+    missing <- artifact_key(downloads[failed, , drop = FALSE])
+    stopifnot(!any(missing %in% unavailable))
+    unavailable <- c(unavailable, missing)
+  }
 }
 
 ir_resolve_primary_package <- function(res, primary_ref) {
@@ -164,6 +305,10 @@ ir_input_key <- function(deps,
   # or reticulate, so its resolved set differs from a plain run of the same deps.
   # Omitting the marker for non-Quarto runs keeps their existing keys stable.
   secretbase::sha256(paste(c(sort(deps),
+                             "ir-artifact-resolution-v2",
+                             paste0("prefer-binaries: ",
+                                    getOption("ir.prefer.binaries", TRUE)),
+                             paste0("platforms: ", Sys.getenv("PKG_PLATFORMS")),
                              source_key,
                              if (quarto) "quarto" else NULL,
                              if (quarto_reticulate)
@@ -293,14 +438,49 @@ ir_invalidate_primary_package_markers <- function(marker) {
 ir_is_standard_resolved_ref <- function(res) {
   stopifnot("type" %in% names(res))
 
-  tolower(res$type) == "standard"
+  tolower(res$type) %in% c("standard", "cran", "bioc")
 }
 
 ir_install_spec <- function(res, i) {
-  if (ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
-    return(sprintf("%s@%s", res$package[[i]], res$version[[i]]))
+  # Include both locator and content identity. In particular, an old source
+  # installation must never satisfy a newly selected binary of that version.
+  path <- res$fulltarget[[i]]
+  digest <- if (file.exists(path)) unname(tools::md5sum(path)) else res$sha[[i]]
+  paste(c(res$package[[i]], res$version[[i]], res$platform[[i]],
+          res$sources[[i]], digest), collapse = "\n")
+}
 
-  res$ref[[i]]
+ir_install_records <- function(res) {
+  records <- lapply(seq_len(nrow(res)), function(i) {
+    # A local record tells renv to consume the already downloaded artifact.
+    # Keep pak's provenance fields (including pinned Git SHAs and subdirs).
+    # Local package directories stay non-cacheable, as in renv's own records.
+    record <- as.list(res$metadata[[i]])
+    record$Package <- res$package[[i]]
+    record$Version <- res$version[[i]]
+    repository <- ir_is_standard_resolved_ref(res[i, , drop = FALSE])
+    record$Source <- if (repository) "Local" else res$type[[i]]
+    record$Path <- if (res$type[[i]] == "local") res$remote[[i]]$path else
+      if (file.exists(res$fulltarget[[i]])) res$fulltarget[[i]] else
+        res$fulltarget_tree[[i]]
+    record$Cacheable <- res$type[[i]] != "local"
+    record$Hash <- secretbase::sha256(ir_install_spec(res, i))
+    if (repository || res$type[[i]] == "url")
+      record$RemoteUrl <- res$sources[[i]][[1L]]
+    # renv uses DESCRIPTION fields to order installations, even when dependency
+    # discovery is disabled. Supply the selected candidate's requirements.
+    deps <- res$deps[[i]]
+    for (type in c("Depends", "Imports", "LinkingTo")) {
+      rows <- which(tolower(deps$type) == tolower(type))
+      if (length(rows)) record[[type]] <- paste(vapply(rows, function(j) {
+        if (nzchar(deps$version[j]))
+          sprintf("%s (%s %s)", deps$package[j], deps$op[j], deps$version[j])
+        else deps$package[j]
+      }, character(1)), collapse = ", ")
+    }
+    record
+  })
+  setNames(records, res$package)
 }
 
 ir_install_specs <- function(res) {
@@ -324,8 +504,14 @@ ir_resolve_main <- function() {
   # Rust decides this policy before R startup profiles can mutate the
   # resolver's environment.
   driver_args <- base::commandArgs(trailingOnly = TRUE)
-  stopifnot(all(driver_args %in% "--ir-no-local-sources"))
+  stopifnot(all(driver_args %in% c("--ir-no-local-sources",
+                                  "--ir-prefer-binaries", "--ir-prefer-newest")))
   no_local_sources <- "--ir-no-local-sources" %in% driver_args
+  policy <- if ("--ir-prefer-newest" %in% driver_args) "0" else
+    if ("--ir-prefer-binaries" %in% driver_args) "1" else
+      Sys.getenv("IR_PREFER_BINARIES", "1")
+  stopifnot(policy %in% c("", "0", "1"))
+  options(ir.prefer.binaries = policy != "0")
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
@@ -341,14 +527,15 @@ ir_resolve_main <- function() {
   if (!is.null(result_file)) {
     ## 0. Bootstrap pak before repository normalization. On Linux PPM URLs are
     ## resolved through pak::repo_resolve(), so pak must be available first.
-    ir_ensure_tooling(packages = "pak", cache_dir = cache_dir)
+    ir_ensure_tooling(packages = "pak", min_versions = c(pak = "0.11.1"),
+                       cache_dir = cache_dir)
     repos <- ir_repos(exclude_newer)
     options(repos = repos)
 
     ## Ensure the rest of the resolver's own tooling is available before any
     ## secretbase/pak/renv use below.
     ir_ensure_tooling(
-      min_versions = c(renv = "1.2.0"),
+      min_versions = c(pak = "0.11.1", renv = "1.2.0"),
       cache_dir = cache_dir
     )
 
@@ -416,7 +603,8 @@ ir_resolve_main <- function() {
     if (length(cached) >= required_lines &&
         ir_marker_source_current(cached[[1L]]) &&
         nzchar(cached[[2L]]) &&
-        dir.exists(cached[[2L]])) {
+        dir.exists(cached[[2L]]) &&
+        !file.exists(file.path(cached[[2L]], ".ir-incomplete"))) {
       package_is_current <- is.null(package_result_file) ||
         nzchar(cached[[3L]])
       if (package_is_current) {
@@ -444,7 +632,7 @@ ir_resolve_main <- function() {
     primary_package <- ir_resolve_primary_package(res, refs_in[[1L]])
   }
 
-  ## 2b. Quarto's knitr engine needs rmarkdown. Inject it (latest) only when the
+  ## 2b. Quarto's knitr engine needs rmarkdown. Inject it only when the
   ## resolved set does not already provide it -- whether the user declared it
   ## directly or it arrived as a transitive dependency of a declared package.
   if (quarto) {
@@ -481,39 +669,39 @@ ir_resolve_main <- function() {
   ## 3. Hash install specs -> content-addressed library path
   # Bind the hash to the R version and platform: the symlinks point into the
   # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(install_specs,
+  key <- paste(c("ir-artifact-library-v2", install_specs,
                  as.character(getRversion()),
                  R.version$platform),
                collapse = "\n")
   if (is.null(library_root)) library_root <- cache_dir
   library_path <- file.path(library_root, "libraries", secretbase::sha256(key))
 
-  ## 4. Materialise the symlinked library via renv::use()
+  ## 4. Materialise the symlinked library via renv::install()
   # Skip when the library already holds every resolved package: repeat runs of
   # an unchanged script then cost nothing beyond resolution.
   dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
+  incomplete <- file.path(library_path, ".ir-incomplete")
   have <- list.files(library_path)
-  if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
+  if (length(pkgs) &&
+      (has_source_ref || file.exists(incomplete) || !all(pkgs %in% have))) {
     # Cache and complete-library reuse do not run package installation code.
     # Check sources only when this invocation will ask renv to materialise them.
     if (no_local_sources)
       ir_assert_remote_install_sources(res)
 
-    # renv::use() installs into the renv cache and links the packages into
-    # `library` as symlinks. Because `library` lives in our cache (not the R
-    # temp dir), renv leaves it in place when the session ends.
+    # Supply the full plan, including the downloaded artifacts, and disable
+    # dependency discovery. renv remains responsible for installation and its
+    # shared package cache, but cannot choose replacement repository artifacts.
     effective_repositories <- ir_effective_repositories()
-    do.call(renv::use, c(
-      as.list(install_specs),
-      list(
-        library = library_path,
-        repos   = effective_repositories,
-        attach  = FALSE,
-        sandbox = FALSE,
-        isolate = TRUE,
-        verbose = TRUE
-      )
-    ))
+    writeLines("Installation in progress", incomplete)
+    options(renv.cache.linkable = TRUE, renv.config.install.remotes = FALSE)
+    renv::install(packages = ir_install_records(res), library = library_path,
+                  repos = effective_repositories, dependencies = FALSE,
+                  prompt = FALSE, transactional = TRUE)
+    installed <- installed.packages(lib.loc = library_path)
+    stopifnot(all(pkgs %in% rownames(installed)),
+              all(installed[pkgs, "Version"] == res$version))
+    stopifnot(unlink(incomplete) == 0L)
   }
 
   ## 4b. Record the resolution so an identical request skips pak.

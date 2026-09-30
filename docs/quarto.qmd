@@ -100,7 +100,7 @@ ir:
 ## R package injection
 
 A Quarto render or preview needs the `rmarkdown` package for the knitr engine.
-`ir` appends `rmarkdown` to the resolved packages automatically when it is not already present, pulling the latest version (or the latest as of `exclude-newer` when set).
+`ir` appends `rmarkdown` to the resolved packages automatically when it is not already present, using the same binary preference and package snapshot as the other requirements.
 
 Declare `rmarkdown` yourself under `ir.packages` - directly (for example, `rmarkdown@2.29`) or transitively through a package that imports it - to override the injected seed.
 

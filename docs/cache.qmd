@@ -8,7 +8,7 @@ Rust owns the cache root and passes it to the resolver R session as `IR_CACHE_DI
 This lets warm resolution-cache hits return without launching R while keeping resolver output in the same cache tree.
 Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of `IR_CACHE_DIR`.
 
-Resolution requests are keyed by declared packages, resolution source, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
+Resolution requests are keyed by declared packages, resolution source, effective binary preference, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
 R resolution records a Unix timestamp inside the cache marker; markers older than `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` are refreshed in place, so changed package metadata is picked up without accumulating one marker per refresh window.
 The default max age is 86400 seconds (24 hours).
@@ -24,9 +24,19 @@ Nonempty resolution graphs with no network-backed pak source, or with any pak qu
 Each invocation asks pak to resolve local-only graphs again, so local changes and explicit cache-control modifiers are not hidden behind a warm marker.
 Empty dependency graphs remain cacheable because they have no package source to invalidate.
 
-Cache-backed materialised libraries are content-addressed by the install refs passed to `renv::use()`, R version, and platform.
+Unset and explicitly enabled `IR_PREFER_BINARIES` share one resolution identity;
+`IR_PREFER_BINARIES=0` uses a separate identity. The artifact-aware cache format
+does not reuse resolution entries from before binary preference became the
+default. Existing package and download caches remain available.
+
+Cache-backed materialised libraries are content-addressed by the selected package
+versions, artifact URLs, platforms and content identities, plus R version and
+platform. A source installation cannot satisfy a request for a different binary
+artifact of the same version. Libraries with an unfinished installation are not
+reused as successful environments.
 Scripts or tools that resolve to the same install refs share one library.
-When a source ref is re-resolved, it is passed to `renv::use()` so renv can refresh the source install; renv may reuse its own package cache when the source has not changed.
+When an explicit source ref is re-resolved, renv refreshes its installation;
+renv may reuse its own package cache when the source has not changed.
 Installed tool libraries use the same content-addressing under `IR_TOOL_STORE_DIR`.
 
 Use `--refresh` to bypass the R and Python resolution markers for one invocation:
