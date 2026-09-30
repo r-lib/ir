@@ -89,9 +89,9 @@ ir_missing_binaries <- function(res) {
   missing <- vapply(rows, function(i) {
     url <- res$sources[[i]][[1L]]
     if (!grepl("^https?://", url)) return(FALSE)
-    headers <- tryCatch(curlGetHeaders(url, verify = FALSE),
+    headers <- tryCatch(base::curlGetHeaders(url, verify = FALSE),
                         error = function(e) NULL)
-    status <- tail(attr(headers, "status"), 1L)
+    status <- utils::tail(attr(headers, "status"), 1L)
     if (any(status >= 400L))
       message("Binary for ", res$package[i], " returned HTTP ", status, ".")
     any(status %in% c(404L, 410L))
@@ -183,8 +183,8 @@ ir_effective_repositories <- function() {
             all(!is.na(repositories$url)),
             all(nzchar(repositories$url)))
 
-  setNames(as.character(repositories$url),
-           as.character(repositories$name))
+  stats::setNames(as.character(repositories$url),
+                  as.character(repositories$name))
 }
 
 ## --- resolution cache -------------------------------------------------------
@@ -380,7 +380,7 @@ ir_install_records <- function(res) {
     }
     record
   })
-  setNames(records, res$package)
+  stats::setNames(records, res$package)
 }
 
 ir_install_specs <- function(res) {
@@ -609,7 +609,9 @@ ir_resolve_main <- function() {
         res <- ir_resolve_refs(refs_in, source = missing)
         next
       }
-      installed <- installed.packages(lib.loc = library_path)
+      # Library timestamps may leave a cached inventory stale after restore.
+      installed <- utils::installed.packages(lib.loc = library_path,
+                                             noCache = TRUE)
       stopifnot(all(pkgs %in% rownames(installed)),
                 all(installed[pkgs, "Version"] == res$version))
       stopifnot(unlink(incomplete) == 0L)

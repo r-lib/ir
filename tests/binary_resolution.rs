@@ -215,6 +215,47 @@ fn default_prefers_older_binary_with_source_only_dependency() {
 }
 
 #[test]
+fn binary_installation_and_fallback_without_default_packages() {
+    let repo = Repository::new();
+    for (missing, artifact, version) in [(false, "binary", "1.0.0"), (true, "source", "2.0.0")] {
+        if missing {
+            *repo.fault.lock().unwrap() = Some(("irlag_1.0.0".to_string(), 404));
+        }
+        let cache = temp_dir("ir-binary-no-default-packages-cache");
+        let expression = format!(
+            "stopifnot(!'package:utils' %in% search(), !'package:stats' %in% search(), irlag::artifact() == '{artifact}', utils::packageVersion('irlag') == '{version}', irsourceonly::artifact() == 'source'); cat('reduced-default-packages\\n')"
+        );
+        // The resolver inherits the environment; only user code gets the flag.
+        let out = repo
+            .command(&cache, None, &["irlag"])
+            .env("R_DEFAULT_PACKAGES", "NULL")
+            .args(["--default-packages=NULL", "-e", &expression])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        assert_stdout_contains(&out, "reduced-default-packages");
+    }
+}
+
+#[test]
+fn post_install_validation_ignores_stale_package_inventory() {
+    let repo = Repository::new();
+    let cache = temp_dir("ir-binary-stale-inventory-cache");
+    let out = repo
+        .rscript_command(&cache)
+        .arg(fixture("stale-package-inventory.R"))
+        .arg(fixture("resolver-tooling.R"))
+        .arg(repo.root.join("tooling"))
+        .output()
+        .unwrap();
+    assert_success(&out);
+    let out = repo.run(&cache, None, &["irlag"],
+        "stopifnot(utils::packageVersion('irlag') == '1.0.0', utils::packageVersion('irsourceonly') == '1.0.0'); cat('fresh-installed-inventory\\n')");
+    assert_success(&out);
+    assert_stdout_contains(&out, "fresh-installed-inventory");
+}
+
+#[test]
 fn user_library_does_not_supply_installed_resolution_candidates() {
     let repo = Repository::new();
     let cache = temp_dir("ir-binary-user-library-cache");
