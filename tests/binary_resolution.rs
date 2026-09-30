@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::UNIX_EPOCH;
@@ -171,6 +171,18 @@ impl Repository {
                 .trim(),
         )
     }
+
+    fn rscript_command(&self, cache: &TempPath) -> Command {
+        let mut command = Command::new(rscript());
+        for (key, value) in self.command(cache, None, &[]).get_envs() {
+            if let Some(value) = value {
+                command.env(key, value);
+            } else {
+                command.env_remove(key);
+            }
+        }
+        command
+    }
 }
 
 impl Drop for Repository {
@@ -199,6 +211,90 @@ fn default_prefers_older_binary_with_source_only_dependency() {
     assert!(
         !requests.iter().any(|p| p.contains("src/contrib/irlag_")),
         "{requests:?}"
+    );
+}
+
+#[test]
+fn user_library_does_not_supply_installed_resolution_candidates() {
+    let repo = Repository::new();
+    let cache = temp_dir("ir-binary-user-library-cache");
+    // The ambient package has the same version as the repository binary, but
+    // different code. It must not supply the isolated environment's artifact.
+    let out = repo.rscript_command(&cache)
+        .args(["--vanilla", "-e", "args <- commandArgs(TRUE); install.packages(args[1], repos = NULL, type = 'source', lib = Sys.getenv('R_LIBS_USER')); stopifnot(iridentity::artifact() == 'source')"])
+        .arg(repo.root.join("repo/src/contrib/iridentity_1.0.0.tar.gz"))
+        .output().unwrap();
+    assert_success(&out);
+    let out = repo.run(
+        &cache,
+        None,
+        &["iridentity"],
+        "stopifnot(iridentity::artifact() == 'binary'); cat('downloaded-binary\\n')",
+    );
+    assert_success(&out);
+    assert_stdout_contains(&out, "downloaded-binary");
+    let requests = repo.requests.lock().unwrap();
+    assert!(
+        requests
+            .iter()
+            .any(|p| p.contains("/bin/") && p.contains("iridentity_1.0.0")),
+        "{requests:?}"
+    );
+}
+
+#[test]
+fn direct_driver_defaults_to_binary_preference() {
+    let repo = Repository::new();
+    let cache = temp_dir("ir-binary-direct-driver-cache");
+    // Have the CLI materialize the shipped driver, including its tooling.
+    assert_success(&repo.run(&cache, None, &["irsame"], "NULL"));
+    let driver = fs::read_dir(cache.join("ir/drivers"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("resolve-")
+        })
+        .unwrap();
+    let result = cache.join("direct-result");
+    for (args, artifact, version) in [
+        (vec![], "binary", "1.0.0"),
+        (vec!["--ir-prefer-binaries"], "binary", "1.0.0"),
+        (vec!["--ir-prefer-newest"], "source", "2.0.0"),
+    ] {
+        let mut child = repo
+            .rscript_command(&cache)
+            .arg(&driver)
+            .args(args)
+            .env("IR_RESOLVE_RESULT_FILE", &result)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(b"irlag\n").unwrap();
+        assert_success(&child.wait_with_output().unwrap());
+        let library = fs::read_to_string(&result).unwrap();
+        let out = repo.rscript_command(&cache)
+            .args(["--vanilla", "-e", ".libPaths(commandArgs(TRUE)[1]); stopifnot(irlag::artifact() == commandArgs(TRUE)[2], packageVersion('irlag') == commandArgs(TRUE)[3], irsourceonly::artifact() == 'source')"])
+            .args([library.trim(), artifact, version])
+            .output().unwrap();
+        assert_success(&out);
+    }
+    let out = repo
+        .rscript_command(&cache)
+        .arg(driver)
+        .args(["--ir-prefer-binaries", "--ir-prefer-newest"])
+        .env("IR_RESOLVE_RESULT_FILE", result)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("cannot combine --ir-prefer-binaries and --ir-prefer-newest"),
+        "{}",
+        stderr(&out)
     );
 }
 

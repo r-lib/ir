@@ -1,6 +1,7 @@
 # ir resolve driver
 #
-# Run by the `ir` Rust binary in a private, throw-away R session.
+# Run by the `ir` Rust binary in a private, throw-away R session, with
+# tooling.R prepended in the emitted driver:
 #
 #   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
@@ -70,6 +71,8 @@ ir_resolve_refs <- function(refs, source = character()) {
   refs[direct_source] <- paste0(refs[direct_source],
     ifelse(grepl("?", refs[direct_source], fixed = TRUE), "&", "?"), "source")
   source <- setdiff(source, packages[direct_source])
+  # pkg_deps() solves against an empty temporary library, so the lazy policy
+  # cannot select installed packages from the user's libraries.
   res <- pak::pkg_deps(c(refs, if (length(source)) paste0(source, "=?source")),
                        upgrade = !prefer)
   res <- res[res$type != "deps", , drop = FALSE]
@@ -404,8 +407,11 @@ ir_resolve_main <- function() {
   stopifnot(all(driver_args %in% c("--ir-no-local-sources",
                                   "--ir-prefer-binaries", "--ir-prefer-newest")))
   no_local_sources <- "--ir-no-local-sources" %in% driver_args
-  stopifnot(sum(driver_args %in% c("--ir-prefer-binaries", "--ir-prefer-newest")) == 1L)
-  options(ir.prefer.binaries = "--ir-prefer-binaries" %in% driver_args)
+  prefer_newest <- "--ir-prefer-newest" %in% driver_args
+  if (prefer_newest && "--ir-prefer-binaries" %in% driver_args)
+    stop("cannot combine --ir-prefer-binaries and --ir-prefer-newest", call. = FALSE)
+  # Direct driver invocations need no private policy flag.
+  options(ir.prefer.binaries = !prefer_newest)
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
