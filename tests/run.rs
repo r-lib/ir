@@ -51,16 +51,20 @@ fn r_tooling_lib(cache_dir: &Path) -> std::path::PathBuf {
 }
 
 fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str) {
-    // These fixtures model the pak subprocess and renv installation boundaries.
+    // These fixtures model the public pak and renv installation boundaries.
     // Keep the public-CLI tests independent of their real network clients.
     let adapter = match name {
         "pak" => {
             r#"
-remote <- function(func, args) {
-  res <- pkg_deps(args[[1L]])
+fixture_pkg_deps <- pkg_deps
+pkg_deps <- function(refs, ...) {
+  refs <- unlist(lapply(refs, function(ref) {
+    if (!startsWith(ref, "deps::")) return(ref)
+    desc <- read.dcf(file.path(sub("^deps::", "", ref), "DESCRIPTION"))
+    strsplit(desc[1, "Imports"], ", ")[[1L]]
+  }))
+  res <- fixture_pkg_deps(refs, ...)
   res$platform <- rep("source", nrow(res))
-  res$sha <- rep("fixture", nrow(res))
-  res$fulltarget <- rep("/absent/fixture.tar.gz", nrow(res))
   res$deps <- rep(list(data.frame(type = character(), package = character(),
                                   version = character(), op = character())), nrow(res))
   res
@@ -69,7 +73,8 @@ remote <- function(func, args) {
         }
         "renv" => {
             r#"
-install <- function(packages, library, repos, ...) {
+restore <- function(lockfile, library, repos, ...) {
+  packages <- lockfile$Packages
   specs <- vapply(seq_along(packages), function(i) {
     record <- packages[[i]]
     if (is.list(record)) paste0(record$Package, "@", record$Version) else record
@@ -90,7 +95,7 @@ install <- function(packages, library, repos, ...) {
         _ => "",
     };
     let namespace = if name == "renv" {
-        format!("{namespace}export(install)\n")
+        format!("{namespace}export(restore)\n")
     } else {
         namespace.to_string()
     };

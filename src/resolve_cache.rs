@@ -59,7 +59,7 @@ pub(crate) fn paths(
         library_root,
     );
     let marker = cache_dir.join("resolutions").join(sha256_fields(&[
-        "ir-artifact-resolution-v2".to_string(),
+        "ir-artifact-resolution-v3".to_string(),
         format!("prefer-binaries: {policy}"),
         format!(
             "platforms: {}",

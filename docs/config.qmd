@@ -99,10 +99,15 @@ ir run --with 'cli>=3.6.0' -e 'print(packageVersion("cli"))'
 ir run --with 'cli?source' -e 'print(packageVersion("cli"))'
 ```
 
-IR downloads the selected artifacts before installation. If a repository reports
-an advertised binary as missing (HTTP 404 or 410), IR excludes that artifact and
-solves the dependency graph again, considering other known binaries and source
-candidates. Authentication, integrity, and installation errors remain errors.
+IR uses pak’s dependency solver to prefer binaries for ordinary package requests.
+Repository-qualified refs such as `cran::pkg` retain pak’s direct-request policy.
+If the preferred binary cannot satisfy the dependency graph, pak can select source
+instead; IR does not search older binaries exhaustively. After a failed binary
+download, if the repository confirms HTTP 404 or 410, IR solves once more with
+that package requested as source. Authentication, integrity, and installation
+errors remain errors. renv installs the exact artifacts in the resolved plan.
+If pak cannot resolve a constrained source request, IR reports that resolution
+error rather than relaxing the requirement.
 
 Package snapshot date precedence for `ir run`, `ir render`, and `ir preview` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.

@@ -215,7 +215,7 @@ fn binary_policy_modes_constraints_and_transitive_dependencies() {
         (None, vec!["irlag@>=2.0.0"], "stopifnot(irlag::artifact() == 'source')"),
         (None, vec!["irlag>=1.0.0", "irlag>=2.0.0"], "stopifnot(irlag::artifact() == 'source', packageVersion('irlag') == '2.0.0')"),
         (None, vec!["irconflict", "irsourceonly@1.0.0"], "stopifnot(irconflict::artifact() == 'source', packageVersion('irconflict') == '2.0.0')"),
-        (None, vec!["irchoice", "irsourceonly@1.0.0"], "stopifnot(irchoice::artifact() == 'binary', packageVersion('irchoice') == '0.5.0')"),
+        (None, vec!["irchoice", "irsourceonly@1.0.0"], "stopifnot(irchoice::artifact() == 'source', packageVersion('irchoice') == '2.0.0')"),
         (None, vec!["irlag?source"], "stopifnot(irlag::artifact() == 'source', packageVersion('irlag') == '2.0.0')"),
     ] {
         let cache = temp_dir("ir-binary-policy-case");
@@ -244,7 +244,7 @@ fn unavailable_binary_resolves_again_with_source_fallback() {
 }
 
 #[test]
-fn unavailable_binary_uses_another_known_compatible_binary() {
+fn unavailable_binary_falls_back_to_source_without_searching_older_binaries() {
     let repo = Repository::new();
     *repo.fault.lock().unwrap() = Some(("irlag_1.0.0".to_string(), 410));
     let cache = temp_dir("ir-binary-alternative");
@@ -252,8 +252,36 @@ fn unavailable_binary_uses_another_known_compatible_binary() {
         &cache,
         None,
         &["irlag"],
-        "stopifnot(packageVersion('irlag') == '0.5.0', irlag::artifact() == 'binary')",
+        "stopifnot(packageVersion('irlag') == '2.0.0', irlag::artifact() == 'source', irnewonly::artifact() == 'source')",
     ));
+    let binary_path = fs::read_to_string(repo.root.join("binary-path")).unwrap();
+    *repo.fault.lock().unwrap() = Some((format!("/{}/iridentity_", binary_path.trim()), 410));
+    let cache = temp_dir("ir-binary-pinned-fallback");
+    assert_success(&repo.run(
+        &cache,
+        None,
+        &["iridentity@1.0.0"],
+        "stopifnot(packageVersion('iridentity') == '1.0.0', iridentity::artifact() == 'source')",
+    ));
+    *repo.fault.lock().unwrap() = Some((format!("/{}/irlag_", binary_path.trim()), 410));
+    let cache = temp_dir("ir-binary-older-pin-fallback");
+    repo.requests.lock().unwrap().clear();
+    let out = repo.run(&cache, None, &["irlag@1.0.0"], "stop('must not run')");
+    assert!(!out.status.success());
+    // pak cannot resolve this older source pin from the fixture. Keep its
+    // resolution error rather than silently upgrading the pinned package.
+    assert!(
+        output_text(&out).contains("Could not solve package dependencies"),
+        "{}",
+        output_text(&out)
+    );
+    assert!(!cache.join("ir/resolutions").exists());
+    assert!(!repo
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|p| p.contains("src/contrib/irlag_2.0.0")));
 }
 
 #[test]

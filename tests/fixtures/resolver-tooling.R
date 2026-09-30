@@ -47,8 +47,8 @@ ir_test_write_pkg <- function(lib, pkg, namespace, code,
 
 ir_test_renv_code <- function() {
   paste(
-    "install <- function(packages, library, repos, ...) {",
-    "  for (record in packages) {",
+    "restore <- function(lockfile, library, repos, ...) {",
+    "  for (record in lockfile$Packages) {",
     "    path <- file.path(library, record$Package)",
     "    dir.create(file.path(path, 'Meta'), recursive = TRUE, showWarnings = FALSE)",
     "    desc <- c(Package = record$Package, Version = record$Version)",
@@ -64,7 +64,7 @@ ir_test_renv_code <- function() {
 ir_test_write_renv <- function(lib, code = ir_test_renv_code(),
                                version = "1.2.0",
                                built = as.character(getRversion())) {
-  namespace <- if (grepl("install <-", code, fixed = TRUE)) "export(install)" else "export(use)"
+  namespace <- if (grepl("restore <-", code, fixed = TRUE)) "export(restore)" else "export(use)"
   ir_test_write_pkg(lib, "renv", namespace, code,
                     version = version, built = built)
 }

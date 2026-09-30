@@ -109,15 +109,6 @@ fn render_quarto_installs_missing_reticulate_with_plain_pak_ref() {
         "export(pkg_deps)\nexport(pkg_install)\nexport(repo_get)\nexport(repo_resolve)\n",
         r#"
 load_private_cli <- function() TRUE
-remote <- function(func, args) {
-  res <- pkg_deps(args[[1L]])
-  res$platform <- "source"
-  res$sha <- "fixture"
-  res$fulltarget <- "/absent/fixture.tar.gz"
-  res$deps <- list(data.frame(type = character(), package = character(),
-                              version = character(), op = character()))
-  res
-}
 repo_resolve <- function(spec) {
   list(CRAN = "https://packagemanager.posit.co/cran/latest")
 }
@@ -130,6 +121,9 @@ repo_get <- function(...) {
   )
 }
 pkg_deps <- function(refs, ...) {
+  stopifnot(startsWith(refs, "deps::"))
+  desc <- read.dcf(file.path(sub("^deps::", "", refs), "DESCRIPTION"))
+  refs <- unname(desc[1, "Imports"])
   stopifnot(identical(refs, "rmarkdown"))
   res <- data.frame(
     ref = refs,
@@ -140,6 +134,9 @@ pkg_deps <- function(refs, ...) {
     priority = NA_character_,
     direct = TRUE
   )
+  res$platform <- "source"
+  res$deps <- list(data.frame(type = character(), package = character(),
+                              version = character(), op = character()))
   res$sources <- list("https://example.test/rmarkdown_1.0.0.tar.gz")
   res$mirror <- "https://example.test/cran"
   res$params <- list(character())
@@ -166,10 +163,10 @@ pkg_install <- function(pkg, lib, ...) {
     install_fake_r_package(
         &user_library,
         "renv",
-        "export(install)\n",
+        "export(restore)\n",
         r#"
-install <- function(packages, library, repos, ...) {
-  for (record in packages) {
+restore <- function(lockfile, library, repos, ...) {
+  for (record in lockfile$Packages) {
     path <- file.path(library, record$Package)
     dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
     desc <- c(Package = record$Package, Version = record$Version)
