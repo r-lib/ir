@@ -30,8 +30,11 @@ impl Repository {
             .output()
             .unwrap();
         assert_success(&out);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        // R uses wildcard sockets with SO_REUSEADDR. Reserve the wildcard
+        // address too, so its downloader cannot reuse this port on macOS.
+        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let address =
+            std::net::SocketAddr::from(([127, 0, 0, 1], listener.local_addr().unwrap().port()));
         let directory = root.to_path_buf();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&requests);
@@ -386,7 +389,17 @@ fn binary_installation_and_fallback_without_default_packages() {
         }
         let cache = temp_dir("ir-binary-no-default-packages-cache");
         let expression = format!(
-            "stopifnot(!'package:utils' %in% search(), !'package:stats' %in% search(), irlag::artifact() == '{artifact}', utils::packageVersion('irlag') == '{version}', irsourceonly::artifact() == 'source'); cat('reduced-default-packages\\n')"
+            r#"
+connection <- tryCatch(serverSocket({}), error = identity)
+if (inherits(connection, "connection")) close(connection)
+stopifnot(inherits(connection, "error"),
+          !"package:utils" %in% search(), !"package:stats" %in% search(),
+          irlag::artifact() == "{artifact}",
+          utils::packageVersion("irlag") == "{version}",
+          irsourceonly::artifact() == "source")
+cat("reduced-default-packages\n")
+"#,
+            repo.address.port()
         );
         // The resolver inherits the environment; only user code gets the flag.
         let out = repo
