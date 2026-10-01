@@ -57,6 +57,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also chooses the R minor when no R selector is set and limits multi-minor `r-version` requirements by date | unset |
 | `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache; `0` disables reuse of time-bounded resolution markers | `86400` seconds |
 | `IR_NO_LOCAL_SOURCES` | dependency-resolving commands | unset; any nonempty value prevents installing R packages from local sources |
+| `IR_PREFER_BINARIES` | R package installation | `1`; prefer pre-built packages, including older versions |
 | `IR_REFRESH` | dependency-resolving commands | unset; any nonempty value bypasses resolution markers |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
@@ -77,6 +78,34 @@ The selected path is passed to the resolver R session, so R startup files do not
 Installed tool libraries use `IR_TOOL_STORE_DIR`.
 When unset, the default is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix and macOS, and `%LOCALAPPDATA%\Programs\R\ir\tools` or `%USERPROFILE%\AppData\Local\Programs\R\ir\tools` on Windows.
 This store is persistent state and is not removed by `ir cache clean`.
+
+IR prefers pre-built R packages, also called binaries, to avoid building packages from source.
+When a new source release arrives before its binary is ready, IR may install an older binary instead.
+
+Your version requirements still apply.
+A binary must also work with your R version, operating system, architecture, and the other packages being installed.
+Packages without a suitable binary can install from source alongside binary packages.
+If you request a specific Git ref, local package, URL, or `?source`, IR honors that request.
+
+`IR_PREFER_BINARIES=0` tells IR to prefer newer versions, even if they need a source build.
+IR can still use a binary for the chosen version.
+Unset, empty, and `1` all use the default; other values are rejected.
+Set the variable before starting IR, for example in your shell, rather than in an R startup file.
+
+```sh
+ir run --with cli -e 'print(packageVersion("cli"))'
+IR_PREFER_BINARIES=0 ir run --with cli -e 'print(packageVersion("cli"))'
+ir run --with 'cli>=3.6.0' -e 'print(packageVersion("cli"))'
+ir run --with 'cli?source' -e 'print(packageVersion("cli"))'
+```
+
+Binary preference applies to plain package names such as `cli`.
+A request like `cran::cli` keeps pak's usual preference for the newest compatible version.
+IR may use source if pak doesn't find a suitable binary; it doesn't try every older binary version.
+
+If a repository reports that the chosen binary is missing, IR tries that package from source once and checks its dependencies again.
+Other download or installation failures are still reported as errors.
+IR also reports an error if no package version can meet the requirements.
 
 Package snapshot date precedence for `ir run`, `ir render`, and `ir preview` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.

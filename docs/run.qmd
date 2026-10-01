@@ -53,8 +53,14 @@ Command-line and environment values are trimmed before use.
 An empty `--exclude-newer` or `IR_EXCLUDE_NEWER` overrides frontmatter `exclude-newer` and resolves latest packages.
 Future snapshot dates also resolve latest packages.
 
-Supported package specs include `pkg` and exact versions such as `pkg==1.2`.
-pak does not currently resolve minimum-version refs such as `pkg>=1.2`; use an exact version or `exclude-newer` instead.
+Supported package specs include `pkg`, exact versions such as `pkg==1.2`, and minimum versions such as `pkg>=1.2`.
+
+IR prefers pre-built packages (binaries) to avoid building from source.
+It may choose an older version than the latest source release, while still meeting your version requirements.
+If no suitable binary is available, IR can install from source instead.
+Set `IR_PREFER_BINARIES=0` to prefer newer versions.
+IR can still use a binary for the chosen version.
+
 Source refs are resolved with pak and then passed through to renv, including GitHub, GitLab, Bitbucket, git, URL, and local package refs in forms both tools accept.
 GitHub packages should use package refs such as `github::owner/repo@ref` or `github::owner/repo/subdir@ref`, not browser URLs copied from GitHub.
 Local packages may be written as `local::path`, as a bare file-system path in pak-supported forms such as `./path`, or with a package prefix such as `mypkg=local::C:/path` for Windows absolute paths.

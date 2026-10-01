@@ -121,6 +121,9 @@ repo_get <- function(...) {
   )
 }
 pkg_deps <- function(refs, ...) {
+  stopifnot(startsWith(refs, "deps::"))
+  desc <- read.dcf(file.path(sub("^deps::", "", refs), "DESCRIPTION"))
+  refs <- unname(desc[1, "Imports"])
   stopifnot(identical(refs, "rmarkdown"))
   res <- data.frame(
     ref = refs,
@@ -131,6 +134,9 @@ pkg_deps <- function(refs, ...) {
     priority = NA_character_,
     direct = TRUE
   )
+  res$platform <- "source"
+  res$deps <- list(data.frame(type = character(), package = character(),
+                              version = character(), op = character()))
   res$sources <- list("https://example.test/rmarkdown_1.0.0.tar.gz")
   res$mirror <- "https://example.test/cran"
   res$params <- list(character())
@@ -157,14 +163,16 @@ pkg_install <- function(pkg, lib, ...) {
     install_fake_r_package(
         &user_library,
         "renv",
-        "export(use)\n",
+        "export(restore)\n",
         r#"
-use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
-  specs <- unlist(list(...), use.names = FALSE)
-  for (spec in specs) {
-    package <- sub("@.*$", "", spec)
-    dir.create(file.path(library, package), recursive = TRUE,
-               showWarnings = FALSE)
+restore <- function(lockfile, library, repos, ...) {
+  for (record in lockfile$Packages) {
+    path <- file.path(library, record$Package)
+    dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+    desc <- c(Package = record$Package, Version = record$Version)
+    writeLines(paste(names(desc), desc, sep = ": "), file.path(path, "DESCRIPTION"))
+    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(),
+      Platform = R.version$platform)), file.path(path, "Meta/package.rds"))
   }
   invisible()
 }
@@ -216,6 +224,7 @@ ir:
         .env("IR_TEST_PYTHON", &fake_python)
         .env("R_LIBS_USER", &user_library)
         .env("R_LIBS_SITE", &site_library)
+        .env_remove("R_LIBS")
         .args(["render", "--isolated", "--vanilla", "--rscript"])
         .arg(rscript())
         .arg(&doc)

@@ -51,6 +51,54 @@ fn r_tooling_lib(cache_dir: &Path) -> std::path::PathBuf {
 }
 
 fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str) {
+    // These fixtures model the public pak and renv installation boundaries.
+    // Keep the public-CLI tests independent of their real network clients.
+    let adapter = match name {
+        "pak" => {
+            r#"
+fixture_pkg_deps <- pkg_deps
+pkg_deps <- function(refs, ...) {
+  refs <- unlist(lapply(refs, function(ref) {
+    if (!startsWith(ref, "deps::")) return(ref)
+    desc <- read.dcf(file.path(sub("^deps::", "", ref), "DESCRIPTION"))
+    strsplit(desc[1, "Imports"], ", ")[[1L]]
+  }))
+  res <- fixture_pkg_deps(refs, ...)
+  res$platform <- rep("source", nrow(res))
+  res$deps <- rep(list(data.frame(type = character(), package = character(),
+                                  version = character(), op = character())), nrow(res))
+  res
+}
+"#
+        }
+        "renv" => {
+            r#"
+restore <- function(lockfile, library, repos, ...) {
+  packages <- lockfile$Packages
+  specs <- vapply(seq_along(packages), function(i) {
+    record <- packages[[i]]
+    if (is.list(record)) paste0(record$Package, "@", record$Version) else record
+  }, character(1))
+  do.call(use, c(as.list(unname(specs)), list(library = library, repos = repos,
+            attach = FALSE, sandbox = FALSE, isolate = TRUE, verbose = TRUE)))
+  for (package in names(packages)) {
+    path <- file.path(library, package)
+    dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+    desc <- c(Package = package, Version = "1.0.0")
+    writeLines(paste(names(desc), desc, sep = ": "), file.path(path, "DESCRIPTION"))
+    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(),
+      Platform = R.version$platform)), file.path(path, "Meta/package.rds"))
+  }
+}
+"#
+        }
+        _ => "",
+    };
+    let namespace = if name == "renv" {
+        format!("{namespace}export(restore)\n")
+    } else {
+        namespace.to_string()
+    };
     let source_root = temp_dir(&format!("ir-fake-{name}-source"));
     let package = source_root.join(name);
     fs::create_dir_all(package.join("R")).unwrap();
@@ -62,7 +110,11 @@ fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, r_code: &str)
     )
     .unwrap();
     fs::write(package.join("NAMESPACE"), namespace).unwrap();
-    fs::write(package.join("R").join(format!("{name}.R")), r_code).unwrap();
+    fs::write(
+        package.join("R").join(format!("{name}.R")),
+        format!("{r_code}\n{adapter}"),
+    )
+    .unwrap();
 
     let out = Command::new(rscript())
         .args([

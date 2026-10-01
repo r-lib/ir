@@ -42,6 +42,7 @@ pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
     command
         .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
+        .env_remove("IR_PREFER_BINARIES")
         .env_remove("IR_NO_LOCAL_SOURCES");
     command
 }
@@ -320,7 +321,6 @@ pub(crate) fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
 }
