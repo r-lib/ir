@@ -29,6 +29,19 @@ package <- function(name, version, artifact, imports = NULL, sentinel = FALSE) {
              file.path(path, "DESCRIPTION"))
   writeLines("export(artifact)", file.path(path, "NAMESPACE"))
   writeLines(sprintf('artifact <- function() "%s"', artifact), file.path(path, "R/artifact.R"))
+  if (name == "irsourceonly" && artifact == "source") {
+    cat('
+if (nzchar(Sys.getenv("IR_TEST_INSTALL_GATE"))) local({
+  gate <- socketConnection("127.0.0.1",
+    port = as.integer(Sys.getenv("IR_TEST_INSTALL_GATE")), open = "r+b",
+    blocking = TRUE, timeout = 60)
+  on.exit(close(gate))
+  writeLines("source-install", gate)
+  flush(gate)
+  stopifnot(identical(readLines(gate, n = 1L), "continue"))
+})
+', file = file.path(path, "R/artifact.R"), append = TRUE)
+  }
   if (sentinel) {
     writeLines('stop("IR_UNEXPECTED_SOURCE_ARTIFACT")', file.path(path, "R/artifact.R"))
   }

@@ -209,7 +209,7 @@ ir_input_key <- function(deps,
   # or reticulate, so its resolved set differs from a plain run of the same deps.
   # Omitting the marker for non-Quarto runs keeps their existing keys stable.
   secretbase::sha256(paste(c(sort(deps),
-                             "ir-artifact-resolution-v3",
+                             "ir-artifact-resolution-v4",
                              paste0("prefer-binaries: ",
                                     getOption("ir.prefer.binaries", TRUE)),
                              paste0("platforms: ", Sys.getenv("PKG_PLATFORMS")),
@@ -353,7 +353,7 @@ ir_install_spec <- function(res, i) {
           res$sources[[i]], digest), collapse = "\n")
 }
 
-ir_install_records <- function(res) {
+ir_install_records <- function(res, cache_dir) {
   records <- lapply(seq_len(nrow(res)), function(i) {
     # URL lockfile records preserve the selected repository artifact. Keep
     # pak's provenance for explicit sources, including Git SHAs and subdirs.
@@ -365,7 +365,10 @@ ir_install_records <- function(res) {
     if (repository) record$RemoteType <- "url"
     if (res$type[[i]] == "local") record$Path <- res$remote[[i]]$path
     record$Cacheable <- res$type[[i]] != "local"
-    record$Hash <- secretbase::sha256(ir_install_spec(res, i))
+    # Rust serializes installs per IR cache root. Separate roots must not
+    # replace the same mutable renv cache entry while its links are in use.
+    record$Hash <- secretbase::sha256(paste(cache_dir, ir_install_spec(res, i),
+                                          sep = "\n"))
     if (repository || res$type[[i]] == "url")
       record$RemoteUrl <- res$sources[[i]][[1L]]
     # Supply the selected candidate's requirements for installation ordering.
@@ -400,6 +403,8 @@ ir_resolve_main <- function() {
   options(renv.config.pak.enabled = FALSE)
 
   cache_dir <- ir_cache_dir()
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = TRUE)
   library_root <- ir_env_optional("IR_LIBRARY_ROOT")
   # Rust decides this policy before R startup profiles can mutate the
   # resolver's environment.
@@ -572,9 +577,9 @@ ir_resolve_main <- function() {
     }
 
     ## 3. Hash install specs -> content-addressed library path
-    # Bind the hash to the R version and platform: the symlinks point into the
-    # renv cache, whose layout is itself keyed by R version and platform.
-    key <- paste(c("ir-artifact-library-v3", install_specs,
+    # Match the scope of the renv cache entries backing this library: the IR
+    # cache root, R version and platform.
+    key <- paste(c("ir-artifact-library-v4", cache_dir, install_specs,
                    as.character(getRversion()),
                    R.version$platform),
                  collapse = "\n")
@@ -601,7 +606,7 @@ ir_resolve_main <- function() {
       options(renv.cache.linkable = TRUE, renv.config.install.remotes = FALSE)
       error <- tryCatch({
         renv::restore(lockfile = list(R = list(Version = as.character(getRversion())),
-                                      Packages = ir_install_records(res)),
+                                      Packages = ir_install_records(res, cache_dir)),
                       library = library_path, repos = effective_repositories,
                       prompt = FALSE, transactional = TRUE)
         NULL

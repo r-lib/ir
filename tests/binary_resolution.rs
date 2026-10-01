@@ -3,13 +3,13 @@ mod support;
 
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 use support::*;
 
 struct Repository {
@@ -259,6 +259,96 @@ fn separate_ir_caches_do_not_share_mutable_downloads() {
         assert_eq!(fs::read(&archives[0]).unwrap(), expected_archive);
         assert!(!shared_renv_root.join("source/url").exists());
     }
+}
+
+fn install_gate() -> (u16, mpsc::Receiver<TcpStream>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = sender.send(stream);
+    });
+    (port, receiver)
+}
+
+fn wait_at_gate(receiver: mpsc::Receiver<TcpStream>, expected: &str) -> TcpStream {
+    let stream = receiver.recv_timeout(Duration::from_secs(60)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut message = String::new();
+    reader.read_line(&mut message).unwrap();
+    assert_eq!(message.trim(), expected);
+    stream
+}
+
+#[test]
+fn installation_survives_replacement_of_an_external_renv_cache_entry() {
+    let repo = Repository::new();
+    let shared_root = temp_dir("ir-binary-external-renv-root");
+    let warm_cache = temp_dir("ir-binary-warm-external-cache");
+    let out = repo
+        .command(&warm_cache, None, &["iridentity"])
+        .env("RENV_PATHS_ROOT", &shared_root)
+        .env("RENV_PATHS_CACHE", shared_root.join("cache"))
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let out = repo
+        .rscript_command(&warm_cache)
+        .env("RENV_PATHS_ROOT", &shared_root)
+        .env("RENV_PATHS_CACHE", shared_root.join("cache"))
+        .args(["--vanilla", "-e", "paths <- list.dirs(renv::paths$cache()); entries <- paths[basename(paths) == 'iridentity' & file.exists(file.path(paths, 'Meta/package.rds'))]; stopifnot(length(entries) == 1L); cat(entries)"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    let entry = stdout(&out).trim().to_owned();
+
+    let cache = temp_dir("ir-binary-cache-replacement");
+    let (install_port, install_receiver) = install_gate();
+    let consumer = repo
+        .command(&cache, None, &["iridentity", "irsourceonly"])
+        .env("RENV_PATHS_ROOT", &shared_root)
+        .env_remove("RENV_PATHS_CACHE")
+        .env("IR_TEST_INSTALL_GATE", install_port.to_string())
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary', irsourceonly::artifact() == 'source'); cat('complete-library\\n')"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Cache hits have been linked into renv's staging library before this
+    // source package builds. Hold that build while an external writer replaces
+    // the cached binary, then let IR finish while the cache entry is absent.
+    let mut install = wait_at_gate(install_receiver, "source-install");
+    let (replace_port, replace_receiver) = install_gate();
+    let writer = repo
+        .rscript_command(&warm_cache)
+        .env("RENV_PATHS_ROOT", &shared_root)
+        .env("RENV_PATHS_CACHE", shared_root.join("cache"))
+        .arg("--vanilla")
+        .arg(fixture("cache-replacement.R"))
+        .arg(replace_port.to_string())
+        .arg(entry)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut replacement = wait_at_gate(replace_receiver, "cache-removed");
+    install.write_all(b"continue\n").unwrap();
+    let out = consumer.wait_with_output().unwrap();
+    replacement.write_all(b"continue\n").unwrap();
+    let writer = writer.wait_with_output().unwrap();
+    assert!(
+        out.status.success() && writer.status.success(),
+        "IR:\n{}\nCache writer:\n{}",
+        output_text(&out),
+        output_text(&writer)
+    );
+    assert_stdout_contains(&out, "complete-library");
 }
 
 #[test]
@@ -582,7 +672,24 @@ fn binary_policy_cache_identity_and_reuse() {
         current_utc_seconds(),
         renviron_path(&old_library)
     );
-    fs::write(cache.join("ir/resolutions").join(old_key), legacy).unwrap();
+    fs::write(cache.join("ir/resolutions").join(&old_key), &legacy).unwrap();
+    // The previous artifact-aware format shared mutable renv entries across
+    // independently locked IR roots. It must not bypass the new cache scope.
+    let fields = [
+        "ir-artifact-resolution-v3".to_string(),
+        "prefer-binaries: true".to_string(),
+        "platforms: ".to_string(),
+        old_key,
+    ];
+    let encoded = fields
+        .iter()
+        .map(|f| format!("{}:{f}\n", f.len()))
+        .collect::<String>();
+    let unscoped_key = Sha256::digest(encoded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    fs::write(cache.join("ir/resolutions").join(unscoped_key), legacy).unwrap();
     let mut binary_library = PathBuf::new();
     for (policy, starts) in [
         (None, 1),
@@ -616,7 +723,7 @@ fn binary_policy_cache_identity_and_reuse() {
     }
     assert_eq!(
         fs::read_dir(cache.join("ir/resolutions")).unwrap().count(),
-        3
+        4
     );
     let out = repo
         .command(&cache, None, &["irlag"])

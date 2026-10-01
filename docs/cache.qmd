@@ -9,6 +9,7 @@ This lets warm resolution-cache hits return without launching R while keeping re
 Installed tools use the same resolver cache for tooling and markers, but their package libraries are materialised under the durable tool store instead of `IR_CACHE_DIR`.
 Downloaded archives are kept under `IR_CACHE_DIR/downloads`, protected by the resolver lock; `RENV_PATHS_SOURCE` can override this location.
 renv's installed-package cache remains shared.
+Artifact entries include the IR cache root in their identity, so runs with separate resolver locks cannot replace each other's entries.
 
 Resolution requests are keyed by declared packages, resolution source, effective binary preference, selected R executable, and runtime selectors such as `R_ARCH` and `R_HOME`.
 If the same request was already resolved, `ir` reuses the cached library before launching the resolver R session, so pak is not invoked again.
@@ -32,9 +33,9 @@ does not reuse resolution entries from before binary preference became the
 default. Existing package and download caches remain available.
 
 Cache-backed materialised libraries are content-addressed by the selected package
-versions, artifact URLs, platforms and content identities, plus R version and
-platform. A source installation cannot satisfy a request for a different binary
-artifact of the same version. Libraries with an unfinished installation are not
+versions, artifact URLs, platforms and content identities, plus the IR cache root,
+R version and platform. A source installation cannot satisfy a request for a
+different binary artifact of the same version. Libraries with an unfinished installation are not
 reused as successful environments.
 Scripts or tools that resolve to the same install refs share one library.
 When an explicit source ref is re-resolved, renv refreshes its installation;
