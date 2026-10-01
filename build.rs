@@ -9,6 +9,7 @@ mod release_metadata;
 const R_VERSION_METADATA_FETCHED_AT_PATH: &str = "src/rig/r-versions-fetched-at.txt";
 const R_VERSION_METADATA_PATH: &str = "src/rig/r-versions.json";
 const TOOLING_DRIVER_PATH: &str = "driver/tooling.R";
+const INIT_DRIVER_PATH: &str = "driver/init.R";
 const RESOLVE_DRIVER_PATH: &str = "driver/resolve.R";
 
 fn main() {
@@ -17,7 +18,12 @@ fn main() {
     println!("cargo:rerun-if-changed={R_VERSION_METADATA_FETCHED_AT_PATH}");
     println!("cargo:rerun-if-changed={R_VERSION_METADATA_PATH}");
     println!("cargo:rerun-if-changed={TOOLING_DRIVER_PATH}");
+    println!("cargo:rerun-if-changed={INIT_DRIVER_PATH}");
     println!("cargo:rerun-if-changed={RESOLVE_DRIVER_PATH}");
+    println!(
+        "cargo:rustc-env=IR_INIT_DRIVER_FILE={}",
+        driver_file_name("init", &[TOOLING_DRIVER_PATH, INIT_DRIVER_PATH])
+    );
     println!(
         "cargo:rustc-env=IR_RESOLVE_DRIVER_FILE={}",
         driver_file_name("resolve", &[TOOLING_DRIVER_PATH, RESOLVE_DRIVER_PATH])

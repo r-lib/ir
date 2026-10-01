@@ -70,6 +70,12 @@ cli_help()
 cli_help("run")
 ```
 
+## `ir init`
+
+```{r}
+cli_help("init")
+```
+
 ## `ir render`
 
 ```{r}
