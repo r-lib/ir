@@ -59,7 +59,9 @@ ir_resolve_refs <- function(refs, source = character()) {
     dir.create(root)
     on.exit(unlink(root, recursive = TRUE), add = TRUE)
     imports <- sub("@>=(.*)$", " (>= \\1)", refs[ordinary])
-    write.dcf(data.frame(Package = "irrequirements", Version = "1.0.0",
+    # Keep the synthetic root distinct from repository packages.
+    root_package <- gsub("-", "", basename(root), fixed = TRUE)
+    write.dcf(data.frame(Package = root_package, Version = "1.0.0",
                          Imports = paste(imports, collapse = ", ")),
               file.path(root, "DESCRIPTION"))
     refs <- c(refs[!ordinary], paste0("deps::", root))

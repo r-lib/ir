@@ -219,6 +219,32 @@ fn default_prefers_older_binary_with_source_only_dependency() {
 }
 
 #[test]
+fn repository_package_can_share_the_original_synthetic_root_name() {
+    let repo = Repository::new();
+    let cache = temp_dir("ir-binary-root-name-cache");
+    let out = repo.run(
+        &cache,
+        None,
+        &["irrequirements"],
+        "stopifnot(packageVersion('irrequirements') == '1.0.0', irrequirements::artifact() == 'source')",
+    );
+    assert_success(&out);
+}
+
+#[test]
+fn dependency_can_share_the_original_synthetic_root_name() {
+    let repo = Repository::new();
+    let cache = temp_dir("ir-binary-dependency-root-name-cache");
+    let out = repo.run(
+        &cache,
+        None,
+        &["irrootparent"],
+        "stopifnot(irrootparent::artifact() == 'source', packageVersion('irrequirements') == '1.0.0', irrequirements::artifact() == 'source')",
+    );
+    assert_success(&out);
+}
+
+#[test]
 fn separate_ir_caches_do_not_share_mutable_downloads() {
     let repo = Repository::new();
     let shared_renv_root = temp_dir("ir-binary-shared-renv-root");
