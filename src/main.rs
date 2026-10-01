@@ -35,6 +35,7 @@ use std::error::Error;
 mod cache;
 mod cli;
 mod driver;
+mod init;
 mod lock;
 mod python;
 mod quarto;
@@ -81,6 +82,11 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                 run.isolated,
             )
         }
+        Some(("init", matches)) => init::cmd_init_script(
+            matches
+                .get_one::<String>("file")
+                .expect("clap requires an init file"),
+        ),
         Some(("render", _)) => {
             let render = cli::parse_render_args(argv[2..].to_vec())?;
             runtime::cmd_quarto(

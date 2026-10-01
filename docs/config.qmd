@@ -5,6 +5,7 @@ title: Install and Configuration
 ## Requirements
 
 - `R` / `Rscript` on `PATH`, `--rscript`, or `IR_RSCRIPT`, when R is not selected by frontmatter `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
+- `Rscript` on `PATH`, or `IR_RSCRIPT`, for `ir init` dependency discovery.
 - `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
