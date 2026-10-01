@@ -31,7 +31,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 ## Why use it?
 
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
-- **Fast by design.** `ir` prefers compatible binaries and reuses cached resolutions and libraries when the same requirements are seen again.
+- **Fast by design.** `ir` prefers pre-built R packages and reuses cached resolutions and libraries when the same requirements are seen again.
 - **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve the default CRAN and Bioconductor repositories from Posit Package Manager snapshots as of a specific date. Without another R selector, the date selects the latest R minor released by then. When `r-version` can match more than one R minor, the date limits selection to minor versions released by then.
 - **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
 - **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
