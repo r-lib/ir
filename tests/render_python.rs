@@ -224,6 +224,7 @@ ir:
         .env("IR_TEST_PYTHON", &fake_python)
         .env("R_LIBS_USER", &user_library)
         .env("R_LIBS_SITE", &site_library)
+        .env_remove("R_LIBS")
         .args(["render", "--isolated", "--vanilla", "--rscript"])
         .arg(rscript())
         .arg(&doc)
