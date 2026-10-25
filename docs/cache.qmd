@@ -8,6 +8,8 @@ Set `IR_CACHE_DIR` to choose where IR keeps its cache.
 Downloads go in `IR_CACHE_DIR/downloads`; set `RENV_PATHS_SOURCE` to put them elsewhere.
 IR uses renv's cache for installed packages.
 Tools installed with `ir tool install` keep their libraries under `IR_TOOL_STORE_DIR`, so they survive `ir cache clean`.
+R installations created through rig use rig's default or configured directories, outside IR's cache.
+They persist between runs and can be shared with other tools.
 
 When the package requirements, snapshot date, binary preference, and R installation match an earlier run, IR can reuse the cached library without asking pak to choose packages again.
 R settings such as `R_ARCH` and `R_HOME` also affect reuse.
@@ -57,5 +59,5 @@ $ ir cache clean --force
 
 `ir cache dir` prints the cache root.
 `ir cache clean` removes IR's cache directory, including saved package choices, downloads, resolver tooling, cached R libraries, and records for Python environments.
-It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
+It does not remove installed tool libraries under `IR_TOOL_STORE_DIR` or R installations managed by rig.
 `--force` is accepted and has the same behavior.

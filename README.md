@@ -126,9 +126,14 @@ Windows to inspect the plan.
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
+- `Rscript` on `PATH`, an explicit `--rscript`/`IR_RSCRIPT`, or `rig` on `PATH` to find or install R.
 - `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
+
+IR reuses a matching R installation reported by rig, or asks rig to install one in user mode.
+Without an R selector or `Rscript` on `PATH`, IR uses rig's `release` selection.
+Automatic installation requires a current development build of rig (0.11.1-dev) with `rig add --no-default` and `--without-path`; these flags are not available in rig 0.11.0.
+R installations use rig's default or configured location, persist between runs, and are not removed by `ir cache clean`.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
 

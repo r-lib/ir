@@ -37,7 +37,7 @@ $ ./script.R
 The script frontmatter supports:
 
 - `packages`: package refs resolved with pak.
-- `r-version`: an optional R version requirement selected from installed versions reported by rig. Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
+- `r-version`: an optional R version requirement selected through rig. IR reuses a matching installed version or asks rig to install one in user mode. Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 - `python-packages`: optional Python package specs resolved with reticulate's uv environment helper.
 - `python-version`: an optional Python version requirement.
 - `python-exclude-newer`: an optional Python package snapshot date.
@@ -52,6 +52,9 @@ Frontmatter `rscript` is rejected.
 Command-line and environment values are trimmed before use.
 An empty `--exclude-newer` or `IR_EXCLUDE_NEWER` overrides frontmatter `exclude-newer` and resolves latest packages.
 Future snapshot dates also resolve latest packages.
+
+Without an R selector, IR uses `Rscript` on `PATH` or asks rig for `release` if it is absent.
+Automatic installation requires a development build of rig with `--no-default` and `--without-path`; see [Install and Configuration](config.qmd#requirements).
 
 Supported package specs include `pkg`, exact versions such as `pkg==1.2`, and minimum versions such as `pkg>=1.2`.
 
