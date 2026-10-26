@@ -2405,6 +2405,17 @@ cat("ir.fixture=bioconductor-repository\n")
 
 #[test]
 fn run_materializes_with_complete_dated_repository_set() {
+    for (ppm_root, cran_path) in [
+        ("https://packagemanager.posit.co", "cran"),
+        ("https://packagemanager.posit.co", "cran/__linux__/noble"),
+        ("https://packagemanager.rstudio.com", "all"),
+        ("https://packagemanager.rstudio.com", "all/__linux__/noble"),
+    ] {
+        assert_dated_repository_set(ppm_root, cran_path);
+    }
+}
+
+fn assert_dated_repository_set(ppm_root: &str, cran_path: &str) {
     let cache_dir = temp_dir("ir-dated-repositories-cache");
     let fake_library = temp_dir("ir-dated-repositories-tooling");
     let effective_repositories = temp_path("ir-dated-repositories", "txt");
@@ -2425,7 +2436,7 @@ repo_resolve <- function(spec) {
   if (startsWith(spec, "PPM@")) {
     date <- sub("^PPM@", "", spec)
     return(c(
-      CRAN = paste0("https://packagemanager.posit.co/cran/", date)
+      CRAN = paste0(Sys.getenv("IR_TEST_PPM_CRAN_BASE"), "/", date)
     ))
   }
   stop("unexpected repository spec: ", spec)
@@ -2516,6 +2527,11 @@ use <- function(..., library, repos, attach, sandbox, isolate, verbose) {
         &profile,
         format!(
             r#".libPaths(c({}, .libPaths()))
+Sys.info <- function() {{
+  info <- base::Sys.info()
+  info[["sysname"]] <- "Linux"
+  info
+}}
 Sys.time <- function() {{
   finished_at <- as.numeric(Sys.getenv("IR_TEST_FINISHED_AT"))
   if (!file.exists(Sys.getenv("IR_TEST_MATERIALIZED")))
@@ -2537,6 +2553,7 @@ Sys.time <- function() {{
             .env("R_PROFILE_USER", &profile)
             .env("R_ENVIRON_USER", &renviron)
             .env("RENV_CONFIG_PAK_ENABLED", "TRUE")
+            .env("IR_TEST_PPM_CRAN_BASE", format!("{ppm_root}/{cran_path}"))
             .env("IR_TEST_EFFECTIVE_REPOSITORIES", &effective_repositories)
             .env("IR_TEST_FINISHED_AT", finished_at.to_string())
             .env("IR_TEST_MATERIALIZED", &materialized)
@@ -2588,19 +2605,20 @@ Sys.time <- function() {{
         4,
         "SCP-style Git sources should use the shared TTL policy"
     );
+    let bioc_mirror = format!("{ppm_root}/bioconductor/2026-06-01");
     assert_eq!(
         fs::read_to_string(effective_repositories)
             .unwrap()
             .lines()
             .collect::<Vec<_>>(),
         [
-            "CRAN=https://packagemanager.posit.co/cran/2026-06-01",
-            "BioCsoft=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/bioc",
-            "BioCann=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/data/annotation",
-            "BioCexp=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/data/experiment",
-            "BioCworkflows=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/workflows",
-            "BioCbooks=https://packagemanager.posit.co/bioconductor/2026-06-01/packages/3.99/books",
-            "renv.config.pak.enabled=FALSE",
+            format!("CRAN={ppm_root}/{cran_path}/2026-06-01"),
+            format!("BioCsoft={bioc_mirror}/packages/3.99/bioc"),
+            format!("BioCann={bioc_mirror}/packages/3.99/data/annotation"),
+            format!("BioCexp={bioc_mirror}/packages/3.99/data/experiment"),
+            format!("BioCworkflows={bioc_mirror}/packages/3.99/workflows"),
+            format!("BioCbooks={bioc_mirror}/packages/3.99/books"),
+            "renv.config.pak.enabled=FALSE".to_string(),
         ]
     );
 }
