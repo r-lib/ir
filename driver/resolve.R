@@ -167,7 +167,8 @@ ir_ppm_bioconductor_mirror <- function(cran_repo, exclude_newer) {
             length(exclude_newer) == 1L, !is.na(exclude_newer),
             nzchar(exclude_newer))
 
-  cran_path <- regexpr("/cran(?:/|$)", cran_repo, perl = TRUE)
+  # pak may retain the `all` repository name from older PPM configurations.
+  cran_path <- regexpr("/(?:cran|all)(?:/|$)", cran_repo, perl = TRUE)
   if (cran_path[[1L]] == -1L)
     stop("could not derive the PPM root from CRAN repository `",
          cran_repo, "`", call. = FALSE)
