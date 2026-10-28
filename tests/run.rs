@@ -12,7 +12,7 @@ use std::process::Command;
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
         "pkgs <- c(",
-        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
+        "'pak', 'renv', 'secretbase', 'filelock', 'cli', 'glue', 'jsonlite', ",
         "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'xfun', 'quarto', ",
         "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
         "'htmltools'); ",
@@ -73,6 +73,8 @@ pkg_deps <- function(refs, ...) {
         }
         "renv" => {
             r#"
+# This fixture materializes libraries directly and has no package cache.
+config <- list(cache.enabled = function() FALSE)
 restore <- function(lockfile, library, repos, ...) {
   packages <- lockfile$Packages
   specs <- vapply(seq_along(packages), function(i) {
@@ -95,7 +97,7 @@ restore <- function(lockfile, library, repos, ...) {
         _ => "",
     };
     let namespace = if name == "renv" {
-        format!("{namespace}export(restore)\n")
+        format!("{namespace}export(restore)\nexport(config)\n")
     } else {
         namespace.to_string()
     };
@@ -117,11 +119,8 @@ restore <- function(lockfile, library, repos, ...) {
     .unwrap();
 
     let out = Command::new(rscript())
-        .args([
-            "--vanilla",
-            "-e",
-            "args <- commandArgs(TRUE); dir.create(args[[1]], recursive = TRUE, showWarnings = FALSE); install.packages(args[[2]], lib = args[[1]], repos = NULL, type = 'source', INSTALL_opts = c('--no-byte-compile', '--no-help', '--no-docs'))",
-        ])
+        .arg("--vanilla")
+        .arg(fixture("install-fake-package.R"))
         .arg(lib)
         .arg(&package)
         .output()
