@@ -85,6 +85,22 @@ if (nzchar(Sys.getenv("IR_PYTHON_RESULT_FILE"))) {
     .unwrap();
 }
 
+#[cfg(unix)]
+fn python_resolver_lock_command() -> Command {
+    let mut command = ir();
+    // The profile supplies fake Python without invoking uv. Ambient uv
+    // overrides would disable the resolution markers this fixture exercises.
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
+        {
+            command.env_remove(name);
+        }
+    }
+    command
+}
+
 struct ResolverLockProbe<'a> {
     user_cache_dir: &'a Path,
     profile: &'a Path,
@@ -184,7 +200,7 @@ ir:
     )
     .unwrap();
 
-    let mut first = ir();
+    let mut first = python_resolver_lock_command();
     first
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &user_cache_dir)
@@ -202,7 +218,7 @@ ir:
     let first = first.spawn().unwrap();
     let first = wait_for_resolver_probe(first, &active);
 
-    let second = ir()
+    let second = python_resolver_lock_command()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &user_cache_dir)
         .env("R_PROFILE_USER", &profile)
