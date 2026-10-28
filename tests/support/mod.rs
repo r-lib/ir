@@ -71,15 +71,18 @@ fn configure_r_test_caches(command: &mut Command) {
             ("RENV_PATHS_CACHE", "renv/cache"),
             ("RENV_PATHS_BINARY", "renv/binary"),
             ("RENV_PATHS_CELLAR", "renv/cellar"),
-            ("PKG_CACHE_DIR", "pak/downloads"),
+            ("R_PKG_CACHE_DIR", "pak"),
             ("PKG_PACKAGE_CACHE_DIR", "pak/packages"),
-            ("PKG_METADATA_CACHE_DIR", "pak/metadata"),
         ] {
             command.env(variable, root.join(subdir));
         }
         // The driver keeps mutable source archives under its IR cache lock.
         // The warm-cache script also supplies its own temporary source cache.
         command.env_remove("RENV_PATHS_SOURCE");
+        // pkgdepends owns these mutable paths inside its R session tempdir.
+        command
+            .env_remove("PKG_CACHE_DIR")
+            .env_remove("PKG_METADATA_CACHE_DIR");
     };
     if let Some(root) = std::env::var_os("IR_TEST_R_CACHE_DIR") {
         assert!(!root.is_empty(), "IR_TEST_R_CACHE_DIR must not be empty");

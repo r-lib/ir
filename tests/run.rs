@@ -1749,7 +1749,7 @@ fn cache_clean_removes_cache_dir() {
 }
 
 #[test]
-fn test_commands_keep_renv_cache_outside_the_ambient_user_cache() {
+fn test_commands_keep_r_caches_outside_the_ambient_user_cache() {
     let cache_dir = temp_cache("ir-test-cache-isolation");
     let ambient_cache = temp_dir("ir-test-ambient-r-cache");
     let profile = temp_path("ir-test-cache-isolation-profile", "R");
@@ -1765,25 +1765,46 @@ fn test_commands_keep_renv_cache_outside_the_ambient_user_cache() {
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &ambient_cache)
         .env("R_PROFILE_USER", &profile)
-        .args(["run", "--vanilla", "-e", "cat(renv::paths$cache())"])
+        .env("PKG_USE_BIOCONDUCTOR", "false")
+        .args([
+            "run",
+            "--vanilla",
+            "-e",
+            concat!(
+                "paths <- c(renv::paths$cache(), ",
+                "pak::meta_summary()$cachepath, pak::cache_summary()$cachepath); ",
+                "invisible(lapply(paths, dir.create, recursive = TRUE, showWarnings = FALSE)); ",
+                "writeLines(normalizePath(paths, winslash = '/', mustWork = TRUE))"
+            ),
+        ])
         .output()
         .unwrap();
     assert_success(&out);
 
-    let cache = std::path::PathBuf::from(stdout(&out).trim());
-    assert!(
-        !cache.starts_with(&ambient_cache),
-        "test command used the ambient renv cache: {}",
-        cache.display()
-    );
+    let ambient_cache = ambient_cache.canonicalize().unwrap();
     let test_root = std::env::var_os("IR_TEST_R_CACHE_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    assert!(
-        cache.starts_with(test_root),
-        "test command used a cache outside the disposable test root: {}",
-        cache.display()
-    );
+        .unwrap_or_else(std::env::temp_dir)
+        .canonicalize()
+        .unwrap();
+    let output = stdout(&out);
+    let caches: Vec<_> = output
+        .lines()
+        .map(|path| Path::new(path).canonicalize().unwrap())
+        .collect();
+    assert_eq!(caches.len(), 3, "{output}");
+    for cache in caches {
+        assert!(
+            !cache.starts_with(&ambient_cache),
+            "test command used an ambient R cache: {}",
+            cache.display()
+        );
+        assert!(
+            cache.starts_with(&test_root),
+            "test command used a cache outside the disposable test root: {}",
+            cache.display()
+        );
+    }
 }
 
 #[test]
