@@ -36,7 +36,7 @@ transitive dependencies.
 - Install persistent launchers for package tools with `ir tool install`; installed tool libraries live in the durable tool store.
 - Inspect and clear run/render cache state with `ir cache dir` and `ir cache clean`.
 - Configure cache, Rscript, Quarto, and launcher destinations with environment variables.
-- Bootstrap resolver tooling (`pak`, `renv`, `secretbase`) automatically on first use, with no manual install.
+- Bootstrap resolver tooling (`pak`, `renv`, `secretbase`, `filelock`) automatically on first use, with no manual install.
 
 ## Common commands
 

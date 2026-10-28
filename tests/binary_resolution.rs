@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
@@ -22,11 +22,20 @@ struct Repository {
 
 impl Repository {
     fn new() -> Self {
+        Self::with_fixture("full")
+    }
+
+    fn cache_fixture() -> Self {
+        Self::with_fixture("cache")
+    }
+
+    fn with_fixture(kind: &str) -> Self {
         let root = temp_dir("ir-binary-repository");
         let out = Command::new(rscript())
             .arg("--vanilla")
             .arg(fixture("binary-repository.R"))
             .arg(&root)
+            .arg(kind)
             .output()
             .unwrap();
         assert_success(&out);
@@ -82,7 +91,7 @@ impl Repository {
             }
         });
         fs::write(root.join("profile.R"), format!(
-            "options(repos = c(CRAN = 'http://{address}/repo'), pkg.extra_arch_repos = TRUE, pkg.use_bioconductor = FALSE, pkg.cran_metadata_url = 'http://{address}/metadata/', pak.no_extra_messages = TRUE)\nif (nzchar(Sys.getenv('IR_RESOLVE_RESULT_FILE'))) cat('resolve\\n', file = Sys.getenv('IR_TEST_RESOLUTIONS'), append = TRUE)\n"
+            "options(repos = c(CRAN = 'http://{address}/repo'), pkg.extra_arch_repos = TRUE, pkg.use_bioconductor = FALSE, pkg.cran_metadata_url = 'http://{address}/metadata/', pak.no_extra_messages = TRUE)\nif (nzchar(Sys.getenv('IR_RESOLVE_RESULT_FILE'))) {{ cat('resolve\\n', file = Sys.getenv('IR_TEST_RESOLUTIONS'), append = TRUE); if (nzchar(Sys.getenv('IR_TEST_RESOLVER_PID'))) writeLines(as.character(Sys.getpid()), Sys.getenv('IR_TEST_RESOLVER_PID')) }}\n"
         )).unwrap();
         Self {
             root,
@@ -133,6 +142,7 @@ impl Repository {
             ("RENV_PATHS_BINARY", "renv/binary"),
             ("RENV_PATHS_CELLAR", "renv/cellar"),
             ("PKG_CACHE_DIR", "pak/downloads"),
+            ("R_PKG_CACHE_DIR", "pak/cache"),
             ("PKG_PACKAGE_CACHE_DIR", "pak/packages"),
             ("PKG_METADATA_CACHE_DIR", "pak/metadata"),
         ] {
@@ -205,7 +215,7 @@ fn default_prefers_older_binary_with_source_only_dependency() {
     assert_success(&out);
     assert_stdout_contains(&out, "binary-with-source-dependency");
     assert!(
-        cache.join("renv/source/url").is_dir(),
+        cache.join("renv/source/ir").is_dir(),
         "an explicit RENV_PATHS_SOURCE must be honored"
     );
     let requests = repo.requests.lock().unwrap();
@@ -275,7 +285,12 @@ fn separate_ir_caches_do_not_share_mutable_downloads() {
             .output()
             .unwrap();
         assert_success(&out);
-        let downloads = cache.join("ir/downloads/url");
+        let partitions: Vec<_> = fs::read_dir(cache.join("ir/downloads/ir"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(partitions.len(), 1);
+        let downloads = partitions[0].join("url");
         assert!(
             downloads.is_dir(),
             "downloads must belong to the locked IR cache"
@@ -311,6 +326,374 @@ fn wait_at_gate(receiver: mpsc::Receiver<TcpStream>, expected: &str) -> TcpStrea
     reader.read_line(&mut message).unwrap();
     assert_eq!(message.trim(), expected);
     stream
+}
+
+struct ObservedInstall {
+    child: Child,
+    waiting: mpsc::Receiver<()>,
+    stderr: thread::JoinHandle<Vec<u8>>,
+}
+
+impl ObservedInstall {
+    fn spawn(command: &mut Command) -> Self {
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let (sender, waiting) = mpsc::channel();
+        let stderr = thread::spawn(move || {
+            let mut output = Vec::new();
+            for line in BufReader::new(stderr).split(b'\n') {
+                let line = line.unwrap();
+                if String::from_utf8_lossy(&line).contains("Waiting for shared renv cache lock:") {
+                    let _ = sender.send(());
+                }
+                output.extend(line);
+                output.push(b'\n');
+            }
+            output
+        });
+        Self {
+            child,
+            waiting,
+            stderr,
+        }
+    }
+
+    fn wait_for_lock(&self) {
+        self.waiting
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the second installer must reach the held shared-cache lock");
+    }
+
+    fn finish(self) -> Output {
+        let mut out = self.child.wait_with_output().unwrap();
+        out.stderr = self.stderr.join().unwrap();
+        out
+    }
+}
+
+#[test]
+fn concurrent_roots_reuse_the_completed_installation() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-concurrent-renv-cache");
+    let first = temp_dir("ir-concurrent-first");
+    let second = temp_dir("ir-concurrent-second");
+    let (port, receiver) = install_gate();
+    let first = ObservedInstall::spawn(
+        repo.command(&first, None, &["irsourceonly"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("IR_TEST_INSTALL_GATE", port.to_string())
+            .args(["-e", "stopifnot(irsourceonly::artifact() == 'source')"]),
+    );
+    let mut gate = wait_at_gate(receiver, "source-install");
+    // A cache hit must not run the source build.
+    let second = ObservedInstall::spawn(
+        repo.command(&second, None, &["irsourceonly"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("IR_TEST_INSTALL_GATE", "forbid")
+            .args(["-e", "stopifnot(irsourceonly::artifact() == 'source')"]),
+    );
+    second.wait_for_lock();
+    gate.write_all(b"continue\n").unwrap();
+    assert_success(&first.finish());
+    let out = second.finish();
+    assert_success(&out);
+    assert!(
+        output_text(&out).contains("copied from cache"),
+        "{}",
+        output_text(&out)
+    );
+}
+
+#[test]
+fn failed_installation_releases_the_shared_cache_for_a_waiting_root() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-failed-renv-cache");
+    let first = temp_dir("ir-failed-first");
+    let second = temp_dir("ir-failed-second");
+    let (first_port, first_receiver) = install_gate();
+    let first = ObservedInstall::spawn(
+        repo.command(&first, None, &["irsourceonly"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("IR_TEST_INSTALL_GATE", first_port.to_string())
+            .args(["-e", "stop('user code must not run')"]),
+    );
+    let mut first_gate = wait_at_gate(first_receiver, "source-install");
+    let (second_port, second_receiver) = install_gate();
+    let second = ObservedInstall::spawn(
+        repo.command(&second, None, &["irsourceonly"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("IR_TEST_INSTALL_GATE", second_port.to_string())
+            .args(["-e", "stopifnot(irsourceonly::artifact() == 'source')"]),
+    );
+    second.wait_for_lock();
+    first_gate.write_all(b"fail\n").unwrap();
+    assert!(!first.finish().status.success());
+    let mut second_gate = wait_at_gate(second_receiver, "source-install");
+    second_gate.write_all(b"continue\n").unwrap();
+    assert_success(&second.finish());
+}
+
+#[cfg(unix)]
+#[test]
+fn interrupted_installer_releases_the_shared_cache_without_breaking_existing_libraries() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-interrupted-renv-cache");
+    let existing = temp_dir("ir-existing-library");
+    let interrupted = temp_dir("ir-interrupted-library");
+    let next = temp_dir("ir-next-library");
+    assert_success(
+        &repo
+            .command(&existing, None, &["iridentity"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+            .output()
+            .unwrap(),
+    );
+    let (port, receiver) = install_gate();
+    let pid_file = interrupted.join("resolver-pid");
+    let first = ObservedInstall::spawn(
+        repo.command(&interrupted, None, &["iridentity", "irsourceonly"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("IR_TEST_RESOLVER_PID", &pid_file)
+            .env("IR_TEST_INSTALL_GATE", port.to_string())
+            .args(["-e", "stop('user code must not run')"]),
+    );
+    let mut gate = wait_at_gate(receiver, "source-install");
+    let (next_port, next_receiver) = install_gate();
+    let second = ObservedInstall::spawn(repo.command(&next, None, &["iridentity", "irsourceonly"])
+        .env("RENV_PATHS_CACHE", &shared)
+        .env("IR_TEST_INSTALL_GATE", next_port.to_string())
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary', irsourceonly::artifact() == 'source')"]));
+    second.wait_for_lock();
+    let pid = fs::read_to_string(pid_file).unwrap();
+    assert!(Command::new("kill")
+        .args(["-KILL", pid.trim()])
+        .status()
+        .unwrap()
+        .success());
+    // End the orphaned R CMD INSTALL child while its resolver is already dead.
+    gate.write_all(b"fail\n").unwrap();
+    assert!(!first.finish().status.success());
+    let mut next_gate = wait_at_gate(next_receiver, "source-install");
+    assert_success(
+        &repo
+            .command(&existing, None, &["iridentity"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+            .output()
+            .unwrap(),
+    );
+    next_gate.write_all(b"continue\n").unwrap();
+    assert_success(&second.finish());
+    assert_success(&repo.command(&interrupted, None, &["iridentity", "irsourceonly"])
+        .env("RENV_PATHS_CACHE", &shared)
+        .env("IR_TEST_INSTALL_GATE", "forbid")
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary', irsourceonly::artifact() == 'source')"]).output().unwrap());
+}
+
+#[test]
+fn equivalent_artifacts_reuse_one_renv_entry_across_ir_roots() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-shared-artifact-cache");
+    let roots = [
+        temp_dir("ir-artifact-first"),
+        temp_dir("ir-artifact-second"),
+    ];
+    let mut growth = Vec::new();
+    for root in &roots {
+        let out = repo
+            .command(root, None, &["iridentity"])
+            .env("RENV_PATHS_CACHE", shared.join("cache"))
+            .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        let out = repo
+            .rscript_command(root)
+            .env("RENV_PATHS_CACHE", shared.join("cache"))
+            .args(["--vanilla", "-e", "paths <- list.dirs(renv::paths$cache()); cat(sum(basename(paths) == 'iridentity' & file.exists(file.path(paths, 'Meta/package.rds'))))"])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        growth.push(stdout(&out).trim().parse::<usize>().unwrap());
+    }
+    assert_eq!(growth, [1, 1], "installed cache entries after each IR root");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", roots[0].join("ir"))
+        .args(["cache", "clean"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    fs::remove_dir_all(shared.join("cache")).unwrap();
+    let out = repo
+        .command(&roots[1], None, &["iridentity"])
+        .env("RENV_PATHS_CACHE", shared.join("cache"))
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert!(
+        !shared.join("cache").exists(),
+        "the completed library must own its files"
+    );
+}
+
+#[test]
+fn changed_content_at_the_same_url_and_version_gets_a_new_library() {
+    assert_changed_content("checksums");
+}
+
+#[test]
+fn direct_urls_keep_changed_content_distinct() {
+    assert_changed_content("url");
+}
+
+#[test]
+fn unidentified_repository_artifacts_are_not_reused_after_resolution() {
+    assert_changed_content("unidentified");
+}
+
+fn assert_changed_content(kind: &str) {
+    let repo = Repository::cache_fixture();
+    let cache = temp_dir("ir-changing-artifact-cache");
+    let url = format!(
+        "url::http://{}/repo/src/contrib/iridentity_1.0.0.tar.gz",
+        repo.address
+    );
+    let package = if kind == "url" {
+        &url
+    } else {
+        "iridentity?source"
+    };
+    let mut libraries = Vec::new();
+    for (index, value) in ["before", "after"].iter().enumerate() {
+        let out = repo
+            .rscript_command(&cache)
+            .arg("--vanilla")
+            .arg(fixture("replace-repository-artifact.R"))
+            .arg(&repo.root)
+            .args([*value, kind])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        let expression = format!(
+            "stopifnot(packageVersion('iridentity') == '1.0.0', iridentity::artifact() == '{value}'); cat('LIBRARY=', .libPaths()[1], '\\n', sep = '')"
+        );
+        let out = repo
+            .command(&cache, None, &[package])
+            .env(
+                "PKG_METADATA_CACHE_DIR",
+                cache.join(format!("metadata-{index}")),
+            )
+            .env("R_PKG_CACHE_DIR", cache.join(format!("pak-{index}")))
+            .args(["--refresh", "-e", &expression])
+            .output()
+            .unwrap();
+        assert_success(&out);
+        libraries.push(
+            stdout(&out)
+                .lines()
+                .find_map(|line| line.strip_prefix("LIBRARY="))
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    assert_ne!(libraries[0], libraries[1]);
+    for (library, value) in libraries.iter().zip(["before", "after"]) {
+        let out = repo.rscript_command(&cache)
+            .args(["--vanilla", "-e", ".libPaths(commandArgs(TRUE)[1]); stopifnot(iridentity::artifact() == commandArgs(TRUE)[2])"])
+            .args([library, value])
+            .output().unwrap();
+        assert_success(&out);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn read_only_and_disabled_renv_caches_keep_their_permission_boundaries() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-read-only-renv-cache");
+    let warm = temp_dir("ir-read-only-warm");
+    assert_success(
+        &repo
+            .command(&warm, None, &["iridentity"])
+            .env("RENV_PATHS_CACHE", &shared)
+            .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+            .output()
+            .unwrap(),
+    );
+    let chmod = |mode: &str| {
+        repo.rscript_command(&warm)
+        .args(["--vanilla", "-e", "args <- commandArgs(TRUE); paths <- c(args[1], list.files(args[1], recursive = TRUE, full.names = TRUE, all.files = TRUE, include.dirs = TRUE, no.. = TRUE)); stopifnot(all(Sys.chmod(paths, args[2])))"])
+        .arg(&shared).arg(mode).output().unwrap()
+    };
+    assert_success(&chmod("0555"));
+    let read_only = temp_dir("ir-read-only-consumer");
+    let out = repo
+        .command(&read_only, None, &["iridentity"])
+        .env("RENV_PATHS_CACHE", &shared)
+        .env("IR_TEST_INSTALL_GATE", "forbid")
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+        .output()
+        .unwrap();
+    // Restore fixture permissions before any assertion can unwind cleanup.
+    assert_success(&chmod("0755"));
+    assert_success(&out);
+    assert!(
+        output_text(&out).contains("copied from cache"),
+        "{}",
+        output_text(&out)
+    );
+
+    let disabled = temp_dir("ir-disabled-cache");
+    let absent = shared.join("disabled");
+    let out = repo
+        .command(&disabled, None, &["iridentity"])
+        .env("RENV_PATHS_CACHE", &absent)
+        .env("RENV_CONFIG_CACHE_ENABLED", "FALSE")
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert!(
+        !absent.exists(),
+        "a disabled renv cache must remain untouched"
+    );
+}
+
+#[test]
+fn project_disabled_renv_cache_is_not_created_or_locked() {
+    let repo = Repository::cache_fixture();
+    let cache = temp_dir("ir-project-disabled-cache");
+    let absent = cache.join("unused-renv-cache");
+    let out = repo
+        .rscript_command(&cache)
+        .args([
+            "--vanilla",
+            "-e",
+            "renv::settings$use.cache(FALSE, project = commandArgs(TRUE)[1])",
+        ])
+        .arg(&repo.root)
+        .output()
+        .unwrap();
+    assert_success(&out);
+    let out = repo
+        .command(&cache, None, &["iridentity"])
+        .current_dir(&repo.root)
+        .env("RENV_PATHS_CACHE", &absent)
+        .args(["-e", "stopifnot(iridentity::artifact() == 'binary')"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    assert!(
+        !absent.exists(),
+        "a project-disabled renv cache must remain untouched"
+    );
 }
 
 #[test]
@@ -349,7 +732,7 @@ fn installation_survives_replacement_of_an_external_renv_cache_entry() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    // Cache hits have been linked into renv's staging library before this
+    // Cache hits have been materialized in renv's staging library before this
     // source package builds. Hold that build while an external writer replaces
     // the cached binary, then let IR finish while the cache entry is absent.
     let mut install = wait_at_gate(install_receiver, "source-install");

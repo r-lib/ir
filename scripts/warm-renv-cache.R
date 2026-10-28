@@ -58,7 +58,7 @@ if (nzchar(r_libs_user)) {
   .libPaths(c(user_libs, .libPaths()))
 }
 
-tooling <- c("pak", "renv", "secretbase")
+tooling <- c("pak", "renv", "secretbase", "filelock")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))
   utils::install.packages(missing, repos = tooling_repos)

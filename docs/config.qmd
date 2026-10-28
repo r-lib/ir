@@ -7,7 +7,7 @@ title: Install and Configuration
 - `R` / `Rscript` on `PATH`, `--rscript`, or `IR_RSCRIPT`, when R is not selected by frontmatter `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
 - `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
-- `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
+- `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`, `filelock`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
 - A Rust toolchain only when building from source.
 
