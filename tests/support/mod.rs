@@ -61,6 +61,18 @@ pub(crate) fn rscript_command() -> Command {
     command
 }
 
+// For fixtures that supply fake Python without invoking uv.
+pub(crate) fn remove_uv_resolver_env(command: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
+        {
+            command.env_remove(name);
+        }
+    }
+}
+
 fn configure_r_test_caches(command: &mut Command) {
     thread_local! {
         static CACHE: TempPath = temp_dir("ir-test-r-caches");

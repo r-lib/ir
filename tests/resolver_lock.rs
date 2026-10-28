@@ -90,14 +90,7 @@ fn python_resolver_lock_command() -> Command {
     let mut command = ir();
     // The profile supplies fake Python without invoking uv. Ambient uv
     // overrides would disable the resolution markers this fixture exercises.
-    for (name, _) in std::env::vars_os() {
-        if name
-            .to_str()
-            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
-        {
-            command.env_remove(name);
-        }
-    }
+    remove_uv_resolver_env(&mut command);
     command
 }
 

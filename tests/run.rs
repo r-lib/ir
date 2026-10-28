@@ -1001,7 +1001,9 @@ printf 'ir.fixture=python-exclude-newer-latest\\n'\n",
             ),
         );
 
-        let out = ir()
+        let mut command = ir();
+        remove_uv_resolver_env(&mut command);
+        let out = command
             .env("IR_CACHE_DIR", &cache_dir)
             .args(["run", "--exclude-newer", exclude_newer, "--rscript"])
             .arg(&rscript)
@@ -1408,17 +1410,6 @@ printf 'ir.fixture=python-uv-config-cache\\n'\n",
     );
 }
 
-fn remove_uv_resolver_env(command: &mut Command) {
-    for (name, _) in std::env::vars_os() {
-        if name
-            .to_str()
-            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
-        {
-            command.env_remove(name);
-        }
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn run_python_only_resolution_clears_inherited_r_resolver_env() {
@@ -1483,7 +1474,9 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
         ),
     );
 
-    let out = ir()
+    let mut command = ir();
+    remove_uv_resolver_env(&mut command);
+    let out = command
         .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--rscript"])
         .arg(&rscript)
@@ -1494,7 +1487,9 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
 
     fs::remove_dir_all(cache_dir.join("python")).unwrap();
 
-    let out = ir()
+    let mut command = ir();
+    remove_uv_resolver_env(&mut command);
+    let out = command
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RESOLVE_RESULT_FILE", "/tmp/stale-r-result")
         .env("IR_RESOLVE_PACKAGE_RESULT_FILE", "/tmp/stale-r-package")
