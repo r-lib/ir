@@ -13,7 +13,7 @@ Downloads have separate subdirectories for each IR root and resolved artifact se
 Tools installed with `ir tool install` keep their libraries under `IR_TOOL_STORE_DIR`, so they survive `ir cache clean`.
 
 IR serializes installations that share a writable renv cache and copies packages into each library.
-Completed libraries remain usable if a renv entry is replaced or removed, or another IR cache is cleaned.
+Newly materialized libraries remain usable if a renv entry is replaced or removed, or another IR cache is cleaned.
 These library copies use additional disk space; removing an unused IR cache reclaims its copies.
 The shared lock coordinates IR processes. External cache writers must not replace an entry while IR is copying it.
 Read-only caches remain readable without new locks or permission changes.
@@ -74,6 +74,7 @@ It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 
 This change does not delete, migrate, or deduplicate existing renv entries.
 Older IR libraries may still link to them, as may other renv projects.
+Existing libraries keep their original references until refreshed.
 Before removing an entry manually, check its library references and stop processes that use it.
 Recreate libraries you still need with the current IR version before removing their old entries.
 Do not deduplicate entries by package name and version alone: different contents, source builds, binaries, R versions, and platforms can require separate installations.
