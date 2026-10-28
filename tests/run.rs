@@ -1749,6 +1749,44 @@ fn cache_clean_removes_cache_dir() {
 }
 
 #[test]
+fn test_commands_keep_renv_cache_outside_the_ambient_user_cache() {
+    let cache_dir = temp_cache("ir-test-cache-isolation");
+    let ambient_cache = temp_dir("ir-test-ambient-r-cache");
+    let profile = temp_path("ir-test-cache-isolation-profile", "R");
+    fs::write(
+        &profile,
+        format!(
+            "options(repos = c(CRAN = {}))\n",
+            serde_json::to_string(&r_repository_url(&ambient_cache)).unwrap()
+        ),
+    )
+    .unwrap();
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &ambient_cache)
+        .env("R_PROFILE_USER", &profile)
+        .args(["run", "--vanilla", "-e", "cat(renv::paths$cache())"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let cache = std::path::PathBuf::from(stdout(&out).trim());
+    assert!(
+        !cache.starts_with(&ambient_cache),
+        "test command used the ambient renv cache: {}",
+        cache.display()
+    );
+    let test_root = std::env::var_os("IR_TEST_R_CACHE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    assert!(
+        cache.starts_with(test_root),
+        "test command used a cache outside the disposable test root: {}",
+        cache.display()
+    );
+}
+
+#[test]
 fn run_script_fixture_resolves_packages_and_isolates_user_library() {
     let script = fixture("run/packages.R");
     let cache_dir = temp_cache("ir-run-script-cache");
