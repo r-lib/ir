@@ -15,8 +15,9 @@ Tools installed with `ir tool install` keep their libraries under `IR_TOOL_STORE
 IR serializes installations that share a writable renv cache and copies packages into each library.
 Newly materialized libraries remain usable if a renv entry is replaced or removed, or another IR cache is cleaned.
 These library copies use additional disk space; removing an unused IR cache reclaims its copies.
-The shared lock coordinates IR processes. External cache writers must not replace an entry while IR is copying it.
-Read-only caches remain readable without new locks or permission changes.
+The lock lives in each writable renv cache root and coordinates IR processes. External cache writers must not replace an entry while IR is copying it.
+Read-only cache roots remain readable without new locks or permission changes.
+Their owners must keep entries stable while IR copies them, even if nested directories are writable.
 
 When the package requirements, snapshot date, binary preference, and R installation match an earlier run, IR can reuse the cached library without asking pak to choose packages again.
 R settings such as `R_ARCH` and `R_HOME` also affect reuse.

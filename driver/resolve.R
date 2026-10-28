@@ -422,7 +422,8 @@ ir_restore <- function(res, library, repos) {
       ancestor <- cache
       while (!dir.exists(ancestor) && dirname(ancestor) != ancestor)
         ancestor <- dirname(ancestor)
-      # Read-only caches remain usable without adding writable paths.
+      # Locks live in writable cache roots. Owners of read-only roots must
+      # keep entries stable while copying, even if nested paths are writable.
       if (file.access(ancestor, 2L) != 0L) next
       dir.create(cache, recursive = TRUE, showWarnings = FALSE)
       if (!dir.exists(cache))
