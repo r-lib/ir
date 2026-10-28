@@ -363,13 +363,14 @@ ir_is_standard_resolved_ref <- function(res) {
 }
 
 ir_install_spec <- function(res, i) {
-  # Include both locator and content identity. In particular, an old source
+  # Include the locator, source subdirectory and content identity. An old source
   # installation must never satisfy a newly selected binary of that version.
   digest <- c(res$md5sum[[i]], res$sha256[[i]],
               res$metadata[[i]][c("RemoteSha", "RemoteEtag")],
               res$ir_identity[[i]])
   paste(c(res$package[[i]], res$version[[i]], res$platform[[i]],
-          res$sources[[i]], digest), collapse = "\n")
+          res$sources[[i]], ir_named_value(res$metadata[[i]], "RemoteSubdir"),
+          digest), collapse = "\n")
 }
 
 ir_install_records <- function(res) {

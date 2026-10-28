@@ -31,7 +31,7 @@ impl Repository {
 
     fn with_fixture(kind: &str) -> Self {
         let root = temp_dir("ir-binary-repository");
-        let out = Command::new(rscript())
+        let out = rscript_command()
             .arg("--vanilla")
             .arg(fixture("binary-repository.R"))
             .arg(&root)
@@ -61,6 +61,16 @@ impl Repository {
                     }
                 }
                 let request = String::from_utf8(request).unwrap();
+                let content_length = request
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find_map(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                let mut body = vec![0; content_length];
+                stream.read_exact(&mut body).unwrap();
                 let mut parts = request.split_whitespace();
                 let method = parts.next().unwrap_or("");
                 let path = parts.next().unwrap_or("/");
@@ -551,6 +561,47 @@ fn changed_content_at_the_same_url_and_version_gets_a_new_library() {
 #[test]
 fn direct_urls_keep_changed_content_distinct() {
     assert_changed_content("url");
+}
+
+#[test]
+fn source_subdirectories_keep_same_version_packages_distinct_across_roots() {
+    let repo = Repository::cache_fixture();
+    let shared = temp_dir("ir-subdirectory-renv-cache");
+    let roots = [
+        temp_dir("ir-subdirectory-one"),
+        temp_dir("ir-subdirectory-two"),
+    ];
+    let out = repo
+        .rscript_command(&roots[0])
+        .arg("--vanilla")
+        .arg(fixture("github-subdir-repository.R"))
+        .arg(&repo.root)
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    for (index, subdir) in [(0, "one"), (1, "two"), (0, "one")] {
+        let package = format!("github::fixture/subdirs/{subdir}@{}", "a".repeat(40));
+        let expression = format!(
+            "stopifnot(packageVersion('irsubdir') == '1.0.0', irsubdir::artifact() == '{subdir}')"
+        );
+        let out = repo
+            .command(&roots[index], None, &[&package])
+            .env("RENV_PATHS_CACHE", &shared)
+            .env("R_PKG_GITHUB_API_URL", format!("http://{}", repo.address))
+            .env("CI", "true")
+            .env("CI_GITHUB_TOKEN", "fixture-token")
+            .env("GITHUB_PAT", "fixture-token")
+            // Use the public download hook to route renv's GitHub HTTPS URLs
+            // to the local HTTP server, including renv versions with batching.
+            .env("RENV_DOWNLOAD_METHOD", "internal")
+            .env("RENV_CURL_EXECUTABLE", "")
+            .env("R_PROFILE_USER", repo.root.join("github-profile.R"))
+            .args(["-e", &expression])
+            .output()
+            .unwrap();
+        assert_success(&out);
+    }
 }
 
 #[test]
