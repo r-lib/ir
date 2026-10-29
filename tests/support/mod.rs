@@ -40,7 +40,7 @@ static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command
         .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
         .env_remove("IR_PREFER_BINARIES")
@@ -48,16 +48,23 @@ pub(crate) fn ir() -> Command {
     command
 }
 
+pub(crate) fn ir_with_private_r_caches() -> Command {
+    // Destructive cache tests must not remove CI's shared warm cache.
+    let mut command = ir();
+    configure_r_test_caches(&mut command, false);
+    command
+}
+
 pub(crate) fn rx() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rx"));
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
     command
 }
 
 pub(crate) fn rscript_command() -> Command {
     let mut command = Command::new(rscript());
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command
 }
 
@@ -73,7 +80,7 @@ pub(crate) fn remove_uv_resolver_env(command: &mut Command) {
     }
 }
 
-fn configure_r_test_caches(command: &mut Command) {
+fn configure_r_test_caches(command: &mut Command, allow_shared: bool) {
     thread_local! {
         static CACHE: TempPath = temp_dir("ir-test-r-caches");
     }
@@ -96,7 +103,12 @@ fn configure_r_test_caches(command: &mut Command) {
             .env_remove("PKG_CACHE_DIR")
             .env_remove("PKG_METADATA_CACHE_DIR");
     };
-    if let Some(root) = std::env::var_os("IR_TEST_R_CACHE_DIR") {
+    let shared_root = if allow_shared {
+        std::env::var_os("IR_TEST_R_CACHE_DIR")
+    } else {
+        None
+    };
+    if let Some(root) = shared_root {
         assert!(!root.is_empty(), "IR_TEST_R_CACHE_DIR must not be empty");
         configure(command, Path::new(&root));
     } else {

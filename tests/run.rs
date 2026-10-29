@@ -1784,7 +1784,7 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
     let r_pkg_package_cache_resolved = fs::canonicalize(&r_pkg_package_cache).unwrap();
     let r_pkg_metadata_cache_resolved = fs::canonicalize(&r_pkg_metadata_cache).unwrap();
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
@@ -1845,7 +1845,7 @@ fn cache_clean_all_treats_cache_paths_literally() {
             fs::write(path.join("marker"), "cached").unwrap();
         }
 
-        let out = ir()
+        let out = ir_with_private_r_caches()
             .env("HOME", &root)
             .env("R_USER", &root)
             .env("IR_CACHE_DIR", &cache_dir)
@@ -1872,7 +1872,7 @@ fn cache_clean_all_preserves_ir_cache_when_r_selection_is_invalid() {
     fs::create_dir_all(&library).unwrap();
     fs::write(library.join("pkg"), "cached").unwrap();
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RSCRIPT", "Rscript")
         .env("IR_R_VERSION", "4.4")
@@ -1895,7 +1895,7 @@ fn cache_clean_all_missing_rscript_advice_uses_env_selection() {
     let cache_dir = temp_dir("ir-cache-clean-all-missing-rscript-cache");
     let path = temp_dir("ir-cache-clean-all-missing-rscript-path");
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("PATH", &path)
         .env_remove("IR_RSCRIPT")
@@ -1962,7 +1962,7 @@ Sys.setenv(
     }
     let r_pkg_package_cache_resolved = fs::canonicalize(&r_pkg_package_cache).unwrap();
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_PROFILE_USER", &profile)
@@ -2043,7 +2043,7 @@ options(
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
@@ -2099,7 +2099,7 @@ fn cache_clean_all_uses_pak_pkg_environment_variables() {
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
@@ -2159,7 +2159,7 @@ Sys.info <- function() c(sysname = "Windows")
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
         .env("LOCALAPPDATA", &local_app_data)
@@ -2208,7 +2208,7 @@ requireNamespace <- function(...) FALSE
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
@@ -2261,7 +2261,7 @@ requireNamespace <- function(...) FALSE
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .current_dir(&workdir)
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
@@ -2336,7 +2336,7 @@ requireNamespace <- function(package, ...) {
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .current_dir(&workdir)
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
@@ -2415,7 +2415,7 @@ esac
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("PATH", prepend_path(&bin_dir))
         .env_remove("RETICULATE_UV")
         .env("IR_CACHE_DIR", &cache_dir)
@@ -2488,7 +2488,7 @@ esac
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
@@ -2550,7 +2550,7 @@ esac
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("PATH", &path_bin)
         .env("IR_RSCRIPT", rscript())
@@ -2620,7 +2620,7 @@ esac
         fs::write(path, "cached").unwrap();
     }
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("HOME", &home)
         .env("PATH", &path_bin)
         .env("IR_RSCRIPT", rscript())
@@ -2684,7 +2684,7 @@ fn cache_clean_all_honors_ir_rscript_env() {
         "#!/bin/sh\ncat >/dev/null\nprintf 'selected\\n' > \"$IR_TEST_MARKER\"\n",
     );
 
-    let out = ir()
+    let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RSCRIPT", &rscript)
         .env("IR_TEST_MARKER", &marker)
