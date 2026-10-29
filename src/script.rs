@@ -1,10 +1,41 @@
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use crate::quarto;
 use crate::spec::{parse_r_frontmatter, RuntimeSpec};
+
+pub(crate) struct RScriptHeader {
+    pub(crate) shebang_end: Option<usize>,
+    pub(crate) frontmatter: Option<Range<usize>>,
+}
+
+pub(crate) fn r_script_header(contents: &[u8]) -> RScriptHeader {
+    let shebang_end = contents.starts_with(b"#!").then(|| line_end(contents, 0));
+    let frontmatter_start = shebang_end.unwrap_or(0);
+    let mut cursor = frontmatter_start;
+    let mut found = false;
+    while contents
+        .get(cursor..)
+        .is_some_and(|rest| rest.starts_with(b"#| "))
+    {
+        found = true;
+        cursor = line_end(contents, cursor);
+    }
+    RScriptHeader {
+        shebang_end,
+        frontmatter: found.then_some(frontmatter_start..cursor),
+    }
+}
+
+fn line_end(contents: &[u8], start: usize) -> usize {
+    contents[start..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(contents.len(), |position| start + position + 1)
+}
 
 /// Where the user's program comes from.
 pub(crate) enum RunSource {

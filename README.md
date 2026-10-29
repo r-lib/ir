@@ -26,6 +26,23 @@ This records a last-known-good environment: tidyr is pinned to the version
 tested with the script, while the snapshot date selects dplyr and the
 transitive dependencies.
 
+To convert an existing R script, initialize it in place:
+
+```sh
+ir init --file analysis.R
+```
+
+`ir` statically discovers direct package uses and inserts the shebang and
+frontmatter. For a released R, the generated requirement uses the inspecting
+Rscript's current major and minor as a lower bound; development and prerelease
+builds retain their `devel` or `next` channel. Packages supplied by that R are
+omitted. It also records the current UTC date as `exclude-newer`, bounding
+package resolution to the state available when the script was initialized. On
+Unix, `ir` also makes the script executable. When the script is inside an renv
+project, `ir` uses the nearest `renv.lock` to pin those direct requirements and
+supported remote sources. Use `--no-project` to generate bare package
+requirements instead.
+
 Full documentation: <https://r-lib.github.io/ir/>
 
 ## Why use it?
@@ -41,6 +58,7 @@ Full documentation: <https://r-lib.github.io/ir/>
 ## Common commands
 
 ```sh
+ir init --file script.R
 ir run script.R
 ir run --vanilla script.R
 ir render report.qmd --to html
@@ -126,6 +144,7 @@ Windows to inspect the plan.
 
 ## Requirements
 
+- `Rscript` on `PATH`, or `IR_RSCRIPT`, for `ir init` dependency discovery.
 - `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
 - `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
