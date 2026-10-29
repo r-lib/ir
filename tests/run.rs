@@ -2951,6 +2951,56 @@ esac
     assert!(!stdout.contains("uv tool cache"), "{stdout}");
 }
 
+#[test]
+fn cache_clean_all_preserves_external_cache_with_cached_managed_uv() {
+    let root = temp_dir("ir-cache-clean-all-cached-managed-uv");
+    let cache_dir = root.join("ir");
+    let r_user_cache_dir = root.join("r-user");
+    let reticulate_cache = r_user_cache_dir.join("R").join("reticulate");
+    let external_uv_cache = root.join("external-uv");
+    let profile = root.join("profile.R");
+    let uv_name = if cfg!(windows) { "uv.exe" } else { "uv" };
+    let uv = uv_executable();
+    let managed_uv = reticulate_cache.join("uv").join("bin").join(uv_name);
+
+    fs::create_dir_all(managed_uv.parent().unwrap()).unwrap();
+    fs::copy(uv, &managed_uv).unwrap();
+    for cache in [
+        &cache_dir,
+        &external_uv_cache,
+        &reticulate_cache.join("uv/cache"),
+    ] {
+        fs::create_dir_all(cache).unwrap();
+        fs::write(cache.join("archive"), "cached").unwrap();
+    }
+    fs::write(
+        &profile,
+        format!(
+            "{RAPPDIRS_UNAVAILABLE_PROFILE}\noptions(reticulate.uv_binary = structure(Sys.getenv('IR_TEST_MANAGED_UV'), `reticulate-managed` = TRUE))\n"
+        ),
+    )
+    .unwrap();
+
+    let mut command = ir_with_private_r_caches();
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_MANAGED_UV", &managed_uv)
+        .env("UV_CACHE_DIR", &external_uv_cache)
+        .env("UV_NO_CONFIG", "1")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(external_uv_cache.join("archive").exists());
+    assert!(!reticulate_cache.exists());
+    assert!(!cache_dir.exists());
+    assert!(!stdout(&out).contains("Clearing uv cache at:"));
+}
+
 #[cfg(unix)]
 #[test]
 fn cache_clean_all_finds_external_uv_under_home_local_bin() {

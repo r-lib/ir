@@ -239,6 +239,9 @@ ir_external_uv_binary <- function() {
 
   uv <- getOption("reticulate.uv_binary", NULL)
   if (!is.null(uv)) {
+    if (isTRUE(attr(uv, "reticulate-managed", exact = TRUE))) {
+      return("")
+    }
     uv <- as.character(uv[[1L]])
     if (identical(uv, "managed")) {
       return("")
