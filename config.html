@@ -82,9 +82,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <link href="site_libs/quarto-html/quarto-syntax-highlighting-bf27225e3a48a9273f3daa8f8e829971.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-8b4acc9e858250717d89728bfb1b0732.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
-<link href="site_libs/bootstrap/bootstrap-dark-b47d5aebbf81f843d1208c4514cbc867.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
-<link href="site_libs/bootstrap/bootstrap-8b4acc9e858250717d89728bfb1b0732.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-a3be67685771c938a0418ca264cbb6eb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="site_libs/bootstrap/bootstrap-dark-8b6599077d0285e0748ff4629e4fe113.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="site_libs/bootstrap/bootstrap-a3be67685771c938a0418ca264cbb6eb.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -376,7 +376,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li><code>R</code> / <code>Rscript</code> on <code>PATH</code>, <code>--rscript</code>, or <code>IR_RSCRIPT</code>, when R is not selected by frontmatter <code>r-version</code>, <code>IR_R_VERSION</code>, <code>--r-version</code>, or date-only <code>exclude-newer</code>.</li>
 <li><code>rig</code> on <code>PATH</code> when <code>r-version</code>, <code>IR_R_VERSION</code>, or <code>--r-version</code> is set, or when date-only <code>exclude-newer</code> selects R.</li>
 <li><code>quarto</code> on <code>PATH</code>, or <code>IR_QUARTO</code>, when rendering or previewing <code>.qmd</code>, <code>.Rmd</code>, or R script files.</li>
-<li><code>ir</code> installs its own resolver tooling (<code>pak</code>, <code>renv</code>, <code>secretbase</code>) on first use into a dedicated library under the cache directory, so you do not need to pre-install them. Copies already on the R library path are reused instead of installing a private one.</li>
+<li><code>ir</code> installs its own resolver tooling (<code>pak</code>, <code>renv</code>, <code>secretbase</code>, <code>filelock</code>) on first use into a dedicated library under the cache directory, so you do not need to pre-install them. Copies already on the R library path are reused instead of installing a private one.</li>
 <li>A Rust toolchain only when building from source.</li>
 </ul>
 </section>
