@@ -38,6 +38,27 @@ fn executable_file(path: &Path) -> bool {
 
 static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn uv_executable() -> OsString {
+    let uv = command_on_path(if cfg!(windows) { "uv.exe" } else { "uv" })
+        .expect("uv is required for tests; run scripts/install-dev-deps");
+    let output = Command::new(&uv).arg("--version").output().unwrap();
+    assert_success(&output);
+    let text = stdout(&output);
+    let version: Vec<u32> = text
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .split('.')
+        .map(|part| part.parse().unwrap())
+        .collect();
+    assert!(
+        (version[0], version[1], version[2]) >= (0, 9, 16),
+        "uv 0.9.16 or newer is required for tests; upgrade uv (found {})",
+        text.trim()
+    );
+    uv
+}
+
 pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
     configure_r_test_caches(&mut command, true);

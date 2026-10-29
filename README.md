@@ -123,6 +123,7 @@ The setup scripts install Rust, Python, uv, rig, the current R release, R 4.3 fo
 the version-selection and documentation example tests, and Quarto. They do not
 run tests or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on
 Windows to inspect the plan.
+Tests require uv 0.9.16 or newer; upgrade an older installation before running the checks.
 
 ## Requirements
 

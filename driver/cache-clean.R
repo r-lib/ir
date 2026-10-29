@@ -269,7 +269,7 @@ ir_uv_cache_args <- function(command) {
   c("cache", command, "--project", shQuote(project))
 }
 
-ir_uv_dir <- function(uv, args) {
+ir_uv_output <- function(uv, args) {
   if (!nzchar(uv)) {
     return("")
   }
@@ -286,7 +286,7 @@ ir_uv_dir <- function(uv, args) {
   out <- out[nzchar(out)]
   if (length(out) != 1L) {
     stop(
-      "`", uv, " ", paste(args, collapse = " "), "` must print exactly one path",
+      "`", uv, " ", paste(args, collapse = " "), "` must print exactly one line",
       call. = FALSE
     )
   }
@@ -299,17 +299,46 @@ ir_clean_uv_cache <- function(uv, path) {
     return(invisible(FALSE))
   }
 
+  version <- numeric_version(sub(
+    "^uv ([0-9.]+).*", "\\1", ir_uv_output(uv, "--version")
+  ))
+  # Cache locking predates UV_LOCK_TIMEOUT, so these versions can deadlock
+  # when the uv process running IR holds the shared cache lock.
+  if (version >= numeric_version("0.8.19") &&
+      version < numeric_version("0.9.16")) {
+    stop(
+      "uv ", version, " cannot limit cache lock waits; ",
+      "upgrade uv to 0.9.16 or newer before running `ir cache clean --all`.",
+      call. = FALSE
+    )
+  }
+
+  lock_timeout <- Sys.getenv("UV_LOCK_TIMEOUT", unset = NA_character_)
+  on.exit({
+    if (is.na(lock_timeout)) {
+      Sys.unsetenv("UV_LOCK_TIMEOUT")
+    } else {
+      Sys.setenv(UV_LOCK_TIMEOUT = lock_timeout)
+    }
+  })
+  Sys.setenv(UV_LOCK_TIMEOUT = "0")
+
   cat("Clearing uv cache at: ", path, "\n", sep = "")
   status <- suppressWarnings(system2(uv, ir_uv_cache_args("clean")))
   if (!is.null(status) && status != 0L) {
-    stop("failed to run `", uv, " cache clean`", call. = FALSE)
+    stop(
+      "failed to run `", uv, " cache clean`. ",
+      "If the cache is in use, stop other uv commands and rerun with a ",
+      "standalone installation of ir, outside `uvx` or `uv tool run`.",
+      call. = FALSE
+    )
   }
 
   invisible(TRUE)
 }
 
 uv <- ir_external_uv_binary()
-uv_cache <- ir_uv_dir(uv, ir_uv_cache_args("dir"))
+uv_cache <- ir_uv_output(uv, ir_uv_cache_args("dir"))
 
 # Package namespaces may have lazy-load databases inside these caches.
 # Resolve every path and run uv before removing any backing files.

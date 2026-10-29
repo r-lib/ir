@@ -40,9 +40,7 @@ fn ci_dependencies_are_available() {
     quarto.arg("--version");
     assert_command_success(quarto, "quarto --version");
 
-    let mut uv = Command::new("uv");
-    uv.arg("--version");
-    assert_command_success(uv, "uv --version");
+    uv_executable();
 
     let version = python_minor_version();
     assert!(!version.is_empty());
@@ -2518,9 +2516,139 @@ requireNamespace <- function(package, ...) {
 }
 
 #[test]
+fn cache_clean_all_fails_promptly_when_launched_by_uv() {
+    let root = temp_dir("ir-cache-clean-all-uv-parent");
+    let uv = uv_executable();
+    let wheel = root.join("ir_cache_clean_fixture-1.0-py3-none-any.whl");
+    let build = Command::new(python_executable())
+        .args(["-c", r#"
+import sys, zipfile
+files = {
+    'ir_cache_clean_fixture.py': '''import os, subprocess, sys
+def main():
+    return subprocess.call([os.environ['IR_TEST_BIN'], *sys.argv[1:]])
+''',
+    'ir_cache_clean_fixture-1.0.dist-info/METADATA': 'Metadata-Version: 2.1\nName: ir-cache-clean-fixture\nVersion: 1.0\n',
+    'ir_cache_clean_fixture-1.0.dist-info/WHEEL': 'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n',
+    'ir_cache_clean_fixture-1.0.dist-info/entry_points.txt': '[console_scripts]\nir-cache-clean-fixture = ir_cache_clean_fixture:main\n',
+}
+files['ir_cache_clean_fixture-1.0.dist-info/RECORD'] = ''.join(f'{name},,\n' for name in files)
+with zipfile.ZipFile(sys.argv[1], 'w') as wheel:
+    for name, content in files.items():
+        wheel.writestr(name, content)
+"#])
+        .arg(&wheel)
+        .output()
+        .unwrap();
+    assert_success(&build);
+
+    let cache = root.join("ir");
+    let uv_cache = root.join("uv-cache");
+    let renv_cache = root.join("renv-cache");
+    for path in [&cache, &uv_cache, &renv_cache] {
+        fs::create_dir_all(path).unwrap();
+        fs::write(path.join("sentinel"), "cached").unwrap();
+    }
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-parent-profile");
+    let mut command = Command::new(&uv);
+    for (name, value) in ir_with_private_r_caches().get_envs() {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    }
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .env("IR_TEST_BIN", env!("CARGO_BIN_EXE_ir"))
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_CACHE_DIR", &cache)
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", &uv)
+        .env("UV_CACHE_DIR", &uv_cache)
+        .env("UV_TOOL_DIR", root.join("uv-tools"))
+        .env("UV_NO_CONFIG", "1")
+        .env("UV_PYTHON_DOWNLOADS", "never")
+        // Bound the broken behavior too; cleanup must override this to avoid waiting.
+        .env("UV_LOCK_TIMEOUT", "1")
+        .args(["tool", "run", "--isolated", "--offline", "--python"])
+        .arg(python_executable())
+        .arg("--from")
+        .arg(&wheel)
+        .args(["ir-cache-clean-fixture", "cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("standalone installation of ir"),
+        "{}",
+        output_text(&out)
+    );
+    for path in [&cache, &uv_cache, &renv_cache] {
+        assert!(path.join("sentinel").exists(), "{}", path.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_limits_uv_lock_waits_across_versions() {
+    for version in ["0.6.3", "0.8.18", "0.8.19", "0.9.15", "0.9.16"] {
+        let root = temp_dir("ir-cache-clean-all-uv-lock-version");
+        let uv = root.join("uv");
+        let cache = root.join("ir");
+        let uv_cache = root.join("uv-cache");
+        let clean_marker = root.join("clean-called");
+        let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-lock-version-profile");
+        write_executable(
+            &uv,
+            r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv %s\n' "$IR_TEST_UV_VERSION" ;;
+  cache:dir) printf '%s\n' "$UV_CACHE_DIR" ;;
+  cache:clean)
+    [ "$UV_LOCK_TIMEOUT" = 0 ] || { echo 'expected zero lock timeout' >&2; exit 3; }
+    touch "$IR_TEST_UV_CLEAN_MARKER" ;;
+  *) exit 2 ;;
+esac
+"#,
+        );
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("sentinel"), "cached").unwrap();
+        let out = ir_with_private_r_caches()
+            .env("IR_CACHE_DIR", &cache)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", &uv)
+            .env("UV_CACHE_DIR", &uv_cache)
+            .env("UV_LOCK_TIMEOUT", "300")
+            .env("IR_TEST_UV_VERSION", version)
+            .env("IR_TEST_UV_CLEAN_MARKER", &clean_marker)
+            .args(["cache", "clean", "--all"])
+            .output()
+            .unwrap();
+        if ["0.8.19", "0.9.15"].contains(&version) {
+            assert!(!out.status.success());
+            assert!(
+                stderr(&out).contains("upgrade uv to 0.9.16 or newer"),
+                "{}",
+                output_text(&out)
+            );
+            assert!(!clean_marker.exists());
+            assert!(cache.join("sentinel").exists());
+        } else {
+            assert_success(&out);
+            assert!(clean_marker.exists());
+            assert!(!cache.exists());
+        }
+    }
+}
+
+#[test]
 fn cache_clean_all_matches_uv_tool_configuration_scope() {
-    let uv = command_on_path(if cfg!(windows) { "uv.exe" } else { "uv" })
-        .expect("uv is required for cache cleanup tests; run scripts/install-dev-deps");
+    let uv = uv_executable();
 
     for project_file in ["uv.toml", "pyproject.toml"] {
         for cache_source in ["user", "environment", "explicit"] {
@@ -2712,6 +2840,7 @@ fn cache_clean_all_resolves_reticulate_uv_before_clearing_reticulate_cache() {
         &uv,
         r#"#!/bin/sh
 case "$1:$2" in
+  --version:) printf 'uv 0.9.16\n' ;;
   cache:dir) printf '%s\n' "$IR_TEST_UV_CACHE_DIR" ;;
   cache:clean) /bin/rm -rf "$IR_TEST_UV_CACHE_DIR" ;;
   python:dir) printf '%s\n' "$IR_TEST_UV_PYTHON_DIR" ;;
