@@ -12,11 +12,17 @@ use sha2::{Digest, Sha256};
 const DEFAULT_LATEST_MAX_AGE_SECONDS: u64 = 24 * 60 * 60;
 const LATEST_MAX_AGE_SECONDS_ENV: &str = "IR_LATEST_RESOLUTION_MAX_AGE_SECONDS";
 
+pub(crate) fn prefer_binaries() -> Result<bool, Box<dyn Error>> {
+    match env::var("IR_PREFER_BINARIES").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("") | Ok("1") => Ok(true),
+        Ok("0") => Ok(false),
+        _ => Err("IR_PREFER_BINARIES must be 0 or 1".into()),
+    }
+}
+
 pub(crate) struct Paths {
     pub(crate) marker: PathBuf,
     pub(crate) package_marker: Option<PathBuf>,
-    source: String,
-    latest_max_age_seconds: Option<u64>,
 }
 
 pub(crate) struct CachedResolution {
@@ -24,36 +30,43 @@ pub(crate) struct CachedResolution {
     pub(crate) primary_package: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct QuartoCacheFlags {
+    pub(crate) render: bool,
+    pub(crate) reticulate: bool,
+}
+
 pub(crate) fn paths(
     cache_dir: &Path,
     rscript: &OsStr,
+    rscript_args: &[String],
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto_render: bool,
+    quarto: QuartoCacheFlags,
+    library_root: Option<&Path>,
 ) -> Result<Option<Paths>, Box<dyn Error>> {
-    if !dependencies
-        .iter()
-        .all(|dependency| is_standard_ref(dependency))
-    {
-        return Ok(None);
-    }
-
+    let policy = prefer_binaries()?;
     let Some(rscript_identity) = rscript_identity(rscript) else {
         return Ok(None);
     };
 
-    let latest_max_age_seconds = if exclude_newer.is_none() {
-        Some(latest_max_age_seconds()?)
-    } else {
-        None
-    };
-    let source = resolution_cache_source(exclude_newer)?;
-    let marker = cache_dir.join("resolutions").join(resolution_cache_key(
+    let request_key = resolution_cache_key(
         dependencies,
         exclude_newer,
-        quarto_render,
+        quarto,
         &rscript_identity,
-    ));
+        rscript_args,
+        library_root,
+    );
+    let marker = cache_dir.join("resolutions").join(sha256_fields(&[
+        "ir-artifact-resolution-v4".to_string(),
+        format!("prefer-binaries: {policy}"),
+        format!(
+            "platforms: {}",
+            env::var("PKG_PLATFORMS").unwrap_or_default()
+        ),
+        request_key,
+    ]));
     let marker_name = marker
         .file_name()
         .and_then(OsStr::to_str)
@@ -65,8 +78,6 @@ pub(crate) fn paths(
     Ok(Some(Paths {
         marker,
         package_marker,
-        source,
-        latest_max_age_seconds,
     }))
 }
 
@@ -78,32 +89,36 @@ pub(crate) fn read(
         return Ok(None);
     };
 
-    if !cache.marker.exists() {
+    let marker = if primary_package {
+        let Some(package_marker) = &cache.package_marker else {
+            return Ok(None);
+        };
+        package_marker
+    } else {
+        &cache.marker
+    };
+
+    if !marker.exists() {
         return Ok(None);
     }
 
-    let marker = fs::read_to_string(&cache.marker)
-        .map_err(|e| format!("failed to read `{}`: {e}", cache.marker.display()))?;
-    let mut lines = marker.lines();
+    let contents = fs::read_to_string(marker)
+        .map_err(|e| format!("failed to read `{}`: {e}", marker.display()))?;
+    let mut lines = contents.lines();
     let source = lines.next().unwrap_or_default();
-    if !source_is_current(source, cache)? {
+    if !source_is_current(source)? {
         return Ok(None);
     }
     let library = lines.next().unwrap_or_default().trim();
-    if library.is_empty() || !Path::new(library).is_dir() {
+    if library.is_empty()
+        || !Path::new(library).is_dir()
+        || Path::new(library).join(".ir-incomplete").exists()
+    {
         return Ok(None);
     }
 
     let primary_package = if primary_package {
-        let Some(package_marker) = &cache.package_marker else {
-            return Ok(None);
-        };
-        if !package_marker.exists() {
-            return Ok(None);
-        }
-        let package = fs::read_to_string(package_marker)
-            .map_err(|e| format!("failed to read `{}`: {e}", package_marker.display()))?;
-        let package = package.lines().next().unwrap_or_default().trim();
+        let package = lines.next().unwrap_or_default().trim();
         if package.is_empty() {
             return Ok(None);
         }
@@ -121,8 +136,10 @@ pub(crate) fn read(
 fn resolution_cache_key(
     dependencies: &[String],
     exclude_newer: Option<&str>,
-    quarto_render: bool,
+    quarto: QuartoCacheFlags,
     rscript_identity: &str,
+    rscript_args: &[String],
+    library_root: Option<&Path>,
 ) -> String {
     let source_key = exclude_newer
         .map(|date| format!("exclude-newer: {date}"))
@@ -130,69 +147,29 @@ fn resolution_cache_key(
     let mut parts = dependencies.to_vec();
     parts.sort();
     parts.push(source_key);
-    if quarto_render {
+    if quarto.render {
         parts.push("quarto".to_string());
     }
+    if quarto.reticulate {
+        parts.push("quarto-reticulate".to_string());
+    }
     parts.push(format!("rscript: {rscript_identity}"));
+    for arg in rscript_args {
+        parts.push(format!("rscript-arg: {arg}"));
+    }
+    if let Some(library_root) = library_root {
+        parts.push(format!("library-root: {}", library_root.display()));
+    }
 
     sha256_fields(&parts)
 }
 
-fn is_standard_ref(dependency: &str) -> bool {
-    let dependency = dependency.trim();
-
-    let Some((package, version)) = dependency.split_once('@') else {
-        return is_package_name(dependency);
-    };
-
-    is_package_name(package) && is_standard_version(version)
-}
-
-fn is_standard_version(version: &str) -> bool {
-    let version = version.strip_prefix(">=").unwrap_or(version);
-    if matches!(version, "current" | "last") {
-        return true;
-    }
-
-    let mut part_count = 0;
-    for part in version.split(['.', '-']) {
-        if part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()) {
-            return false;
-        }
-        part_count += 1;
-    }
-
-    part_count >= 2
-}
-
-fn is_package_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphabetic()
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '.')
-        && name
-            .chars()
-            .last()
-            .is_some_and(|ch| ch.is_ascii_alphanumeric())
-}
-
-fn resolution_cache_source(exclude_newer: Option<&str>) -> Result<String, Box<dyn Error>> {
-    Ok(match exclude_newer {
-        Some(date) => format!("exclude-newer: {date}"),
-        None => format!("latest: {}", current_utc_seconds()?),
-    })
-}
-
-fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>> {
-    let Some(max_age_seconds) = cache.latest_max_age_seconds else {
-        return Ok(source == cache.source.as_str());
-    };
-
+fn source_is_current(source: &str) -> Result<bool, Box<dyn Error>> {
     let Some(created_at) = source.strip_prefix("latest: ") else {
         return Ok(false);
     };
+    let max_age_seconds = latest_max_age_seconds()?;
+
     let Ok(created_at) = created_at.parse::<u64>() else {
         return Ok(false);
     };
@@ -201,7 +178,7 @@ fn source_is_current(source: &str, cache: &Paths) -> Result<bool, Box<dyn Error>
         return Ok(false);
     }
     let age_seconds = now - created_at;
-    Ok(age_seconds <= max_age_seconds)
+    Ok(age_seconds < max_age_seconds)
 }
 
 fn rscript_identity(rscript: &OsStr) -> Option<String> {
@@ -391,6 +368,13 @@ mod tests {
         path
     }
 
+    fn default_quarto_flags() -> QuartoCacheFlags {
+        QuartoCacheFlags {
+            render: false,
+            reticulate: false,
+        }
+    }
+
     #[test]
     fn runtime_selection_env_changes_resolution_marker() {
         let _guard = ENV_LOCK
@@ -406,23 +390,47 @@ mod tests {
 
         env::set_var("R_ARCH", "x64");
         env::remove_var("R_HOME");
-        let x64_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let x64_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            default_quarto_flags(),
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         env::set_var("R_ARCH", "i386");
-        let i386_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let i386_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            default_quarto_flags(),
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         env::set_var("R_ARCH", "x64");
         env::set_var("R_HOME", dir.join("R-home"));
-        let r_home_marker = paths(&cache_dir, rscript.as_os_str(), &dependencies, None, false)
-            .unwrap()
-            .unwrap()
-            .marker;
+        let r_home_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            None,
+            default_quarto_flags(),
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
         assert_ne!(x64_marker, i386_marker);
         assert_ne!(x64_marker, r_home_marker);
@@ -431,61 +439,40 @@ mod tests {
     }
 
     #[test]
-    fn nonstandard_refs_skip_resolution_markers() {
-        let dir = unique_dir("ir-nonstandard-ref-cache-unit");
+    fn library_root_changes_resolution_marker() {
+        let dir = unique_dir("ir-resolve-cache-library-root-unit");
         let cache_dir = dir.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
         let rscript = dummy_rscript(&dir);
+        let dependencies = vec!["cli".to_string()];
 
-        for dependency in [
-            "github::owner/repo@branch",
-            "owner/repo/subdir@main",
-            "pkg=owner/repo/subdir@main",
-            "gitlab::group/project",
-            "https://example.com/pkg.tar.gz",
-            "\\work\\pkg",
-            "cli@3",
-        ] {
-            let dependencies = vec![dependency.to_string()];
-            assert!(
-                paths(
-                    &cache_dir,
-                    rscript.as_os_str(),
-                    &dependencies,
-                    Some("2026-06-01"),
-                    false
-                )
-                .unwrap()
-                .is_none(),
-                "{dependency} should not use a warm resolution marker",
-            );
-        }
+        let cache_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            Some("2026-06-01"),
+            default_quarto_flags(),
+            None,
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
+        let store_marker = paths(
+            &cache_dir,
+            rscript.as_os_str(),
+            &[],
+            &dependencies,
+            Some("2026-06-01"),
+            default_quarto_flags(),
+            Some(&dir.join("tool-store")),
+        )
+        .unwrap()
+        .unwrap()
+        .marker;
 
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn standard_refs_use_resolution_markers() {
-        let dir = unique_dir("ir-standard-ref-cache-unit");
-        let cache_dir = dir.join("cache");
-        fs::create_dir_all(&cache_dir).unwrap();
-        let rscript = dummy_rscript(&dir);
-
-        for dependency in ["cli", "cli@3.6.6", "cli@>=3.6.6"] {
-            let dependencies = vec![dependency.to_string()];
-            assert!(
-                paths(
-                    &cache_dir,
-                    rscript.as_os_str(),
-                    &dependencies,
-                    Some("2026-06-01"),
-                    false
-                )
-                .unwrap()
-                .is_some(),
-                "{dependency} should use a warm resolution marker",
-            );
-        }
+        assert_ne!(cache_marker, store_marker);
+        assert!(store_marker.starts_with(cache_dir.join("resolutions")));
 
         let _ = fs::remove_dir_all(&dir);
     }

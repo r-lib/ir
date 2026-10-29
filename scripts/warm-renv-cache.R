@@ -58,7 +58,7 @@ if (nzchar(r_libs_user)) {
   .libPaths(c(user_libs, .libPaths()))
 }
 
-tooling <- c("pak", "renv", "secretbase")
+tooling <- c("pak", "renv", "secretbase", "filelock")
 missing <- tooling[!vapply(tooling, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing))
   utils::install.packages(missing, repos = tooling_repos)
@@ -75,12 +75,15 @@ options(repos = repos, renv.consent = TRUE)
 
 project <- tempfile("ir-renv-warm-project-")
 library <- tempfile("ir-renv-warm-library-")
+source_cache <- file.path(project, "source")
 dir.create(project, recursive = TRUE, showWarnings = FALSE)
 dir.create(library, recursive = TRUE, showWarnings = FALSE)
+dir.create(source_cache, recursive = TRUE, showWarnings = FALSE)
 old_wd <- setwd(project)
 on.exit(setwd(old_wd), add = TRUE)
 on.exit(unlink(project, recursive = TRUE, force = TRUE), add = TRUE)
 on.exit(unlink(library, recursive = TRUE, force = TRUE), add = TRUE)
+Sys.setenv(RENV_PATHS_SOURCE = source_cache)
 
 do.call(renv::use, c(
   as.list(args),

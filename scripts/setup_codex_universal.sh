@@ -136,7 +136,7 @@ options(
   Ncpus = max(1L, parallel::detectCores(logical = TRUE) - 1L)
 )
 packages <- c(
-  "pak", "renv", "secretbase", "cli", "glue", "jsonlite",
+  "pak", "renv", "secretbase", "filelock", "cli", "glue", "jsonlite",
   "dplyr", "tidyr", "reticulate", "knitr", "rmarkdown", "quarto",
   "btw", "Rapp", "docopt", "pkgsearch", "prettyunits"
 )
@@ -169,8 +169,8 @@ renv::install(
 )
 EOF
 
-rig add oldrel/2
-mapfile -t test_r_metadata < <(python3 scripts/resolve-test-r.py oldrel/2)
+rig add 4.3
+mapfile -t test_r_metadata < <(python3 scripts/resolve-test-r.py 4.3)
 rig_name="${test_r_metadata[0]}"
 test_r_version="${test_r_metadata[1]}"
 test_r_exclude_newer="${test_r_metadata[2]}"
@@ -180,7 +180,7 @@ options(repos = c(CRAN = "https://packagemanager.posit.co/cran/latest"))
 if (!requireNamespace("pak", quietly = TRUE)) {
   install.packages("pak")
 }
-pak::pkg_install(c("renv", "secretbase", "jsonlite", "knitr", "rmarkdown"))
+pak::pkg_install(c("renv", "secretbase", "filelock", "jsonlite", "knitr", "rmarkdown"))
 prefetch_lib <- file.path(
   Sys.getenv("HOME"),
   ".cache", "ir-codex-renv-prefetch",
@@ -194,10 +194,20 @@ renv::install(
   prompt = FALSE,
   rebuild = FALSE
 )
+docs_example_lib <- file.path(prefetch_lib, "docs-2024-02-01")
+dir.create(docs_example_lib, recursive = TRUE, showWarnings = FALSE)
+renv::install(
+  c("dplyr", "tidyr@1.3.1", "gt@0.10.1", "rmarkdown"),
+  library = docs_example_lib,
+  repos = c(CRAN = "https://packagemanager.posit.co/cran/2024-02-01"),
+  prompt = FALSE,
+  rebuild = FALSE
+)
 stopifnot(
   requireNamespace("pak", quietly = TRUE),
   requireNamespace("renv", quietly = TRUE),
-  requireNamespace("secretbase", quietly = TRUE)
+  requireNamespace("secretbase", quietly = TRUE),
+  requireNamespace("filelock", quietly = TRUE)
 )
 EOF
 env -u R_LIBS_USER rig run -r "$rig_name" -f /tmp/ir-rig-setup.R

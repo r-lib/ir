@@ -10,7 +10,34 @@ Options:
   -w, --with <PKG>         Add a dependency for this tool run; may be repeated
       --r-version <SPEC>   Select the R version for this tool run with rig
       --rscript <RSCRIPT>  Select the Rscript executable
+      --refresh            Ignore cached dependency resolution for this invocation
   -h, --help               Print help
   -V, --version            Print version
 
-Use `ir tool run` for more details.
+Mental model:
+  rx is the package-executable frontend for `ir tool run`.
+  It resolves the provider package plus any --with dependencies into an
+  isolated cached R library, then launches the selected executable.
+  Package executables are discovered from installed package exec/, bin/,
+  and architecture-specific bin/<arch>/ directories. bin/ entries are run
+  as-is.
+  The tool sees the resolved package library plus base, site, and system
+  libraries; ambient user R libraries are not used.
+
+Examples:
+  rx btw --help
+      # shorthand for: rx --from btw btw --help.
+
+  rx --from pkg command --help
+      # resolve package `pkg`, run executable `command`.
+
+  rx --from pkg --with cli command --flag value
+      # --from and --with are for rx; --flag value is passed to command.
+
+Workflow:
+  Use rx for ad hoc package tools and executable frontends.
+  Use `ir tool install` for repeated shell use.
+  For durable scripts and documents, use `ir run` or `ir render` with
+  frontmatter; see `ir quickstart`.
+
+Use `ir tool run --help` for full command details.

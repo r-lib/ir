@@ -132,7 +132,7 @@ def parse_metadata(output: str, spec: str) -> dict[str, str]:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        die("usage: scripts/resolve-test-r.py oldrel/N")
+        die("usage: scripts/resolve-test-r.py <rig-version-spec>")
 
     spec = sys.argv[1]
     version = resolve_spec(spec)

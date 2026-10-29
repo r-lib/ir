@@ -6,14 +6,13 @@
 //! ```r
 //! #!/usr/bin/env -S ir run
 //! #| packages:
-//! #|   - dplyr>=1.0
-//! #|   - tidyr
-//! #| r-version: ">= 4.0"
+//! #|   - dplyr
+//! #|   - tidyr==1.3.1
+//! #| r-version: ">= 4.3"
 //! #| isolated: true
-//! #| exclude-newer: "2024-01-15"
+//! #| exclude-newer: "2024-02-01"
 //!
-//! library(dplyr)
-//! 1 + 1
+//! airquality |> tidyr::drop_na(Ozone) |> dplyr::count(Month)
 //! ```
 //!
 //! The pipeline has two phases:
@@ -39,6 +38,7 @@ mod driver;
 mod lock;
 mod python;
 mod quarto;
+mod quickstart;
 mod resolve_cache;
 mod rig;
 mod runtime;
@@ -72,9 +72,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
                     r_requirement: run.r_requirement.as_deref(),
                     rscript: run.rscript.as_deref(),
                 },
-                runtime::SnapshotArgs {
+                runtime::ResolutionArgs {
                     exclude_newer: run.exclude_newer.as_deref(),
                     python_exclude_newer: run.python_exclude_newer.as_deref(),
+                    refresh: run.refresh,
                 },
                 &run.script_args,
                 run.isolated,
@@ -82,22 +83,49 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         }
         Some(("render", _)) => {
             let render = cli::parse_render_args(argv[2..].to_vec())?;
-            runtime::cmd_render(
+            runtime::cmd_quarto(
+                quarto::QuartoCommand::Render,
                 &render.source,
                 &render.with_deps,
                 runtime::RSelectionArgs {
                     r_requirement: render.r_requirement.as_deref(),
                     rscript: render.rscript.as_deref(),
                 },
-                runtime::SnapshotArgs {
+                runtime::ResolutionArgs {
                     exclude_newer: render.exclude_newer.as_deref(),
                     python_exclude_newer: render.python_exclude_newer.as_deref(),
+                    refresh: render.refresh,
                 },
-                &render.render_args,
-                render.isolated,
-                render.vanilla,
+                &render.quarto_args,
+                quarto::QuartoOptions {
+                    isolated: render.isolated,
+                    vanilla: render.vanilla,
+                },
             )
         }
+        Some(("preview", _)) => {
+            let preview = cli::parse_preview_args(argv[2..].to_vec())?;
+            runtime::cmd_quarto(
+                quarto::QuartoCommand::Preview,
+                &preview.source,
+                &preview.with_deps,
+                runtime::RSelectionArgs {
+                    r_requirement: preview.r_requirement.as_deref(),
+                    rscript: preview.rscript.as_deref(),
+                },
+                runtime::ResolutionArgs {
+                    exclude_newer: preview.exclude_newer.as_deref(),
+                    python_exclude_newer: preview.python_exclude_newer.as_deref(),
+                    refresh: preview.refresh,
+                },
+                &preview.quarto_args,
+                quarto::QuartoOptions {
+                    isolated: preview.isolated,
+                    vanilla: preview.vanilla,
+                },
+            )
+        }
+        Some(("quickstart", _)) => quickstart::cmd_quickstart(),
         Some(("tool", matches)) => match matches.subcommand() {
             Some(("run", _)) => {
                 let run =

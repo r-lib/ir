@@ -9,6 +9,235 @@ use std::fs;
 use std::path::Path;
 
 #[cfg(unix)]
+fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, code: &str) {
+    let source_root = temp_dir(&format!("ir-render-python-fake-{name}-source"));
+    let package = source_root.join(name);
+    fs::create_dir_all(package.join("R")).unwrap();
+    fs::write(
+        package.join("DESCRIPTION"),
+        format!(
+            "Package: {name}\nVersion: 99.0.0\nTitle: Fake {name}\nDescription: Fake {name}.\nLicense: MIT\nEncoding: UTF-8\n"
+        ),
+    )
+    .unwrap();
+    fs::write(package.join("NAMESPACE"), namespace).unwrap();
+    fs::write(package.join("R").join(format!("{name}.R")), code).unwrap();
+
+    let out = rscript_command()
+        .arg("--vanilla")
+        .arg(fixture("install-fake-package.R"))
+        .arg(lib)
+        .arg(&package)
+        .output()
+        .unwrap();
+    assert_success(&out);
+}
+
+#[cfg(unix)]
+fn assert_quarto_reticulate_for_document(name: &str, document: &str, expected: bool) {
+    assert_quarto_reticulate_for_source(name, "qmd", document, expected);
+}
+
+#[cfg(unix)]
+fn assert_quarto_reticulate_for_source(
+    name: &str,
+    extension: &str,
+    document: &str,
+    expected: bool,
+) {
+    let cache_dir = temp_dir(&format!("ir-{name}-cache"));
+    let bin_dir = temp_dir(&format!("ir-{name}-bin"));
+    let doc = temp_path(name, extension);
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+    let expected = if expected { "1" } else { "" };
+
+    fs::write(&doc, document).unwrap();
+    write_executable(
+        &rscript,
+        &format!(
+            "#!/bin/sh\n\
+if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n\
+  cat > /dev/null\n\
+  observed=${{IR_QUARTO_RETICULATE:+1}}\n\
+  if [ \"$observed\" != \"{}\" ]; then\n\
+    echo expected IR_QUARTO_RETICULATE={} got \"$observed\" >&2\n\
+    exit 1\n\
+  fi\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+            expected, expected
+        ),
+    );
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_installs_missing_reticulate_with_plain_pak_ref() {
+    let cache_dir = temp_dir("ir-render-python-missing-reticulate-cache");
+    let bin_dir = temp_dir("ir-render-python-missing-reticulate-bin");
+    let user_library = temp_dir("ir-render-python-missing-reticulate-user-library");
+    let site_library = temp_dir("ir-render-python-missing-reticulate-site-library");
+    let staged_library = temp_dir("ir-render-python-missing-reticulate-staged-library");
+    let doc = temp_path("ir-render-python-missing-reticulate", "qmd");
+    let fake_python = bin_dir.join("python");
+    let quarto = bin_dir.join("quarto");
+    let install_ref = temp_path("ir-render-python-missing-reticulate-ref", "txt");
+
+    install_fake_r_package(
+        &user_library,
+        "pak",
+        "export(pkg_deps)\nexport(pkg_install)\nexport(repo_get)\nexport(repo_resolve)\n",
+        r#"
+load_private_cli <- function() TRUE
+repo_resolve <- function(spec) {
+  list(CRAN = "https://packagemanager.posit.co/cran/latest")
+}
+repo_get <- function(...) {
+  repos <- getOption("repos")
+  data.frame(
+    name = names(repos),
+    url = unname(repos),
+    stringsAsFactors = FALSE
+  )
+}
+pkg_deps <- function(refs, ...) {
+  stopifnot(startsWith(refs, "deps::"))
+  desc <- read.dcf(file.path(sub("^deps::", "", refs), "DESCRIPTION"))
+  refs <- unname(desc[1, "Imports"])
+  stopifnot(identical(refs, "rmarkdown"))
+  res <- data.frame(
+    ref = refs,
+    status = "OK",
+    package = "rmarkdown",
+    version = "1.0.0",
+    type = "standard",
+    priority = NA_character_,
+    direct = TRUE
+  )
+  res$platform <- "source"
+  res$deps <- list(data.frame(type = character(), package = character(),
+                              version = character(), op = character()))
+  res$sources <- list("https://example.test/rmarkdown_1.0.0.tar.gz")
+  res$mirror <- "https://example.test/cran"
+  res$params <- list(character())
+  res
+}
+pkg_install <- function(pkg, lib, ...) {
+  writeLines(pkg, Sys.getenv("IR_TEST_INSTALL_REF"))
+  if (!identical(pkg, "reticulate")) {
+    stop("expected plain reticulate ref, got `", pkg, "`", call. = FALSE)
+  }
+
+  source <- Sys.getenv("IR_TEST_RETICULATE_PATH")
+  target <- file.path(lib, "reticulate")
+  dir.create(target, recursive = TRUE, showWarnings = FALSE)
+  entries <- list.files(source, all.files = TRUE, full.names = TRUE,
+                        no.. = TRUE)
+  if (!all(file.copy(entries, target, recursive = TRUE))) {
+    stop("failed to install fake reticulate", call. = FALSE)
+  }
+  invisible()
+}
+"#,
+    );
+    install_fake_r_package(
+        &user_library,
+        "renv",
+        "export(restore)\n",
+        r#"
+restore <- function(lockfile, library, repos, ...) {
+  for (record in lockfile$Packages) {
+    path <- file.path(library, record$Package)
+    dir.create(file.path(path, "Meta"), recursive = TRUE, showWarnings = FALSE)
+    desc <- c(Package = record$Package, Version = record$Version)
+    writeLines(paste(names(desc), desc, sep = ": "), file.path(path, "DESCRIPTION"))
+    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(),
+      Platform = R.version$platform)), file.path(path, "Meta/package.rds"))
+  }
+  invisible()
+}
+"#,
+    );
+    install_fake_r_package(
+        &user_library,
+        "secretbase",
+        "export(sha256)\n",
+        "sha256 <- function(x) \"fake-resolution-key\"\n",
+    );
+    install_fake_r_package(
+        &staged_library,
+        "reticulate",
+        "export(uv_get_or_create_env)\n",
+        r#"
+uv_get_or_create_env <- function(...) Sys.getenv("IR_TEST_PYTHON")
+"#,
+    );
+
+    fs::write(
+        &doc,
+        r#"---
+title: Python report
+engine: jupyter
+jupyter: python3
+ir:
+  python-packages:
+    - numpy
+---
+
+```{python}
+1 + 1
+```
+"#,
+    )
+    .unwrap();
+    write_executable(&fake_python, "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &quarto,
+        "#!/bin/sh\nprintf 'quarto_python=%s\\n' \"$QUARTO_PYTHON\"\nprintf 'reticulate_python=%s\\n' \"$RETICULATE_PYTHON\"\n",
+    );
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .env("IR_TEST_INSTALL_REF", &install_ref)
+        .env("IR_TEST_RETICULATE_PATH", staged_library.join("reticulate"))
+        .env("IR_TEST_PYTHON", &fake_python)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_LIBS_SITE", &site_library)
+        .env_remove("R_LIBS")
+        .args(["render", "--isolated", "--vanilla", "--rscript"])
+        .arg(rscript())
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_stdout_contains(&out, &format!("quarto_python={}", fake_python.display()));
+    assert_stdout_contains(
+        &out,
+        &format!("reticulate_python={}", fake_python.display()),
+    );
+    assert_eq!(fs::read_to_string(&install_ref).unwrap(), "reticulate\n");
+}
+
+#[cfg(unix)]
 #[test]
 fn render_quarto_ir_python_frontmatter_sets_quarto_python() {
     let cache_dir = temp_dir("ir-render-python-cache");
@@ -254,6 +483,288 @@ exit 1\n",
     let env = fs::read_to_string(&python_env).unwrap();
     assert!(env.contains("python_version=3.11"), "{env}");
     assert!(env.contains("exclude_newer=2026-06-01"), "{env}");
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_knitr_python_chunk_requests_reticulate() {
+    let cache_dir = temp_dir("ir-render-knitr-python-reticulate-cache");
+    let bin_dir = temp_dir("ir-render-knitr-python-reticulate-bin");
+    let doc = temp_path("ir-render-knitr-python-reticulate", "qmd");
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+
+    fs::write(
+        &doc,
+        r#"---
+title: knitr python chunk
+format: html
+---
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &rscript,
+        "#!/bin/sh\n\
+if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n\
+  cat > /dev/null\n\
+  if [ -z \"${IR_QUARTO_RETICULATE:-}\" ]; then\n\
+    echo expected reticulate injection for knitr Python chunk >&2\n\
+    exit 1\n\
+  fi\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+    );
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_jupyter_python_chunk_does_not_request_reticulate() {
+    let cache_dir = temp_dir("ir-render-jupyter-python-reticulate-cache");
+    let bin_dir = temp_dir("ir-render-jupyter-python-reticulate-bin");
+    let doc = temp_path("ir-render-jupyter-python-reticulate", "qmd");
+    let rscript = bin_dir.join("Rscript");
+    let quarto = bin_dir.join("quarto");
+
+    fs::write(
+        &doc,
+        r#"---
+title: jupyter python chunk
+format: html
+jupyter: python3
+---
+
+```{python}
+print("ok")
+```
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &rscript,
+        "#!/bin/sh\n\
+if [ -n \"${IR_RESOLVE_RESULT_FILE:-}\" ]; then\n\
+  cat > /dev/null\n\
+  if [ -n \"${IR_QUARTO_RETICULATE:-}\" ]; then\n\
+    echo jupyter Python chunk should not inject reticulate >&2\n\
+    exit 1\n\
+  fi\n\
+  mkdir -p \"$IR_CACHE_DIR/fake-library\"\n\
+  printf '%s\\n' \"$IR_CACHE_DIR/fake-library\" > \"$IR_RESOLVE_RESULT_FILE\"\n\
+  exit 0\n\
+fi\n\
+echo unexpected Rscript invocation >&2\n\
+exit 1\n",
+    );
+    write_executable(&quarto, "#!/bin/sh\nexit 0\n");
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", &quarto)
+        .args(["render", "--rscript"])
+        .arg(&rscript)
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_top_level_knitr_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-top-level-knitr-python-reticulate",
+        r#"---
+title: top-level knitr Python chunk
+format: html
+engine: knitr
+---
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_top_level_jupyter_python_chunk_does_not_request_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-top-level-jupyter-python-reticulate",
+        r#"---
+title: top-level jupyter Python chunk
+format: html
+engine: jupyter
+---
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        false,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_rmd_with_jupyter_metadata_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_source(
+        "ir-render-rmd-jupyter-python-reticulate",
+        "Rmd",
+        r#"---
+title: Rmd ignores Jupyter metadata
+format: html
+jupyter: python3
+---
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_tilde_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-tilde-python-reticulate",
+        r#"---
+title: tilde Python chunk
+format: html
+---
+
+~~~{r}
+1 + 1
+~~~
+
+~~~{python}
+print("ok")
+~~~
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_dot_yaml_terminator_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-dot-yaml-reticulate",
+        r#"---
+title: dot YAML terminator Python chunk
+format: html
+...
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_longer_closing_fence_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-longer-closing-fence-reticulate",
+        r#"---
+title: longer closing fence Python chunk
+format: html
+---
+
+```text
+literal block
+````
+
+```{r}
+1 + 1
+```
+
+```{python}
+print("ok")
+```
+"#,
+        true,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_indented_literal_python_fence_does_not_request_reticulate() {
+    assert_quarto_reticulate_for_document(
+        "ir-render-indented-literal-python-reticulate",
+        r#"---
+title: indented literal Python fence
+format: html
+---
+
+```{r}
+1 + 1
+```
+
+    ```{python}
+    print("not executable")
+    ```
+"#,
+        false,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_quarto_script_python_chunk_requests_reticulate() {
+    assert_quarto_reticulate_for_source(
+        "ir-render-script-python-reticulate",
+        "R",
+        r#"#' ---
+#' title: script Python chunk
+#' format: html
+#' ---
+
+#' ```{python}
+#' print("ok")
+#' ```
+"#,
+        true,
+    );
 }
 
 #[cfg(unix)]

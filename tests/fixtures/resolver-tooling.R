@@ -1,11 +1,12 @@
 ir_test_write_pkg <- function(lib, pkg, namespace, code,
+                              version = "0.0.1",
                               built = as.character(getRversion())) {
   path <- file.path(lib, pkg)
   dir.create(file.path(path, "R"), recursive = TRUE, showWarnings = FALSE)
 
   description <- c(
     Package = pkg,
-    Version = "0.0.1",
+    Version = version,
     Title = pkg,
     Description = paste0(pkg, "."),
     License = "MIT"
@@ -46,11 +47,13 @@ ir_test_write_pkg <- function(lib, pkg, namespace, code,
 
 ir_test_renv_code <- function() {
   paste(
-    "use <- function(..., library, repos, attach, sandbox, isolate, verbose) {",
-    "  specs <- unlist(list(...), use.names = FALSE)",
-    "  for (spec in specs) {",
-    "    pkg <- sub('@.*$', '', spec)",
-    "    dir.create(file.path(library, pkg), recursive = TRUE, showWarnings = FALSE)",
+    "restore <- function(lockfile, library, repos, ...) {",
+    "  for (record in lockfile$Packages) {",
+    "    path <- file.path(library, record$Package)",
+    "    dir.create(file.path(path, 'Meta'), recursive = TRUE, showWarnings = FALSE)",
+    "    desc <- c(Package = record$Package, Version = record$Version)",
+    "    writeLines(paste(names(desc), desc, sep = ': '), file.path(path, 'DESCRIPTION'))",
+    "    saveRDS(list(DESCRIPTION = desc, Built = list(R = getRversion(), Platform = R.version$platform)), file.path(path, 'Meta/package.rds'))",
     "  }",
     "  invisible(TRUE)",
     "}",
@@ -59,8 +62,15 @@ ir_test_renv_code <- function() {
 }
 
 ir_test_write_renv <- function(lib, code = ir_test_renv_code(),
+                               version = "1.2.0",
                                built = as.character(getRversion())) {
-  ir_test_write_pkg(lib, "renv", "export(use)", code, built = built)
+  namespace <- if (grepl("restore <-", code, fixed = TRUE)) "export(restore)" else "export(use)"
+  # This fixture materializes libraries directly and has no package cache.
+  namespace <- c(namespace, "export(config)")
+  code <- paste("config <- list(cache.enabled = function() FALSE)", code,
+                sep = "\n")
+  ir_test_write_pkg(lib, "renv", namespace, code,
+                    version = version, built = built)
 }
 
 ir_test_write_secretbase <- function(lib, marker = NULL, hash = "privatehash",

@@ -3,11 +3,13 @@ Run self-describing R scripts
 Usage: ir [COMMAND]
 
 Commands:
-  run     Run a script or inline R expression
-  render  Render a Quarto document or script
-  tool    Run package executables
-  cache   Manage ir's cache
-  help    Print this message or the help of the given subcommand(s)
+  run         Run a script or inline R expression
+  render      Render a Quarto document or script
+  preview     Preview a Quarto document or script
+  tool        Run package executables
+  quickstart  Show a concise usage guide for AI agents
+  cache       Manage ir's cache
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -16,5 +18,6 @@ Options:
 Examples:
   ir run script.R
   ir render report.qmd
+  ir preview report.qmd
   ir tool run btw
   ir cache dir

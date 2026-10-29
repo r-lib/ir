@@ -62,6 +62,38 @@ pub(crate) fn select_installed_r<'a>(
         .max_by(|a, b| compare_installed_r(a, b))
 }
 
+pub(crate) fn select_installed_r_through_minor<'a>(
+    requirement: &VersionRequirement,
+    installed: &'a [InstalledR],
+    latest_minor: &str,
+) -> Option<&'a InstalledR> {
+    let mut latest_minor = parse_version(latest_minor)?;
+    latest_minor.truncate(2);
+
+    installed
+        .iter()
+        .filter(|version| {
+            requirement.matches_installed(version)
+                && version_minor_is_at_most(&version.version, &latest_minor)
+        })
+        .max_by(|a, b| compare_installed_r(a, b))
+}
+
+pub(crate) fn matching_unreleased_alias<'a>(
+    requirement: &VersionRequirement,
+    installed: &'a [InstalledR],
+) -> Option<&'a str> {
+    installed.iter().find_map(|version| {
+        let alias = version
+            .aliases
+            .iter()
+            .find(|alias| is_unreleased_alias(alias))?;
+        requirement
+            .matches_candidate(&version.name, &version.version, &version.aliases)
+            .then_some(alias.as_str())
+    })
+}
+
 pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str> {
     match requirement {
         VersionRequirement::Bare(req) => Some(req),
@@ -76,7 +108,32 @@ pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str>
 
 impl VersionRequirement {
     fn matches_installed(&self, installed: &InstalledR) -> bool {
+        // Broad requirements select released R versions. R-devel and R-next
+        // remain available through their aliases or exact numeric versions.
+        if installed
+            .aliases
+            .iter()
+            .any(|alias| is_unreleased_alias(alias))
+            && self.is_broad()
+        {
+            return false;
+        }
+
         self.matches_candidate(&installed.name, &installed.version, &installed.aliases)
+    }
+
+    pub(crate) fn is_broad(&self) -> bool {
+        match self {
+            VersionRequirement::Bare(req) => parse_version(req)
+                .map(|version| version.len() == 1)
+                .unwrap_or(false),
+            VersionRequirement::Comparison {
+                op: VersionOp::Eq,
+                version,
+                ..
+            } => version.len() == 1,
+            VersionRequirement::Comparison { .. } => true,
+        }
     }
 
     fn matches_candidate(&self, name: &str, candidate_version: &str, aliases: &[String]) -> bool {
@@ -115,6 +172,18 @@ impl VersionRequirement {
             }
         }
     }
+}
+
+fn is_unreleased_alias(alias: &str) -> bool {
+    matches!(alias, "devel" | "next")
+}
+
+fn version_minor_is_at_most(candidate: &str, latest_minor: &[u64]) -> bool {
+    let Some(mut candidate) = parse_version(candidate) else {
+        return false;
+    };
+    candidate.truncate(2);
+    compare_version_parts(&candidate, latest_minor).is_le()
 }
 
 fn is_iso_date(value: &str) -> bool {

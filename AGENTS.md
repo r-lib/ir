@@ -29,4 +29,9 @@ Flow: parse CLI -> read source metadata -> resolve packages with the embedded R 
 - Keep `main.rs` small; place behavior in the owning module.
 - Preserve public CLI behavior unless tests and snapshots change intentionally.
 - Prefer direct, actionable errors over fallback chains when invoking R, `rig`, or Quarto.
+- Before returning finished code changes, run `scripts/check.sh`. It runs the
+  complete local diagnostics required by CI: rustfmt, Clippy with warnings
+  denied, and the full nextest suite. Do not substitute `cargo test` for this
+  check. If the environment prevents it from completing, report the failing
+  command and error explicitly.
 - Keep this file a compact map; put durable details in README, docs, or tests.

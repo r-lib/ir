@@ -150,6 +150,67 @@ fn docs_run_page_dark_mode_styles_console_blocks() {
 }
 
 #[test]
+fn docs_reference_keeps_quickstart_low_prominence() {
+    let docs_dir = docs_copy("ir-docs-quickstart-reference-project");
+    let (output_dir, output_dir_name) =
+        unique_dir_in(&docs_dir, "ir-docs-quickstart-reference-output");
+
+    let config = fs::read_to_string(docs_dir.join("_quarto.yml")).unwrap();
+    assert!(!config.contains("quickstart.qmd"), "{config}");
+    assert!(!config.contains("href: quickstart.qmd"), "{config}");
+
+    let index = fs::read_to_string(docs_dir.join("index.qmd")).unwrap();
+    assert!(!index.contains("quickstart"), "{index}");
+
+    let tools = fs::read_to_string(docs_dir.join("tools.qmd")).unwrap();
+    assert!(!tools.contains("quickstart"), "{tools}");
+
+    #[cfg(windows)]
+    {
+        let reference = fs::read_to_string(docs_dir.join("reference.qmd")).unwrap();
+        let cache_clean = reference
+            .find("## `ir cache clean`")
+            .unwrap_or_else(|| panic!("reference page should include ir cache clean\n{reference}"));
+        let quickstart = reference
+            .find("## `ir quickstart`")
+            .unwrap_or_else(|| panic!("reference page should include ir quickstart\n{reference}"));
+        assert!(
+            quickstart > cache_clean,
+            "ir quickstart should appear near the bottom of the reference page\n{reference}"
+        );
+        return;
+    }
+
+    let mut quarto = Command::new("quarto");
+    quarto
+        .current_dir(&docs_dir)
+        .env("IR_BIN", env!("CARGO_BIN_EXE_ir"))
+        .args(["render", "reference.qmd", "--to", "html"])
+        .arg("--output-dir")
+        .arg(&output_dir_name);
+    pin_quarto_r(&mut quarto);
+    let output = quarto.output().unwrap();
+    assert_success(&output);
+
+    let html = fs::read_to_string(output_dir.join("reference.html"))
+        .unwrap_or_else(|e| panic!("failed to read rendered reference page: {e}"));
+    let cache_clean = html
+        .find("id=\"ir-cache-clean\"")
+        .unwrap_or_else(|| panic!("reference page should include ir cache clean\n{html}"));
+    let quickstart = html
+        .find("id=\"ir-quickstart\"")
+        .unwrap_or_else(|| panic!("reference page should include ir quickstart\n{html}"));
+    assert!(
+        quickstart > cache_clean,
+        "ir quickstart should appear near the bottom of the reference page\n{html}"
+    );
+    assert!(
+        html.contains("Show a concise usage guide for AI agents"),
+        "{html}"
+    );
+}
+
+#[test]
 fn render_quarto_fixture_injects_rmarkdown_and_renders() {
     let fixture_dir = fixture_copy("run", "ir-e2e-qmd-fixture");
     let cache_dir = temp_dir("ir-e2e-qmd-cache");

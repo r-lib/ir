@@ -1,6 +1,7 @@
 # ir resolve driver
 #
-# Run by the `ir` Rust binary in a private, throw-away R session.
+# Run by the `ir` Rust binary in a private, throw-away R session, with
+# tooling.R prepended in the emitted driver:
 #
 #   IR_RESOLVE_RESULT_FILE=<result_file> Rscript resolve.R
 #
@@ -9,15 +10,15 @@
 #   2. Resolve dependencies with pak.
 #   3. Hash the install refs to derive a content-addressed library path under
 #      <cache_dir>.
-#   4. Materialise that path as a light-weight library of symlinks into
-#      renv's package cache via renv::use().
+#   4. Materialise that path with independent package copies from renv's cache
+#      via renv::restore().
 #
 # The resulting library path is written to the temp result file named by
 # IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
 # This session then exits; the Rust process launches the user's script in a
 # fresh R session with the resolved library prepended to `.libPaths()`.
 #
-# The helpers below are pure and side-effect free. The pipeline runs only when
+# The pipeline runs only when
 # this file is executed as a script -- `sys.nframe() == 0L` is false when the
 # file is sourced. End-to-end coverage lives in the Rust CLI tests
 # (tests/run.rs, tests/render.rs, and tests/tool.rs), which drive this resolver
@@ -32,7 +33,7 @@ ir_env_optional <- function(name) {
 
 # Optional date-bounded resolution. `exclude-newer` is a YAML mapping key whose
 # value is an ISO date; resolution then uses that day's Posit Package Manager
-# CRAN snapshot instead of the latest CRAN repository.
+# CRAN and Bioconductor snapshots instead of the latest repositories.
 ir_exclude_newer <- function(value) {
   if (is.null(value)) return(NULL)
 
@@ -44,14 +45,86 @@ ir_exclude_newer <- function(value) {
   value
 }
 
-# Resolve dependency refs with pak, stopping if any ref fails to resolve.
-ir_resolve_refs <- function(refs) {
-  res <- pak::pkg_deps(refs, dependencies = NA, upgrade = TRUE)
-  failed <- res[res$status != "OK", , drop = FALSE]
-  if (nrow(failed))
-    stop("pak could not resolve: ",
-         paste(failed$ref, collapse = ", "), call. = FALSE)
+# Keep ordinary requests as dependencies of a temporary DESCRIPTION. pak's lazy
+# policy prefers binaries for dependencies, but always updates direct requests.
+# Explicit package sources and exact pins remain direct refs.
+ir_resolve_refs <- function(refs, source = character()) {
+  prefer <- getOption("ir.prefer.binaries", TRUE)
+  ordinary <- grepl("^[A-Za-z][A-Za-z0-9.]*$", refs)
+  minimum <- grepl("^[A-Za-z][A-Za-z0-9.]*@>=[0-9][-0-9.]*$", refs)
+  ordinary <- (ordinary & prefer) | minimum
+  requested <- sub("@.*$", "", refs[ordinary])
+  if (any(ordinary)) {
+    root <- tempfile("ir-requirements-")
+    dir.create(root)
+    on.exit(unlink(root, recursive = TRUE), add = TRUE)
+    imports <- sub("@>=(.*)$", " (>= \\1)", refs[ordinary])
+    # Keep the synthetic root distinct from repository packages.
+    root_package <- gsub("-", "", basename(root), fixed = TRUE)
+    write.dcf(data.frame(Package = root_package, Version = "1.0.0",
+                         Imports = paste(imports, collapse = ", ")),
+              file.path(root, "DESCRIPTION"))
+    refs <- c(refs[!ordinary], paste0("deps::", root))
+  }
+  # Keep exact pins when changing a failed direct binary to source. Overrides
+  # below apply only to dependencies, whose constraints stay in the graph.
+  packages <- sub("^(cran|bioc)::", "", sub("[@?].*$", "", refs))
+  direct_source <- packages %in% source
+  refs[direct_source] <- paste0(refs[direct_source],
+    ifelse(grepl("?", refs[direct_source], fixed = TRUE), "&", "?"), "source")
+  source <- setdiff(source, packages[direct_source])
+  # pkg_deps() solves against an empty temporary library, so the lazy policy
+  # cannot select installed packages from the user's libraries.
+  res <- pak::pkg_deps(c(refs, if (length(source)) paste0(source, "=?source")),
+                       upgrade = !prefer)
+  res <- res[res$type != "deps", , drop = FALSE]
+  res$direct <- res$direct | res$package %in% requested
+  identified <- vapply(seq_len(nrow(res)), function(i) {
+    digest <- c(res$md5sum[[i]], res$sha256[[i]],
+                res$metadata[[i]]["RemoteEtag"])
+    # Repository records can use the package version as RemoteSha.
+    if (!ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
+      digest <- c(digest, res$metadata[[i]]["RemoteSha"])
+    any(!is.na(digest) & nzchar(digest))
+  }, logical(1))
+  local <- res$type == "local"
+  res$ir_cacheable <- !local & identified
+  # Without content metadata, a fresh resolution must not reuse a prior
+  # installation or download from the same mutable locator.
+  res$ir_identity <- ifelse(!local & !identified,
+                            tempfile("ir-unidentified-artifact-"), "")
   res
+}
+
+# Only missing repository binaries justify a source retry. Check HTTP status
+# after an installer failure, without interpreting pak/renv's private errors.
+# Authentication, integrity and installation failures retain their diagnostics.
+ir_missing_binaries <- function(res) {
+  binary <- ir_is_standard_resolved_ref(res) & res$platform != "source"
+  rows <- which(binary)
+  missing <- vapply(rows, function(i) {
+    url <- res$sources[[i]][[1L]]
+    if (!grepl("^https?://", url)) return(FALSE)
+    headers <- tryCatch(base::curlGetHeaders(url, verify = FALSE),
+                        error = function(e) NULL)
+    status <- utils::tail(attr(headers, "status"), 1L)
+    if (any(status >= 400L))
+      message("Binary for ", res$package[i], " returned HTTP ", status, ".")
+    any(status %in% c(404L, 410L))
+  }, logical(1))
+  res$package[rows[missing]]
+}
+
+ir_resolve_primary_package <- function(res, primary_ref) {
+  packages <- unique(res$package[res$direct])
+  if (length(packages) != 1L) {
+    primary <- ir_resolve_refs(primary_ref)
+    packages <- unique(primary$package[primary$direct])
+  }
+  if (length(packages) != 1L || !(packages[[1L]] %in% res$package))
+    stop("package ref must resolve to exactly one R package: ",
+         primary_ref, call. = FALSE)
+  packages[[1L]]
 }
 
 ## --- repositories -----------------------------------------------------------
@@ -103,6 +176,34 @@ ir_repos <- function(exclude_newer = NULL, repos = getOption("repos")) {
   repos
 }
 
+ir_ppm_bioconductor_mirror <- function(cran_repo, exclude_newer) {
+  stopifnot(length(cran_repo) == 1L, !is.na(cran_repo), nzchar(cran_repo),
+            length(exclude_newer) == 1L, !is.na(exclude_newer),
+            nzchar(exclude_newer))
+
+  # pak may retain the `all` repository name from older PPM configurations.
+  cran_path <- regexpr("/(?:cran|all)(?:/|$)", cran_repo, perl = TRUE)
+  if (cran_path[[1L]] == -1L)
+    stop("could not derive the PPM root from CRAN repository `",
+         cran_repo, "`", call. = FALSE)
+
+  ppm_root <- substr(cran_repo, 1L, cran_path[[1L]] - 1L)
+  paste0(ppm_root, "/bioconductor/", exclude_newer)
+}
+
+ir_effective_repositories <- function() {
+  repositories <- pak::repo_get()
+  stopifnot(is.data.frame(repositories),
+            all(c("name", "url") %in% names(repositories)),
+            all(!is.na(repositories$name)),
+            all(nzchar(repositories$name)),
+            all(!is.na(repositories$url)),
+            all(nzchar(repositories$url)))
+
+  stats::setNames(as.character(repositories$url),
+                  as.character(repositories$name))
+}
+
 ## --- resolution cache -------------------------------------------------------
 
 # Legacy fallback key identifying a resolution request when Rust does not pass
@@ -113,18 +214,28 @@ ir_input_key <- function(deps,
                          rversion      = getRversion(),
                          platform      = R.version$platform,
                          exclude_newer = NULL,
-                         quarto        = FALSE) {
+                         quarto        = FALSE,
+                         quarto_reticulate = FALSE,
+                         library_root  = NULL) {
   source_key <- if (is.null(exclude_newer))
     "latest"
   else
     sprintf("exclude-newer: %s", exclude_newer)
 
-  # `quarto` folds in only when TRUE: a Quarto render may inject rmarkdown, so
-  # its resolved set differs from a plain run of the same deps. Omitting the
-  # marker for non-Quarto runs keeps their existing keys (and cache) stable.
+  # `quarto` flags fold in only when TRUE: a Quarto render may inject rmarkdown
+  # or reticulate, so its resolved set differs from a plain run of the same deps.
+  # Omitting the marker for non-Quarto runs keeps their existing keys stable.
   secretbase::sha256(paste(c(sort(deps),
+                             "ir-artifact-resolution-v4",
+                             paste0("prefer-binaries: ",
+                                    getOption("ir.prefer.binaries", TRUE)),
+                             paste0("platforms: ", Sys.getenv("PKG_PLATFORMS")),
                              source_key,
                              if (quarto) "quarto" else NULL,
+                             if (quarto_reticulate)
+                               "quarto-reticulate" else NULL,
+                             if (!is.null(library_root))
+                               paste0("library-root: ", library_root) else NULL,
                              as.character(rversion),
                              platform),
                            collapse = "\n"))
@@ -143,53 +254,156 @@ ir_latest_resolution_max_age_seconds <- function() {
   as.numeric(value)
 }
 
-ir_marker_source <- function(exclude_newer,
-                             created_at = ir_current_utc_seconds()) {
-  if (is.null(exclude_newer))
-    sprintf("latest: %.0f", floor(created_at))
-  else
-    sprintf("exclude-newer: %s", exclude_newer)
+ir_marker_source <- function(created_at = ir_current_utc_seconds()) {
+  sprintf("latest: %.0f", floor(created_at))
 }
 
-ir_marker_source_current <- function(source, exclude_newer) {
-  if (!is.null(exclude_newer))
-    return(identical(source, ir_marker_source(exclude_newer)))
-
+ir_marker_source_current <- function(source) {
   if (!startsWith(source, "latest: ")) return(FALSE)
+  max_age_seconds <- ir_latest_resolution_max_age_seconds()
+
   created_at <- suppressWarnings(as.numeric(sub("^latest: ", "", source)))
   if (is.na(created_at)) return(FALSE)
 
   now <- ir_current_utc_seconds()
   if (created_at > now) return(FALSE)
-  now - created_at <= ir_latest_resolution_max_age_seconds()
+  now - created_at < max_age_seconds
 }
 
-ir_is_standard_input_ref <- function(ref) {
-  stopifnot(length(ref) == 1L)
-
-  ref <- trimws(ref)
-  grepl(paste0("^",
-               "[[:alpha:]]([[:alnum:].]*[[:alnum:]])?",
-               "(@(>=)?([0-9]+[-.][0-9]+([-.][0-9]+)*|current|last))?",
-               "$"),
-        ref)
+ir_is_network_locator <- function(locator) {
+  uri <- grepl("^[[:alpha:]][[:alnum:]+.-]*://", locator) &&
+    !grepl("^file:", locator, ignore.case = TRUE)
+  scp <- grepl("^[^/@:[:space:]]+@[^/@:[:space:]]+:.+", locator)
+  uri || scp
 }
 
-ir_has_nonstandard_input_ref <- function(refs) {
-  any(!vapply(refs, ir_is_standard_input_ref, logical(1)))
+ir_resolved_locators <- function(res, i) {
+  locators <- res$sources[[i]]
+  if ("mirror" %in% names(res))
+    locators <- c(locators, res$mirror[[i]])
+  locators <- as.character(locators)
+  locators[!is.na(locators) & nzchar(locators)]
+}
+
+ir_assert_remote_install_sources <- function(res) {
+  if (is.null(res) || !nrow(res)) return(invisible())
+
+  stopifnot(
+    is.data.frame(res),
+    all(c("ref", "type", "direct", "package", "sources") %in% names(res)),
+    is.list(res$sources),
+    all(!is.na(res$ref)),
+    all(!is.na(res$type)),
+    all(!is.na(res$direct)),
+    all(!is.na(res$package))
+  )
+
+  file_sources <- vapply(seq_len(nrow(res)), function(i) {
+    any(grepl("^file:", ir_resolved_locators(res, i), ignore.case = TRUE))
+  }, logical(1))
+  local <- tolower(res$type) == "local" | file_sources
+  if (!any(local)) return(invisible())
+
+  rows <- which(local)
+  origins <- vapply(rows, function(i) {
+    locators <- ir_resolved_locators(res, i)
+    files <- locators[grepl("^file:", locators, ignore.case = TRUE)]
+    if (length(files)) files[[1L]] else res$ref[[i]]
+  }, character(1))
+  roles <- ifelse(res$direct[rows], "requested package", "dependency")
+  details <- unique(sprintf("%s `%s` from `%s`",
+                            roles, res$package[rows], origins))
+
+  stop(
+    "IR_NO_LOCAL_SOURCES is set, but installing this environment would use ",
+    "packages from the local file system:\n- ",
+    paste(details, collapse = "\n- "),
+    "\nUse a remote package source or unset IR_NO_LOCAL_SOURCES.",
+    call. = FALSE
+  )
+}
+
+ir_resolution_is_cacheable <- function(res) {
+  if (is.null(res) || !nrow(res))
+    return(TRUE)
+
+  stopifnot(
+    is.data.frame(res),
+    all(c("sources", "params") %in% names(res)),
+    is.list(res$sources),
+    is.list(res$params)
+  )
+
+  if (any(lengths(res$params))) return(FALSE)
+
+  locators <- unlist(res$sources, use.names = FALSE)
+  if ("mirror" %in% names(res))
+    locators <- c(locators, res$mirror)
+  locators <- locators[!is.na(locators) & nzchar(locators)]
+  any(vapply(locators, ir_is_network_locator, logical(1)))
+}
+
+ir_invalidate_primary_package_markers <- function(marker) {
+  directory <- dirname(marker)
+  if (!dir.exists(directory)) return(invisible())
+
+  entries <- list.files(directory, all.files = TRUE, full.names = TRUE)
+  prefix <- paste0(basename(marker), "-primary-")
+  markers <- entries[startsWith(basename(entries), prefix)]
+  if (length(markers) && unlink(markers) != 0L)
+    stop("could not invalidate previous primary package markers",
+         call. = FALSE)
+  invisible()
 }
 
 ir_is_standard_resolved_ref <- function(res) {
   stopifnot("type" %in% names(res))
 
-  tolower(res$type) == "standard"
+  tolower(res$type) %in% c("standard", "cran", "bioc")
 }
 
 ir_install_spec <- function(res, i) {
-  if (ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
-    return(sprintf("%s@%s", res$package[[i]], res$version[[i]]))
+  # Include the locator, source subdirectory and content identity. An old source
+  # installation must never satisfy a newly selected binary of that version.
+  digest <- c(res$md5sum[[i]], res$sha256[[i]],
+              res$metadata[[i]][c("RemoteSha", "RemoteEtag")],
+              res$ir_identity[[i]])
+  paste(c(res$package[[i]], res$version[[i]], res$platform[[i]],
+          res$sources[[i]], ir_named_value(res$metadata[[i]], "RemoteSubdir"),
+          digest), collapse = "\n")
+}
 
-  res$ref[[i]]
+ir_install_records <- function(res) {
+  records <- lapply(seq_len(nrow(res)), function(i) {
+    # URL lockfile records preserve the selected repository artifact. Keep
+    # pak's provenance for explicit sources, including Git SHAs and subdirs.
+    record <- as.list(res$metadata[[i]])
+    record$Package <- res$package[[i]]
+    record$Version <- res$version[[i]]
+    repository <- ir_is_standard_resolved_ref(res[i, , drop = FALSE])
+    record$Source <- if (repository) "URL" else res$type[[i]]
+    if (repository) record$RemoteType <- "url"
+    if (res$type[[i]] == "local") record$Path <- res$remote[[i]]$path
+    record$Cacheable <- res$ir_cacheable[[i]]
+    record$Hash <- secretbase::sha256(paste("ir-installed-artifact-v1",
+                                          ir_install_spec(res, i),
+                                          as.character(getRversion()),
+                                          R.version$platform, sep = "\n"))
+    if (repository || res$type[[i]] == "url")
+      record$RemoteUrl <- res$sources[[i]][[1L]]
+    # Supply the selected candidate's requirements for installation ordering.
+    deps <- res$deps[[i]]
+    for (type in c("Depends", "Imports", "LinkingTo")) {
+      rows <- which(tolower(deps$type) == tolower(type))
+      if (length(rows)) record[[type]] <- paste(vapply(rows, function(j) {
+        if (nzchar(deps$version[j]))
+          sprintf("%s (%s %s)", deps$package[j], deps$op[j], deps$version[j])
+        else deps$package[j]
+      }, character(1)), collapse = ", ")
+    }
+    record
+  })
+  stats::setNames(records, res$package)
 }
 
 ir_install_specs <- function(res) {
@@ -197,10 +411,81 @@ ir_install_specs <- function(res) {
                      character(1))))
 }
 
+ir_restore <- function(res, library, repos) {
+  locks <- list()
+  on.exit(for (lock in rev(locks)) filelock::unlock(lock), add = TRUE)
+
+  if (any(res$ir_cacheable) && isTRUE(renv::config$cache.enabled()) &&
+      isTRUE(renv::settings$use.cache())) {
+    caches <- character()
+    for (cache in renv::paths$cache()) {
+      ancestor <- cache
+      while (!dir.exists(ancestor) && dirname(ancestor) != ancestor)
+        ancestor <- dirname(ancestor)
+      # Locks live in writable cache roots. Owners of read-only roots must
+      # keep entries stable while copying, even if nested paths are writable.
+      if (file.access(ancestor, 2L) != 0L) next
+      dir.create(cache, recursive = TRUE, showWarnings = FALSE)
+      if (!dir.exists(cache))
+        stop("could not create renv cache directory: ", cache, call. = FALSE)
+      caches <- c(caches, normalizePath(cache, winslash = "/", mustWork = TRUE))
+    }
+
+    # Order canonical paths so overlapping cache lists cannot deadlock.
+    for (cache in sort(unique(caches), method = "radix")) {
+      path <- file.path(cache, ".ir-install.lock")
+      # Let the user's umask govern new locks; never change existing modes.
+      if (!file.exists(path) && !file.create(path))
+        stop("could not create shared renv cache lock: ", path, call. = FALSE)
+      lock <- tryCatch({
+        lock <- filelock::lock(path, timeout = 0)
+        if (is.null(lock)) {
+          message("Waiting for shared renv cache lock: ", path)
+          lock <- filelock::lock(path)
+        }
+        lock
+      }, error = function(error) {
+        stop("could not lock shared renv cache `", path, "`: ",
+             conditionMessage(error), call. = FALSE)
+      })
+      locks[[length(locks) + 1L]] <- lock
+    }
+  }
+
+  # renv's own lock covers publication, but not reads. Keep cooperating IR
+  # restores serialized until their independent library copies are complete.
+  renv::restore(lockfile = list(R = list(Version = as.character(getRversion())),
+                                Packages = ir_install_records(res)),
+                library = library, packages = res$package, repos = repos,
+                prompt = FALSE, transactional = TRUE)
+}
+
 ## --- pipeline ---------------------------------------------------------------
 
 ir_resolve_main <- function() {
+  # R startup files can set this after the parent process launches R.
+  # pak's effective repository set is authoritative for renv.
+  Sys.unsetenv("RENV_CONFIG_REPOS_OVERRIDE")
+
+  # renv currently drops exact package versions when its pak integration is
+  # enabled: https://github.com/rstudio/renv/issues/2341
+  options(renv.config.pak.enabled = FALSE)
+
   cache_dir <- ir_cache_dir()
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = TRUE)
+  library_root <- ir_env_optional("IR_LIBRARY_ROOT")
+  # Rust decides this policy before R startup profiles can mutate the
+  # resolver's environment.
+  driver_args <- base::commandArgs(trailingOnly = TRUE)
+  stopifnot(all(driver_args %in% c("--ir-no-local-sources",
+                                  "--ir-prefer-binaries", "--ir-prefer-newest")))
+  no_local_sources <- "--ir-no-local-sources" %in% driver_args
+  prefer_newest <- "--ir-prefer-newest" %in% driver_args
+  if (prefer_newest && "--ir-prefer-binaries" %in% driver_args)
+    stop("cannot combine --ir-prefer-binaries and --ir-prefer-newest", call. = FALSE)
+  # Direct driver invocations need no private policy flag.
+  options(ir.prefer.binaries = !prefer_newest)
   ir_configure_child_tempdir()
   on.exit(ir_close_pak_remote(), add = TRUE)
 
@@ -214,6 +499,9 @@ ir_resolve_main <- function() {
   exclude_newer <- ir_exclude_newer(ir_env_optional("IR_EXCLUDE_NEWER"))
 
   if (!is.null(result_file)) {
+    source_root <- ir_env_optional("RENV_PATHS_SOURCE")
+    if (is.null(source_root)) source_root <- file.path(cache_dir, "downloads")
+
     ## 0. Bootstrap pak before repository normalization. On Linux PPM URLs are
     ## resolved through pak::repo_resolve(), so pak must be available first.
     ir_ensure_tooling(packages = "pak", cache_dir = cache_dir)
@@ -222,7 +510,19 @@ ir_resolve_main <- function() {
 
     ## Ensure the rest of the resolver's own tooling is available before any
     ## secretbase/pak/renv use below.
-    ir_ensure_tooling(cache_dir = cache_dir)
+    ir_ensure_tooling(
+      min_versions = c(renv = "1.2.0"),
+      cache_dir = cache_dir
+    )
+
+    if (!is.null(exclude_newer)) {
+      options(
+        BioC_mirror = ir_ppm_bioconductor_mirror(
+          repos[["CRAN"]],
+          exclude_newer
+        )
+      )
+    }
   }
 
   if (!is.null(python_result_file)) {
@@ -245,45 +545,48 @@ ir_resolve_main <- function() {
   # IR_QUARTO_RENDER so the resolver can inject it when the resolved set does not
   # already provide it. (Distinct from IR_QUARTO, the quarto executable path.)
   quarto <- !is.null(ir_env_optional("IR_QUARTO_RENDER"))
+  quarto_reticulate <- !is.null(ir_env_optional("IR_QUARTO_RETICULATE"))
 
-  ## 1b. Resolution cache: Rust checks this marker before launching this
-  ## resolver. Keep the in-resolver check as the fallback for direct driver runs
-  ## and races where another process warms the marker first. The marker is
-  ## written only after a successful materialise (below), so its presence implies
-  ## a complete library.
+  ## 1b. Resolution cache: Rust checks its marker before launching this resolver.
+  ## Wrapper Rscript CLI runs and direct driver invocations use an R-derived
+  ## fallback key and check it here instead.
   primary_ref <- if (length(deps)) deps[[1L]] else NULL
-  cache_resolution <- !ir_has_nonstandard_input_ref(deps)
+  refresh <- !is.null(ir_env_optional("IR_REFRESH"))
   marker <- ir_env_optional("IR_RESOLUTION_MARKER")
-  if (is.null(marker) && cache_resolution) {
+  marker_from_rust <- !is.null(marker)
+  if (is.null(marker)) {
     marker <- file.path(cache_dir, "resolutions",
                         ir_input_key(deps, exclude_newer = exclude_newer,
-                                     quarto = quarto))
+                                     quarto = quarto,
+                                     quarto_reticulate = quarto_reticulate,
+                                     library_root = library_root))
   }
   package_marker <- ir_env_optional("IR_PRIMARY_PACKAGE_MARKER")
   if (!is.null(package_result_file) &&
       is.null(package_marker) &&
-      !is.null(marker) &&
       !is.null(primary_ref)) {
     package_marker <- file.path(cache_dir, "resolutions",
                                 paste0(basename(marker), "-primary-",
                                        secretbase::sha256(primary_ref)))
   }
-  if (!is.null(marker) && file.exists(marker)) {
-    cached <- readLines(marker, n = 2L, warn = FALSE)
-    if (length(cached) >= 2L &&
-        ir_marker_source_current(cached[[1L]], exclude_newer) &&
+  if (!marker_from_rust && !refresh) {
+    cache_marker <- if (is.null(package_result_file)) marker else package_marker
+    required_lines <- if (is.null(package_result_file)) 2L else 3L
+    cached <- if (!is.null(cache_marker) && file.exists(cache_marker))
+      readLines(cache_marker, n = required_lines, warn = FALSE)
+    else
+      character()
+    if (length(cached) >= required_lines &&
+        ir_marker_source_current(cached[[1L]]) &&
         nzchar(cached[[2L]]) &&
-        dir.exists(cached[[2L]])) {
-      if (!is.null(package_result_file) &&
-          (is.null(package_marker) || !file.exists(package_marker))) {
-        # The library is reusable, but this caller needs primary-package
-        # metadata that older cache entries did not record.
-      } else {
+        dir.exists(cached[[2L]]) &&
+        !file.exists(file.path(cached[[2L]], ".ir-incomplete"))) {
+      package_is_current <- is.null(package_result_file) ||
+        nzchar(cached[[3L]])
+      if (package_is_current) {
         writeLines(cached[[2L]], result_file)
-        if (!is.null(package_result_file)) {
-          package <- readLines(package_marker, n = 1L, warn = FALSE)
-          writeLines(package, package_result_file)
-        }
+        if (!is.null(package_result_file))
+          writeLines(cached[[3L]], package_result_file)
         return(invisible())
       }
     }
@@ -302,14 +605,10 @@ ir_resolve_main <- function() {
     if (is.null(res))
       stop("cannot resolve a primary package without dependencies",
            call. = FALSE)
-    primary <- unique(res$package[res$direct & res$ref == refs_in[[1L]]])
-    if (length(primary) != 1L)
-      stop("package ref must resolve to exactly one R package: ",
-           deps[[1L]], call. = FALSE)
-    primary_package <- primary[[1L]]
+    primary_package <- ir_resolve_primary_package(res, refs_in[[1L]])
   }
 
-  ## 2b. Quarto's knitr engine needs rmarkdown. Inject it (latest) only when the
+  ## 2b. Quarto's knitr engine needs rmarkdown. Inject it only when the
   ## resolved set does not already provide it -- whether the user declared it
   ## directly or it arrived as a transitive dependency of a declared package.
   if (quarto) {
@@ -319,58 +618,101 @@ ir_resolve_main <- function() {
       res <- ir_resolve_refs(refs_in)
     }
   }
-
-  if (is.null(res)) {
-    pkgs     <- character()
-    install_specs <- character()
-    has_source_ref <- FALSE
-  } else {
-    # Drop base / recommended packages: those are supplied by R itself.
-    keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
-    res <- res[keep, , drop = FALSE]
-    pkgs     <- res$package
-    install_specs <- ir_install_specs(res)
-    has_source_ref <- any(!ir_is_standard_resolved_ref(res))
+  if (quarto_reticulate) {
+    have_reticulate <- !is.null(res) && "reticulate" %in% res$package
+    if (!have_reticulate) {
+      refs_in <- c(refs_in, "reticulate")
+      res <- ir_resolve_refs(refs_in)
+    }
   }
 
-  ## 3. Hash install specs -> content-addressed library path
-  # Bind the hash to the R version and platform: the symlinks point into the
-  # renv cache, whose layout is itself keyed by R version and platform.
-  key <- paste(c(install_specs,
-                 as.character(getRversion()),
-                 R.version$platform),
-               collapse = "\n")
-  library_path <- file.path(cache_dir, "libraries", secretbase::sha256(key))
+  for (attempt in 1:2) {
+    cache_resolution <- ir_resolution_is_cacheable(res)
+    if (cache_resolution)
+      ir_latest_resolution_max_age_seconds()
+    if (is.null(res)) {
+      pkgs     <- character()
+      install_specs <- character()
+      has_source_ref <- FALSE
+    } else {
+      # Drop base / recommended packages: those are supplied by R itself.
+      keep <- is.na(res$priority) | !(res$priority %in% c("base", "recommended"))
+      res <- res[keep, , drop = FALSE]
+      pkgs     <- res$package
+      install_specs <- ir_install_specs(res)
+      has_source_ref <- any(!ir_is_standard_resolved_ref(res))
+    }
 
-  ## 4. Materialise the symlinked library via renv::use()
-  # Skip when the library already holds every resolved package: repeat runs of
-  # an unchanged script then cost nothing beyond resolution.
-  dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
-  have <- list.files(library_path)
-  if (length(pkgs) && (has_source_ref || !all(pkgs %in% have))) {
-    # renv::use() installs into the renv cache and links the packages into
-    # `library` as symlinks. Because `library` lives in our cache (not the R
-    # temp dir), renv leaves it in place when the session ends.
-    do.call(renv::use, c(
-      as.list(install_specs),
-      list(
-        library = library_path,
-        repos   = repos,
-        attach  = FALSE,
-        sandbox = FALSE,
-        isolate = TRUE,
-        verbose = TRUE
-      )
-    ))
+    ## 3. Hash install specs -> content-addressed library path
+    # Libraries belong to one IR cache root, including when their parent is
+    # an external tool store. Installed artifacts are shared independently.
+    key <- paste(c("ir-artifact-library-v5", cache_dir, install_specs,
+                   as.character(getRversion()),
+                   R.version$platform),
+                 collapse = "\n")
+    if (is.null(library_root)) library_root <- cache_dir
+    library_path <- file.path(library_root, "libraries", secretbase::sha256(key))
+
+    ## 4. Materialise an independent library via renv::restore()
+    # Skip when the library already holds every resolved package: repeat runs of
+    # an unchanged script then cost nothing beyond resolution.
+    dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
+    incomplete <- file.path(library_path, ".ir-incomplete")
+    have <- list.files(library_path)
+    if (length(pkgs) &&
+        (has_source_ref || file.exists(incomplete) || !all(pkgs %in% have))) {
+      # Cache and complete-library reuse do not run package installation code.
+      # Check sources only when this invocation will ask renv to materialise them.
+      if (no_local_sources)
+        ir_assert_remote_install_sources(res)
+
+      # Restore the resolved plan through renv's public lockfile interface.
+      # Repository records carry exact URLs; renv owns downloads and its cache.
+      effective_repositories <- ir_effective_repositories()
+      writeLines("Installation in progress", incomplete)
+      # renv's URL archive cache does not distinguish content at one locator.
+      # Keep downloads owned by this root and selected artifact plan, even
+      # when the caller configured a shared source-cache parent.
+      download_key <- secretbase::sha256(paste(c(cache_dir, install_specs),
+                                              collapse = "\n"))
+      Sys.setenv(RENV_PATHS_SOURCE = file.path(source_root, "ir", download_key))
+      options(renv.cache.linkable = FALSE, renv.config.install.remotes = FALSE)
+      error <- tryCatch({
+        ir_restore(res, library = library_path, repos = effective_repositories)
+        NULL
+      }, error = identity)
+      if (!is.null(error)) {
+        missing <- if (attempt == 1L) ir_missing_binaries(res) else character()
+        if (!length(missing)) stop(error)
+        message("Binary unavailable for ", paste(missing, collapse = ", "),
+                "; resolving again with source packages.")
+        res <- ir_resolve_refs(refs_in, source = missing)
+        next
+      }
+      # Library timestamps may leave a cached inventory stale after restore.
+      installed <- utils::installed.packages(lib.loc = library_path,
+                                             noCache = TRUE)
+      stopifnot(all(pkgs %in% rownames(installed)),
+                all(installed[pkgs, "Version"] == res$version))
+      stopifnot(unlink(incomplete) == 0L)
+    }
+
+    break
   }
 
   ## 4b. Record the resolution so an identical request skips pak.
-  if (!is.null(marker)) {
+  if (cache_resolution) {
     dir.create(dirname(marker), recursive = TRUE, showWarnings = FALSE)
-    writeLines(c(ir_marker_source(exclude_newer), library_path), marker)
-  }
-  if (!is.null(primary_package) && !is.null(package_marker)) {
-    writeLines(primary_package, package_marker)
+    marker_source <- ir_marker_source()
+    writeLines(c(marker_source, library_path), marker)
+    if (!is.null(primary_package) && !is.null(package_marker))
+      writeLines(c(marker_source, library_path, primary_package),
+                 package_marker)
+  } else {
+    ir_invalidate_primary_package_markers(marker)
+    if (unlink(marker) != 0L)
+      stop("could not invalidate the previous resolution marker",
+           call. = FALSE)
   }
   writeLines(library_path, result_file)
   if (!is.null(package_result_file)) {

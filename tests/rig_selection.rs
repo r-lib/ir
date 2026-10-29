@@ -111,6 +111,7 @@ fn selected_r_binary(dir: &std::path::Path, label: &str) -> std::path::PathBuf {
             concat!(
                 "#!/bin/sh\n",
                 "if [ -n \"${{IR_RESOLVE_RESULT_FILE:-}}\" ]; then\n",
+                "  cat >/dev/null\n",
                 "  : > \"$IR_RESOLVE_RESULT_FILE\"\n",
                 "  exit 0\n",
                 "fi\n",
@@ -263,6 +264,257 @@ fn run_with_r_version_selects_highest_matching_installed_r() {
     );
     assert_success(&out);
     assert_stdout_contains(&out, "selected=old");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_r_version_range_does_not_select_devel() {
+    let cache_dir = temp_dir("ir-r-version-range-release-cache");
+    let bin_dir = temp_dir("ir-r-version-range-release-bin");
+    let release_dir = temp_dir("ir-r-version-range-release-r46");
+    let devel_dir = temp_dir("ir-r-version-range-release-devel");
+    let release_binary = selected_r_binary(&release_dir, "release");
+    let devel_binary = selected_r_binary(&devel_dir, "devel");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}},
+{{"name":"4.7","version":"4.7.0","aliases":["devel"],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            release_binary.display(),
+            devel_binary.display()
+        ),
+    );
+
+    let ranged = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&ranged);
+    assert_stdout_contains(&ranged, "selected=release");
+
+    let major = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "4", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&major);
+    assert_stdout_contains(&major, "selected=release");
+
+    let explicit = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "devel", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&explicit);
+    assert_stdout_contains(&explicit, "selected=devel");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.7","version":"4.7.0","aliases":["devel"],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            devel_binary.display()
+        ),
+    );
+
+    let only_devel = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &only_devel,
+        &["matches only installed R-devel", "--r-version devel"],
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_with_r_version_range_does_not_select_next() {
+    let cache_dir = temp_dir("ir-r-version-range-next-cache");
+    let bin_dir = temp_dir("ir-r-version-range-next-bin");
+    let release_dir = temp_dir("ir-r-version-range-next-r46");
+    let next_dir = temp_dir("ir-r-version-range-next-r47");
+    let release_binary = selected_r_binary(&release_dir, "release");
+    let next_binary = selected_r_binary(&next_dir, "next");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}},
+{{"name":"4.7","version":"4.7.0","aliases":["next"],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            release_binary.display(),
+            next_binary.display()
+        ),
+    );
+
+    let ranged = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&ranged);
+    assert_stdout_contains(&ranged, "selected=release");
+
+    let explicit = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", "next", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_success(&explicit);
+    assert_stdout_contains(&explicit, "selected=next");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.7","version":"4.7.0","aliases":["next"],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            next_binary.display()
+        ),
+    );
+
+    let only_next = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args(["run", "--r-version", ">= 4.2", "-e", "cat('ignored')"])
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &only_next,
+        &["matches only installed R-next", "--r-version next"],
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_frontmatter_r_version_range_and_exclude_newer_selects_compatible_minor() {
+    let cache_dir = temp_dir("ir-r-version-range-date-cache");
+    let bin_dir = temp_dir("ir-r-version-range-date-bin");
+    let r43_dir = temp_dir("ir-r-version-range-date-r43");
+    let r46_dir = temp_dir("ir-r-version-range-date-r46");
+    let script = temp_path("ir-r-version-range-date", "R");
+    let r43_binary = selected_r_binary(&r43_dir, "r43");
+    let r46_binary = selected_r_binary(&r46_dir, "r46");
+    fs::write(
+        &script,
+        concat!(
+            "#| packages:\n",
+            "#|   - dplyr\n",
+            "#|   - tidyr==1.3.1\n",
+            "#| r-version: \">= 4.3\"\n",
+            "#| exclude-newer: \"2024-02-01\"\n",
+            "cat('ignored')\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[
+{{"name":"4.3","version":"4.3.3","aliases":[],"binary":"{}"}},
+{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}}
+]"#,
+                "\nJSON\n",
+            ),
+            r43_binary.display(),
+            r46_binary.display()
+        ),
+    );
+
+    let compatible = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_EXCLUDE_NEWER")
+        .env_remove("IR_RSCRIPT")
+        .env_remove("IR_R_VERSION")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_success(&compatible);
+    assert_stdout_contains(&compatible, "selected=r43");
+
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}}]"#,
+                "\nJSON\n",
+            ),
+            r46_binary.display()
+        ),
+    );
+
+    let incompatible = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_EXCLUDE_NEWER")
+        .env_remove("IR_RSCRIPT")
+        .env_remove("IR_R_VERSION")
+        .arg("run")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &incompatible,
+        &[
+            "`r-version: >= 4.3`",
+            "`exclude-newer: 2024-02-01`",
+            "R 4.3 was the latest R minor released by that date",
+        ],
+    );
 }
 
 #[cfg(unix)]
@@ -912,54 +1164,6 @@ fn env_rscript_overrides_frontmatter_r_version_without_rig() {
 
 #[cfg(unix)]
 #[test]
-fn env_r_version_overrides_frontmatter_rscript() {
-    let cache_dir = temp_dir("ir-env-r-version-frontmatter-rscript-cache");
-    let bin_dir = temp_dir("ir-env-r-version-frontmatter-rscript-bin");
-    let rscript_dir = temp_dir("ir-env-r-version-frontmatter-rscript-r");
-    let rig_r_dir = temp_dir("ir-env-r-version-frontmatter-rscript-rig-r");
-    let script = temp_path("ir-env-r-version-frontmatter-rscript", "R");
-
-    let frontmatter_rscript = rscript_dir.join("Rscript");
-    write_selected_rscript(&frontmatter_rscript, "frontmatter-rscript");
-    fs::write(
-        &script,
-        format!(
-            "#| rscript: {}\ncat('ignored')\n",
-            r_string(&frontmatter_rscript)
-        ),
-    )
-    .unwrap();
-
-    let rig_binary = selected_r_binary(&rig_r_dir, "env-r-version");
-    write_executable(
-        &bin_dir.join("rig"),
-        &format!(
-            concat!(
-                "#!/bin/sh\n",
-                "cat <<'JSON'\n",
-                r#"[{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}]"#,
-                "\nJSON\n",
-            ),
-            rig_binary.display()
-        ),
-    );
-
-    let out = ir()
-        .env("IR_CACHE_DIR", &cache_dir)
-        .env("IR_R_VERSION", "4.4")
-        .env("PATH", path_with_bin_dir(&bin_dir))
-        .env_remove("IR_RSCRIPT")
-        .arg("run")
-        .arg(&script)
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_stdout_contains(&out, "selected=env-r-version");
-}
-
-#[cfg(unix)]
-#[test]
 fn cli_rscript_overrides_env_r_version_and_frontmatter_r_version() {
     let cache_dir = temp_dir("ir-cli-rscript-precedence-cache");
     let bin_dir = temp_dir("ir-cli-rscript-precedence-bin");
@@ -1062,18 +1266,15 @@ fn env_r_selection_conflict_errors() {
 
 #[cfg(unix)]
 #[test]
-fn frontmatter_r_selection_conflict_errors() {
-    let cache_dir = temp_dir("ir-frontmatter-r-selection-conflict-cache");
-    let rscript_dir = temp_dir("ir-frontmatter-r-selection-conflict-r");
-    let script = temp_path("ir-frontmatter-r-selection-conflict", "R");
+fn run_frontmatter_rscript_errors() {
+    let cache_dir = temp_dir("ir-frontmatter-rscript-cache");
+    let rscript_dir = temp_dir("ir-frontmatter-rscript-r");
+    let script = temp_path("ir-frontmatter-rscript", "R");
     let rscript = rscript_dir.join("Rscript");
     write_selected_rscript(&rscript, "unused");
     fs::write(
         &script,
-        format!(
-            "#| r-version: \"4.4\"\n#| rscript: {}\ncat('ignored')\n",
-            r_string(&rscript)
-        ),
+        format!("#| rscript: {}\ncat('ignored')\n", r_string(&rscript)),
     )
     .unwrap();
 
@@ -1088,7 +1289,49 @@ fn frontmatter_r_selection_conflict_errors() {
 
     assert_failure_contains(
         &out,
-        &["frontmatter cannot set both `r-version` and `rscript`"],
+        &[
+            "frontmatter `rscript` is no longer supported",
+            "Use `--rscript` or `IR_RSCRIPT` instead",
+        ],
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn render_frontmatter_rscript_errors() {
+    let cache_dir = temp_dir("ir-render-frontmatter-rscript-cache");
+    let quarto_dir = temp_dir("ir-render-frontmatter-rscript-quarto");
+    let rscript_dir = temp_dir("ir-render-frontmatter-rscript-r");
+    let doc = temp_path("ir-render-frontmatter-rscript", "qmd");
+    let rscript = rscript_dir.join("Rscript");
+
+    write_selected_rscript(&rscript, "unused");
+    write_executable(&quarto_dir.join("quarto"), "#!/bin/sh\nexit 0\n");
+    fs::write(
+        &doc,
+        format!(
+            "---\ntitle: rscript render\nir:\n  rscript: {}\n---\n",
+            r_string(&rscript)
+        ),
+    )
+    .unwrap();
+
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_QUARTO", quarto_dir.join("quarto"))
+        .env_remove("IR_RSCRIPT")
+        .env_remove("IR_R_VERSION")
+        .arg("render")
+        .arg(&doc)
+        .output()
+        .unwrap();
+
+    assert_failure_contains(
+        &out,
+        &[
+            "frontmatter `ir.rscript` is no longer supported",
+            "Use `--rscript` or `IR_RSCRIPT` instead",
+        ],
     );
 }
 

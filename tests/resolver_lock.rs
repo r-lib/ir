@@ -85,6 +85,15 @@ if (nzchar(Sys.getenv("IR_PYTHON_RESULT_FILE"))) {
     .unwrap();
 }
 
+#[cfg(unix)]
+fn python_resolver_lock_command() -> Command {
+    let mut command = ir();
+    // The profile supplies fake Python without invoking uv. Ambient uv
+    // overrides would disable the resolution markers this fixture exercises.
+    remove_uv_resolver_env(&mut command);
+    command
+}
+
 struct ResolverLockProbe<'a> {
     user_cache_dir: &'a Path,
     profile: &'a Path,
@@ -153,17 +162,6 @@ fn resolver_probe_count(entered: &Path) -> usize {
         .count()
 }
 
-fn remove_python_resolver_env(cmd: &mut Command) {
-    for (name, _) in std::env::vars_os() {
-        let remove = name
-            .to_str()
-            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV");
-        if remove {
-            cmd.env_remove(name);
-        }
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn concurrent_python_render_serializes_python_resolver_tooling() {
@@ -195,7 +193,7 @@ ir:
     )
     .unwrap();
 
-    let mut first = ir();
+    let mut first = python_resolver_lock_command();
     first
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &user_cache_dir)
@@ -210,12 +208,10 @@ ir:
         .arg(&doc)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    remove_python_resolver_env(&mut first);
     let first = first.spawn().unwrap();
     let first = wait_for_resolver_probe(first, &active);
 
-    let mut second = ir();
-    second
+    let second = python_resolver_lock_command()
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &user_cache_dir)
         .env("R_PROFILE_USER", &profile)
@@ -226,9 +222,9 @@ ir:
         .env("IR_TEST_SLEEP", "1")
         .env("IR_TEST_PYTHON", &python)
         .args(["render"])
-        .arg(&doc);
-    remove_python_resolver_env(&mut second);
-    let second = second.output().unwrap();
+        .arg(&doc)
+        .output()
+        .unwrap();
     let first = first.wait_with_output().unwrap();
 
     assert_success(&first);

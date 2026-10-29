@@ -6,7 +6,7 @@
 
 set -eu
 
-TEST_R_SPEC="oldrel/2"
+TEST_R_SPEC="4.3"
 TEST_R_NAME=""
 TEST_R_VERSION=""
 TEST_R_EXCLUDE_NEWER=""

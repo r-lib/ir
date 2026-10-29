@@ -1,9 +1,9 @@
-use std::convert::Infallible;
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, ExitStatus};
+use std::process::{Command, ExitCode};
 
-fn exec_spawn(cmd: &mut Command) -> std::io::Result<Infallible> {
+fn exec_or_status(cmd: &mut Command) -> io::Result<ExitCode> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -37,23 +37,24 @@ fn ir_path(rx: &Path) -> std::io::Result<PathBuf> {
     Ok(ir)
 }
 
-fn run() -> std::io::Result<ExitStatus> {
+fn run() -> io::Result<ExitCode> {
+    let user_args = std::env::args_os().skip(1).collect::<Vec<_>>();
     let current_exe = std::env::current_exe()?;
     let ir = ir_path(&current_exe)?;
     let args = ["tool", "rx"]
         .iter()
         .map(OsString::from)
-        .chain(std::env::args_os().skip(1))
+        .chain(user_args)
         .collect::<Vec<_>>();
 
     let mut cmd = Command::new(ir);
     cmd.args(&args);
-    match exec_spawn(&mut cmd)? {}
+    exec_or_status(&mut cmd)
 }
 
 fn main() -> ExitCode {
     match run() {
-        Ok(status) => u8::try_from(status.code().unwrap_or(2)).unwrap_or(2).into(),
+        Ok(status) => status,
         Err(err) => {
             eprintln!("rx: {err}");
             ExitCode::from(2)

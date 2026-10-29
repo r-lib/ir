@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn command_on_path(command: &str) -> Option<OsString> {
@@ -38,11 +39,77 @@ fn executable_file(path: &Path) -> bool {
 static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn ir() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ir"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
+    configure_r_test_caches(&mut command);
+    command
+        .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
+        .env_remove("IR_PREFER_BINARIES")
+        .env_remove("IR_NO_LOCAL_SOURCES");
+    command
 }
 
 pub(crate) fn rx() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_rx"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rx"));
+    configure_r_test_caches(&mut command);
+    command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
+    command
+}
+
+pub(crate) fn rscript_command() -> Command {
+    let mut command = Command::new(rscript());
+    configure_r_test_caches(&mut command);
+    command
+}
+
+// For fixtures that supply fake Python without invoking uv.
+pub(crate) fn remove_uv_resolver_env(command: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
+        {
+            command.env_remove(name);
+        }
+    }
+}
+
+fn configure_r_test_caches(command: &mut Command) {
+    thread_local! {
+        static CACHE: TempPath = temp_dir("ir-test-r-caches");
+    }
+    let configure = |command: &mut Command, root: &Path| {
+        for (variable, subdir) in [
+            ("RENV_PATHS_ROOT", "renv"),
+            ("RENV_PATHS_CACHE", "renv/cache"),
+            ("RENV_PATHS_BINARY", "renv/binary"),
+            ("RENV_PATHS_CELLAR", "renv/cellar"),
+            ("R_PKG_CACHE_DIR", "pak"),
+            ("PKG_PACKAGE_CACHE_DIR", "pak/packages"),
+        ] {
+            command.env(variable, root.join(subdir));
+        }
+        // The driver keeps mutable source archives under its IR cache lock.
+        // The warm-cache script also supplies its own temporary source cache.
+        command.env_remove("RENV_PATHS_SOURCE");
+        // pkgdepends owns these mutable paths inside its R session tempdir.
+        command
+            .env_remove("PKG_CACHE_DIR")
+            .env_remove("PKG_METADATA_CACHE_DIR");
+    };
+    if let Some(root) = std::env::var_os("IR_TEST_R_CACHE_DIR") {
+        assert!(!root.is_empty(), "IR_TEST_R_CACHE_DIR must not be empty");
+        configure(command, Path::new(&root));
+    } else {
+        CACHE.with(|root| configure(command, root));
+    }
+}
+
+fn test_tool_store_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let (dir, _) = unique_dir_in(&std::env::temp_dir(), "ir-test-tool-store");
+        dir
+    })
 }
 
 pub(crate) fn ir_bin_name() -> String {
@@ -212,6 +279,35 @@ pub(crate) fn copy_dir_files(source: &Path, destination: &Path) {
     }
 }
 
+pub(crate) fn copy_dir_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap_or_else(|e| {
+        panic!(
+            "failed to create fixture copy {}: {e}",
+            destination.display()
+        )
+    });
+    for entry in fs::read_dir(source)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", source.display()))
+    {
+        let entry = entry.unwrap_or_else(|e| {
+            panic!("failed to read fixture entry in {}: {e}", source.display())
+        });
+        let path = entry.path();
+        let target = destination.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_tree(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap_or_else(|e| {
+                panic!(
+                    "failed to copy fixture {} to {}: {e}",
+                    path.display(),
+                    target.display()
+                )
+            });
+        }
+    }
+}
+
 pub(crate) fn fixture_copy(name: &str, prefix: &str) -> TempPath {
     let source = fixture(name);
     let destination = temp_dir(prefix);
@@ -276,7 +372,6 @@ pub(crate) fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
 }

@@ -1,8 +1,6 @@
-#[cfg(target_os = "linux")]
 mod support;
 
-#[cfg(target_os = "linux")]
-use support::{rscript, temp_cache, temp_dir, temp_path};
+use support::{rscript_command, temp_cache, temp_dir, temp_path};
 
 use std::fs;
 use std::path::Path;
@@ -56,6 +54,91 @@ fn readme_install_commands_are_copyable() {
     );
 }
 
+#[test]
+fn public_windows_install_guidance_recommends_scoop() {
+    for file in ["README.md", "docs/config.qmd"] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        let add_bucket = text
+            .find("scoop bucket add r-bucket https://github.com/cderv/r-bucket.git")
+            .unwrap_or_else(|| panic!("{file} should add the Scoop bucket"));
+        let install = text
+            .find("scoop install ir")
+            .unwrap_or_else(|| panic!("{file} should install ir with Scoop"));
+        assert!(add_bucket < install, "{file}");
+        assert!(
+            text.contains("https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1"),
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn public_install_guidance_includes_uv_tool_install() {
+    for file in ["README.md", "docs/config.qmd"] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        assert!(text.contains("uv tool install r-lib-ir"), "{file}");
+    }
+}
+
+#[test]
+fn public_ir_links_use_r_lib_owner() {
+    for file in [
+        "README.md",
+        "docs/config.qmd",
+        "scripts/install.sh",
+        "scripts/install.ps1",
+    ] {
+        let text = fs::read_to_string(repo_root().join(file)).unwrap();
+        assert!(!text.contains("t-kalinowski/ir"), "{file}");
+        assert!(!text.contains("t-kalinowski.github.io/ir"), "{file}");
+        assert!(
+            !text.contains("raw.githubusercontent.com/t-kalinowski/ir"),
+            "{file}"
+        );
+    }
+
+    let readme = fs::read_to_string(repo_root().join("README.md")).unwrap();
+    assert!(readme.contains("https://r-lib.github.io/ir/"), "{readme}");
+    assert!(
+        readme.contains("https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh"),
+        "{readme}"
+    );
+    assert!(
+        readme.contains("https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1"),
+        "{readme}"
+    );
+
+    let sh = fs::read_to_string(repo_root().join("scripts/install.sh")).unwrap();
+    assert!(sh.contains("OWNER=\"r-lib\""), "{sh}");
+
+    let ps1 = fs::read_to_string(repo_root().join("scripts/install.ps1")).unwrap();
+    assert!(ps1.contains("$Owner = \"r-lib\""), "{ps1}");
+}
+
+#[test]
+fn public_installers_recommend_rig_when_missing() {
+    let sh_path = repo_root().join("scripts/install.sh");
+    let sh = fs::read_to_string(&sh_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
+    assert!(sh.contains("command -v rig"), "{sh}");
+    assert!(sh.contains("rig was not found on PATH."), "{sh}");
+    assert!(sh.contains("brew install --cask rig"), "{sh}");
+    assert!(sh.contains("sudo apt install r-rig"), "{sh}");
+    assert!(sh.contains("https://github.com/r-lib/rig#id-macos"), "{sh}");
+    assert!(sh.contains("https://github.com/r-lib/rig#id-linux"), "{sh}");
+
+    let ps1_path = repo_root().join("scripts/install.ps1");
+    let ps1 = fs::read_to_string(&ps1_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
+    assert!(ps1.contains("Get-Command rig"), "{ps1}");
+    assert!(ps1.contains("rig was not found on PATH."), "{ps1}");
+    assert!(ps1.contains("winget install --id posit.rig"), "{ps1}");
+    assert!(
+        ps1.contains("https://github.com/r-lib/rig#id-windows"),
+        "{ps1}"
+    );
+}
+
 #[cfg(unix)]
 fn dev_deps_sh_plan(platform: &str) -> Output {
     Command::new("sh")
@@ -93,10 +176,10 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_stdout_contains(&out, ".deb");
     assert_stdout_contains(&out, "quarto-linux-");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
-    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
-    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-4.3-version>");
+    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-4.3>");
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
         "{}",
@@ -122,7 +205,7 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_stdout_contains(&out, "installer -pkg");
     assert_stdout_contains(&out, "brew install --cask quarto");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("brew tap r-lib/rig"), "{stdout}");
@@ -159,7 +242,7 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     assert_success(&out);
     assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
     assert_stdout_contains(&out, "r-rig_");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("https://sh.rustup.rs"), "{stdout}");
@@ -176,7 +259,7 @@ fn install_dev_deps_sh_can_skip_test_r() {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("rig add oldrel/2"), "{stdout}");
+    assert!(!stdout.contains("rig add 4.3"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_VERSION"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_EXCLUDE_NEWER"), "{stdout}");
 }
@@ -193,10 +276,14 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
     assert!(workflow.contains("-Skip rust, python, quarto, r-release"));
+    assert!(workflow.contains("GITHUB_TOKEN: ${{ github.token }}"));
     assert!(!workflow.contains("IR_TEST_R_VERSION=4.4.3"));
     assert!(!workflow.contains("IR_TEST_R_EXCLUDE_NEWER=2025-02-28"));
     assert!(workflow.contains("any::bookdown"));
     assert!(workflow.contains("any::xfun"));
+    assert!(workflow.contains("${cran%/latest}/2024-02-01"));
+    assert!(workflow.contains("tidyr@1.3.1"));
+    assert!(workflow.contains("gt@0.10.1"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
     assert!(!workflow
         .lines()
@@ -300,6 +387,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(warm_script.contains("Sys.getenv(\"R_LIBS_USER\", unset = \"\")"));
     assert!(warm_script.contains("dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)"));
     assert!(warm_script.contains(".libPaths(c(user_libs, .libPaths()))"));
+    assert!(warm_script.contains("Sys.setenv(RENV_PATHS_SOURCE = source_cache)"));
     assert!(warm_script.contains("pak::repo_resolve(\"PPM@latest\")"));
     assert!(!warm_script.contains("https://cran.r-project.org"));
 }
@@ -312,9 +400,46 @@ fn warm_renv_cache_replaces_unnamed_at_cran_with_real_package() {
     let profile = temp_path("ir-warm-real-profile", "R");
     fs::write(&profile, "options(repos = \"@CRAN@\")\n").unwrap();
 
-    let out = Command::new(rscript())
+    let out = rscript_command()
         .current_dir(repo_root())
         .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_LIBS_USER", &user_library)
+        .env("R_PROFILE_USER", &profile)
+        .env("CC", "false")
+        .env("CXX", "false")
+        .env("CXX11", "false")
+        .env("CXX14", "false")
+        .env("CXX17", "false")
+        .env("CXX20", "false")
+        .args(["scripts/warm-renv-cache.R", "zip"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+}
+
+#[test]
+fn warm_renv_cache_ignores_corrupt_user_source_cache() {
+    let renv_cache = temp_cache("ir-warm-corrupt-renv-cache");
+    let user_library = temp_dir("ir-warm-corrupt-user-library");
+    let user_cache = temp_dir("ir-warm-corrupt-user-cache");
+    let profile = temp_path("ir-warm-corrupt-profile", "R");
+    fs::write(&profile, "options(repos = \"@CRAN@\")\n").unwrap();
+
+    let corrupt_archive = user_cache
+        .join("R")
+        .join("renv")
+        .join("source")
+        .join("repository")
+        .join("cli")
+        .join("cli_3.6.6.tar.gz");
+    fs::create_dir_all(corrupt_archive.parent().unwrap()).unwrap();
+    fs::write(&corrupt_archive, b"partial archive").unwrap();
+
+    let out = rscript_command()
+        .current_dir(repo_root())
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_USER_CACHE_DIR", &user_cache)
         .env("R_LIBS_USER", &user_library)
         .env("R_PROFILE_USER", &profile)
         .env("CC", "false")
@@ -342,7 +467,7 @@ fn warm_renv_cache_rewrites_plain_ppm_latest_with_real_binary_package() {
     )
     .unwrap();
 
-    let out = Command::new(rscript())
+    let out = rscript_command()
         .current_dir(repo_root())
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_LIBS_USER", &user_library)
@@ -399,7 +524,7 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
     let sh_path = repo_root().join("scripts/install-dev-deps.sh");
     let sh = fs::read_to_string(&sh_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", sh_path.display()));
-    assert!(sh.contains("TEST_R_SPEC=\"oldrel/2\""));
+    assert!(sh.contains("TEST_R_SPEC=\"4.3\""));
     assert!(sh.contains("scripts/resolve-test-r.py \"$TEST_R_SPEC\""));
     assert!(sh.contains("sed -n '4p' \"$metadata_file\""));
     assert!(sh.contains("IR_TEST_R_EXCLUDE_NEWER"));
@@ -412,7 +537,7 @@ fn install_dev_deps_scripts_persist_dynamic_test_r_metadata() {
     let ps1_path = repo_root().join("scripts/install-dev-deps.ps1");
     let ps1 = fs::read_to_string(&ps1_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", ps1_path.display()));
-    assert!(ps1.contains("$TestRSpec = \"oldrel/2\""));
+    assert!(ps1.contains("$TestRSpec = \"4.3\""));
     assert!(ps1.contains("scripts/resolve-test-r.py\" $TestRSpec"));
     assert!(ps1.contains("$fields = @($metadata)"));
     assert!(!ps1.contains(r#"-split "\s+""#));
@@ -460,10 +585,12 @@ fn install_dev_deps_scripts_install_rig_from_upstream_release_without_pinned_ver
 #[test]
 fn cli_tests_do_not_use_global_e2e_lock() {
     let tests = [
+        "tests/docs_examples.rs",
         "tests/run.rs",
         "tests/resolver_lock.rs",
         "tests/rig_selection.rs",
         "tests/render.rs",
+        "tests/preview.rs",
         "tests/tool.rs",
         "tests/support/mod.rs",
     ]
@@ -477,6 +604,33 @@ fn cli_tests_do_not_use_global_e2e_lock() {
 
     assert!(!tests.contains("static E2E_LOCK"), "use per-test isolation");
     assert!(!tests.contains("e2e_lock()"), "use per-test isolation");
+}
+
+#[test]
+fn local_check_runs_all_ci_diagnostics_and_is_required_for_agents() {
+    let check_path = repo_root().join("scripts/check.sh");
+    let check = fs::read_to_string(&check_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", check_path.display()));
+    let workflow_path = repo_root().join(".github/workflows/ci.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", workflow_path.display()));
+
+    for command in [
+        "cargo fmt --all -- --check",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo nextest run --verbose --no-fail-fast",
+    ] {
+        assert!(check.contains(command), "{check_path:?} omits `{command}`");
+        assert!(
+            workflow.contains(command),
+            "{workflow_path:?} omits `{command}`"
+        );
+    }
+
+    let agents_path = repo_root().join("AGENTS.md");
+    let agents = fs::read_to_string(&agents_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", agents_path.display()));
+    assert!(agents.contains("scripts/check.sh"), "{agents_path:?}");
 }
 
 #[test]
@@ -542,15 +696,15 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert_stdout_contains(&out, "winget install --id posit.rig");
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
     assert_stdout_contains(&out, "rig add release");
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     assert!(
         !String::from_utf8_lossy(&out.stdout).contains("rig default release"),
         "{}",
         output_text(&out)
     );
-    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-oldrel/2-version>");
-    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-oldrel/2>");
-    assert_stdout_contains(&out, "IR_TEST_RSCRIPT='<Rscript-for-oldrel/2>'");
+    assert_stdout_contains(&out, "IR_TEST_R_VERSION=<resolved-4.3-version>");
+    assert_stdout_contains(&out, "IR_TEST_R_EXCLUDE_NEWER=<release-date-for-4.3>");
+    assert_stdout_contains(&out, "IR_TEST_RSCRIPT='<Rscript-for-4.3>'");
 }
 
 #[cfg(windows)]
@@ -582,7 +736,7 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
         &out,
         "ir-rig-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
     );
-    assert_stdout_contains(&out, "rig add oldrel/2");
+    assert_stdout_contains(&out, "rig add 4.3");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("choco install rig"), "{stdout}");
     assert!(
@@ -611,7 +765,7 @@ fn install_dev_deps_ps1_can_skip_test_r() {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("rig add oldrel/2"), "{stdout}");
+    assert!(!stdout.contains("rig add 4.3"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_VERSION"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_R_EXCLUDE_NEWER"), "{stdout}");
     assert!(!stdout.contains("IR_TEST_RSCRIPT"), "{stdout}");
@@ -629,6 +783,9 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(script.contains("posit.rig"));
     assert!(!script.contains("choco"));
     assert!(script.contains("https://api.github.com/repos/r-lib/rig/releases/latest"));
+    assert!(script.contains("function Get-GitHubApiHeaders"));
+    assert!(script.contains("$env:GITHUB_TOKEN"));
+    assert!(script.contains("-Headers $headers"));
     assert!(script.contains("https://github.com/r-lib/rig/releases/download/$tag/$asset"));
     assert!(script.contains("Posit.Quarto"));
     assert!(script.contains("ProgramFiles \"rig\""));
@@ -645,7 +802,7 @@ fn install_dev_deps_ps1_documents_windows_bootstrap() {
     assert!(!script.contains(r#"Test-AnyTool @("python", "python3")"#));
     assert!(!script.contains(r#"@("python", "python3", "py")"#));
     assert!(script.contains("R\\bin"));
-    assert!(script.contains("$TestRSpec = \"oldrel/2\""));
+    assert!(script.contains("$TestRSpec = \"4.3\""));
     assert!(script.contains("IR_TEST_R_VERSION=$TestRVersion"));
     assert!(script.contains("IR_TEST_R_EXCLUDE_NEWER=$TestRExcludeNewer"));
     assert!(
@@ -718,8 +875,13 @@ fn universal_setup_uses_resolved_test_r_snapshot_date() {
     let script = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
+    assert!(script.contains("rig add 4.3"));
+    assert!(script.contains("scripts/resolve-test-r.py 4.3"));
     assert!(script.contains("test_r_exclude_newer=\"${test_r_metadata[2]}\""));
     assert!(script.contains("https://packagemanager.posit.co/cran/${test_r_exclude_newer}"));
+    assert!(script.contains("https://packagemanager.posit.co/cran/2024-02-01"));
+    assert!(script.contains("\"tidyr@1.3.1\""));
+    assert!(script.contains("\"gt@0.10.1\""));
     assert!(!script.contains("https://packagemanager.posit.co/cran/2026-06-01"));
 }
 
@@ -821,4 +983,299 @@ fi
     );
 
     let _ = fs::remove_dir_all(&temp);
+}
+
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    any(target_arch = "aarch64", target_arch = "x86_64")
+))]
+mod release_script_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use support::{make_executable, write_executable, TempPath};
+
+    struct ReleaseFixture {
+        _root: TempPath,
+        repo: PathBuf,
+        origin: PathBuf,
+        assets: PathBuf,
+        log: PathBuf,
+        path: OsString,
+    }
+
+    impl ReleaseFixture {
+        fn new() -> Self {
+            let root = temp_dir("ir-release-script");
+            let repo = root.join("repo");
+            let origin = root.join("origin.git");
+            let bin = root.join("bin");
+            let assets = root.join("assets");
+            fs::create_dir_all(repo.join("scripts")).unwrap();
+            fs::create_dir_all(&bin).unwrap();
+            fs::create_dir_all(&assets).unwrap();
+
+            let release_script = repo_root().join("scripts/release.sh");
+            fs::copy(&release_script, repo.join("scripts/release.sh")).unwrap();
+            make_executable(&repo.join("scripts/release.sh"));
+            fs::write(
+                repo.join("Cargo.toml"),
+                "[package]\nname = \"ir\"\nversion = \"0.3.0+dev\"\n",
+            )
+            .unwrap();
+            fs::write(
+                repo.join("Cargo.lock"),
+                concat!(
+                    "version = 4\n\n",
+                    "[[package]]\nname = \"helper\"\nversion = \"0.4.0\"\n\n",
+                    "[[package]]\nname = \"ir\"\nversion = \"0.3.0+dev\"\n",
+                ),
+            )
+            .unwrap();
+
+            let log = root.join("release.log");
+            fs::write(&log, "").unwrap();
+            write_executable(
+                &repo.join("scripts/check.sh"),
+                "#!/bin/sh\nset -eu\nprintf 'check\\n' >> \"$IR_RELEASE_TEST_LOG\"\n",
+            );
+            write_executable(
+                &bin.join("gh"),
+                r#"#!/bin/sh
+set -eu
+printf 'gh %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1:$2" in
+  repo:view) printf 'r-lib/ir\n' ;;
+  run:list)
+    case " $* " in
+      *" release.yml "*) printf '202\n' ;;
+      *) printf '101\n' ;;
+    esac
+    ;;
+  run:watch) ;;
+  release:view) printf 'https://example.test/v0.4.0\n' ;;
+  release:download)
+    destination=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--dir" ]; then
+        destination="$2"
+        shift 2
+      else
+        shift
+      fi
+    done
+    cp "$IR_RELEASE_TEST_ASSETS"/* "$destination/"
+    ;;
+  *) echo "unexpected gh command: $*" >&2; exit 98 ;;
+esac
+"#,
+            );
+            write_executable(
+                &bin.join("Rscript"),
+                "#!/bin/sh\nset -eu\nprintf 'Rscript %s\\n' \"$*\" >> \"$IR_RELEASE_TEST_LOG\"\n",
+            );
+
+            let target = release_target();
+            let package = format!("ir-{target}");
+            let package_dir = root.join(&package);
+            fs::create_dir_all(&package_dir).unwrap();
+            write_executable(
+                &package_dir.join("ir"),
+                r#"#!/bin/sh
+set -eu
+printf 'artifact ir %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'ir 0.4.0\n' ;;
+  --help) ;;
+  run) "$3" -e "$5" ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
+            write_executable(
+                &package_dir.join("rx"),
+                r#"#!/bin/sh
+set -eu
+printf 'artifact rx %s\n' "$*" >> "$IR_RELEASE_TEST_LOG"
+case "$1" in
+  --version) printf 'rx 0.4.0\n' ;;
+  --help) ;;
+  *) exit 98 ;;
+esac
+"#,
+            );
+            let archive_name = format!("{package}.tar.gz");
+            let archive = assets.join(&archive_name);
+            let output = Command::new("tar")
+                .current_dir(&root)
+                .args(["-czf", archive.to_str().unwrap(), &package])
+                .output()
+                .unwrap();
+            assert_success(&output);
+            use sha2::{Digest as _, Sha256};
+            let digest = Sha256::digest(fs::read(&archive).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            fs::write(
+                assets.join("SHA256SUMS.txt"),
+                format!("{digest}  {archive_name}\n"),
+            )
+            .unwrap();
+
+            run_git(&root, &["init", "--bare", origin.to_str().unwrap()]);
+            run_git(&repo, &["init", "-b", "main"]);
+            run_git(&repo, &["config", "user.email", "release-test@example.com"]);
+            run_git(&repo, &["config", "user.name", "Release Test"]);
+            run_git(&repo, &["add", "."]);
+            run_git(&repo, &["commit", "-m", "Initial development"]);
+            run_git(
+                &repo,
+                &["remote", "add", "origin", origin.to_str().unwrap()],
+            );
+            run_git(&repo, &["push", "-u", "origin", "main"]);
+
+            let mut paths = vec![bin];
+            paths.extend(std::env::split_paths(
+                &std::env::var_os("PATH").unwrap_or_default(),
+            ));
+
+            Self {
+                _root: root,
+                repo,
+                origin,
+                assets,
+                log,
+                path: std::env::join_paths(paths).unwrap(),
+            }
+        }
+
+        fn run(&self, version: &str) -> Output {
+            Command::new(self.repo.join("scripts/release.sh"))
+                .current_dir(&self.repo)
+                .arg(version)
+                .env("PATH", &self.path)
+                .env("IR_RELEASE_TEST_LOG", &self.log)
+                .env("IR_RELEASE_TEST_ASSETS", &self.assets)
+                .output()
+                .unwrap()
+        }
+
+        fn git_text(&self, args: &[&str]) -> String {
+            command_text(Command::new("git").current_dir(&self.repo).args(args))
+        }
+
+        fn origin_text(&self, args: &[&str]) -> String {
+            command_text(
+                Command::new("git")
+                    .args(["--git-dir", self.origin.to_str().unwrap()])
+                    .args(args),
+            )
+        }
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_success(&output);
+    }
+
+    fn command_text(command: &mut Command) -> String {
+        let output = command.output().unwrap();
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    fn release_target() -> &'static str {
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => "aarch64-apple-darwin",
+            ("macos", "x86_64") => "x86_64-apple-darwin",
+            ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+            ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+            (os, arch) => panic!("unsupported release test host: {os}/{arch}"),
+        }
+    }
+
+    fn assert_event_order(log: &str, events: &[&str]) {
+        let mut rest = log;
+        for event in events {
+            let position = rest
+                .find(event)
+                .unwrap_or_else(|| panic!("missing event {event:?}\n{log}"));
+            rest = &rest[position + event.len()..];
+        }
+    }
+
+    #[test]
+    fn release_script_rejects_invalid_version_before_preflight() {
+        let output = Command::new(repo_root().join("scripts/release.sh"))
+            .arg("v0.4.0")
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success(), "{}", output_text(&output));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("stable version like 0.4.0"),
+            "{}",
+            output_text(&output)
+        );
+    }
+
+    #[test]
+    fn release_script_runs_the_release_sequence() {
+        let fixture = ReleaseFixture::new();
+
+        let output = fixture.run("0.4.0");
+
+        assert_success(&output);
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.toml"))
+            .unwrap()
+            .contains("version = \"0.4.0+dev\""));
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.lock"))
+            .unwrap()
+            .contains("name = \"ir\"\nversion = \"0.4.0+dev\""));
+        assert!(fs::read_to_string(fixture.repo.join("Cargo.lock"))
+            .unwrap()
+            .contains("name = \"helper\"\nversion = \"0.4.0\""));
+        assert_eq!(
+            fixture.git_text(&["log", "-2", "--format=%s"]),
+            "Mark post-release builds as development versions\nRelease v0.4.0"
+        );
+        let release_commit = fixture.git_text(&["rev-parse", "HEAD^"]);
+        assert_eq!(
+            fixture.git_text(&["rev-parse", "v0.4.0^{}"]),
+            release_commit
+        );
+        assert_eq!(fixture.git_text(&["cat-file", "-t", "v0.4.0"]), "tag");
+        assert_eq!(
+            fixture.origin_text(&["rev-parse", "v0.4.0^{}"]),
+            release_commit
+        );
+        assert_eq!(
+            fixture.origin_text(&["rev-parse", "refs/heads/main"]),
+            fixture.git_text(&["rev-parse", "HEAD"])
+        );
+
+        let log = fs::read_to_string(&fixture.log).unwrap();
+        assert_event_order(
+            &log,
+            &[
+                "gh repo view",
+                "gh repo view",
+                "check",
+                "gh run watch 101",
+                "gh run watch 202",
+                "gh release view v0.4.0",
+                "gh release download v0.4.0",
+                "artifact ir --version",
+                "artifact rx --version",
+                "artifact ir run",
+                "Rscript -e",
+                "gh run watch 101",
+            ],
+        );
+    }
 }

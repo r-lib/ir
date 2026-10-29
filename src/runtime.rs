@@ -13,7 +13,7 @@ use time::{Date, OffsetDateTime};
 use crate::driver;
 use crate::lock::{resolver_lock_path, FileLock};
 use crate::python;
-use crate::quarto::{self, RenderSource};
+use crate::quarto::{self, QuartoCommand, QuartoOptions, QuartoSource};
 use crate::resolve_cache;
 use crate::rig;
 use crate::script::RunSource;
@@ -28,6 +28,9 @@ const RESOLVE_DRIVER: &str = concat!(
 );
 const TOOLING_RESTART_STATUS: i32 = 86;
 const TOOLING_SAFE_MODE_ENV: &str = "IR_TOOLING_SAFE_MODE";
+const REFRESH_ENV: &str = "IR_REFRESH";
+const NO_LOCAL_SOURCES_ENV: &str = "IR_NO_LOCAL_SOURCES";
+const NO_LOCAL_SOURCES_DRIVER_ARG: &str = "--ir-no-local-sources";
 
 /// Resolve dependencies for `source`, then run it against the resulting
 /// library. Exits the process with the program's own exit code.
@@ -36,21 +39,28 @@ pub(crate) fn cmd_run(
     rscript_args: &[String],
     with_deps: &[String],
     r_selection: RSelectionArgs<'_>,
-    snapshots: SnapshotArgs<'_>,
+    resolution: ResolutionArgs<'_>,
     script_args: &[String],
     isolated: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     apply_exclude_newer_overrides(
         &mut spec,
-        snapshots.exclude_newer,
-        snapshots.python_exclude_newer,
+        resolution.exclude_newer,
+        resolution.python_exclude_newer,
     )?;
     spec.dependencies.extend(with_deps.iter().cloned());
     let isolated = isolated || spec.isolated;
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
-    let resolved = resolve_runtime(&rscript, &spec, false)?;
+    let resolution_rscript_args = rscript_arch_args(rscript_args);
+    let resolved = resolve_runtime(
+        &rscript,
+        &spec,
+        false,
+        &resolution_rscript_args,
+        resolution.refresh,
+    )?;
 
     // Render the document, or run the user's program, in an isolated R session.
     let code = run_user_code(
@@ -65,37 +75,40 @@ pub(crate) fn cmd_run(
     std::process::exit(code);
 }
 
-/// Resolve dependencies for `source`, then render it with Quarto. Exits the
+/// Resolve dependencies for `source`, then run it with Quarto. Exits the
 /// process with Quarto's own exit code.
-pub(crate) fn cmd_render(
-    source: &RenderSource,
+pub(crate) fn cmd_quarto(
+    command: QuartoCommand,
+    source: &QuartoSource,
     with_deps: &[String],
     r_selection: RSelectionArgs<'_>,
-    snapshots: SnapshotArgs<'_>,
-    render_args: &[String],
-    isolated: bool,
-    vanilla: bool,
+    resolution: ResolutionArgs<'_>,
+    quarto_args: &[String],
+    options: QuartoOptions,
 ) -> Result<(), Box<dyn Error>> {
     let mut spec = source.script_spec()?;
     apply_exclude_newer_overrides(
         &mut spec,
-        snapshots.exclude_newer,
-        snapshots.python_exclude_newer,
+        resolution.exclude_newer,
+        resolution.python_exclude_newer,
     )?;
     spec.dependencies.extend(with_deps.iter().cloned());
     spec.quarto_render = true;
-    let isolated = isolated || spec.isolated;
+    let options = QuartoOptions {
+        isolated: options.isolated || spec.isolated,
+        ..options
+    };
     let rscript = rscript_for_spec(&spec, r_selection)?;
 
-    let resolved = resolve_runtime(&rscript, &spec, true)?;
+    let resolved = resolve_runtime(&rscript, &spec, true, &[], resolution.refresh)?;
     let code = quarto::run(
+        command,
         &rscript,
         resolved.library.as_deref(),
         resolved.python.as_deref(),
         source.path(),
-        render_args,
-        isolated,
-        vanilla,
+        quarto_args,
+        options,
     )?;
     std::process::exit(code);
 }
@@ -110,9 +123,22 @@ pub(crate) struct RSelectionArgs<'a> {
     pub(crate) rscript: Option<&'a str>,
 }
 
-pub(crate) struct SnapshotArgs<'a> {
+pub(crate) struct ResolutionArgs<'a> {
     pub(crate) exclude_newer: Option<&'a str>,
     pub(crate) python_exclude_newer: Option<&'a str>,
+    pub(crate) refresh: bool,
+}
+
+pub(crate) fn rscript_arch_args(rscript_args: &[String]) -> Vec<String> {
+    rscript_args
+        .iter()
+        .filter(|arg| is_rscript_arch_arg(arg))
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn is_rscript_arch_arg(arg: &str) -> bool {
+    arg.starts_with("--arch=")
 }
 
 pub(crate) fn rscript_for_spec(
@@ -125,7 +151,7 @@ pub(crate) fn rscript_for_spec(
     if let Some(selection) = env_r_selection()? {
         return resolve_r_selection(selection, spec.exclude_newer.as_deref());
     }
-    if let Some(selection) = frontmatter_r_selection(spec)? {
+    if let Some(selection) = frontmatter_r_selection(spec) {
         return resolve_r_selection(selection, spec.exclude_newer.as_deref());
     }
     if let Some(exclude_newer) = &spec.exclude_newer {
@@ -171,13 +197,10 @@ fn env_r_selection() -> Result<Option<RSelection>, Box<dyn Error>> {
     }
 }
 
-fn frontmatter_r_selection(spec: &RuntimeSpec) -> Result<Option<RSelection>, Box<dyn Error>> {
-    match (&spec.r_requirement, &spec.rscript) {
-        (Some(_), Some(_)) => Err("frontmatter cannot set both `r-version` and `rscript`".into()),
-        (Some(req), None) => Ok(Some(RSelection::Version(req.clone()))),
-        (None, Some(rscript)) => Ok(Some(RSelection::Rscript(OsString::from(rscript)))),
-        (None, None) => Ok(None),
-    }
+fn frontmatter_r_selection(spec: &RuntimeSpec) -> Option<RSelection> {
+    spec.r_requirement
+        .as_ref()
+        .map(|req| RSelection::Version(req.clone()))
 }
 
 fn resolve_r_selection(
@@ -281,9 +304,32 @@ fn is_future_iso_date(value: &str) -> bool {
 pub(crate) fn resolve_library_and_primary_package(
     rscript: &OsStr,
     spec: &RuntimeSpec,
+    rscript_args: &[String],
+    refresh: bool,
+) -> Result<(PathBuf, String), Box<dyn Error>> {
+    resolve_library_and_primary_package_in_root(rscript, spec, rscript_args, None, refresh)
+}
+
+pub(crate) fn resolve_library_and_primary_package_in_root(
+    rscript: &OsStr,
+    spec: &RuntimeSpec,
+    rscript_args: &[String],
+    library_root: Option<&Path>,
+    refresh: bool,
 ) -> Result<(PathBuf, String), Box<dyn Error>> {
     let cache_dir = ir_cache_dir()?;
-    let resolved = resolve_library_inner(rscript, spec, true, None, &cache_dir)?;
+    let resolved = resolve_library_inner(
+        rscript,
+        spec,
+        &cache_dir,
+        ResolveRequest {
+            primary_package: true,
+            python_request: None,
+            rscript_args,
+            library_root,
+            refresh,
+        },
+    )?;
     let library = resolved
         .library
         .ok_or("dependency resolver did not return a library path")?;
@@ -297,10 +343,23 @@ fn resolve_runtime(
     rscript: &OsStr,
     spec: &RuntimeSpec,
     include_jupyter: bool,
+    rscript_args: &[String],
+    refresh: bool,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
     let cache_dir = ir_cache_dir()?;
     let python_request = python::request(&cache_dir, spec.python.as_ref(), include_jupyter)?;
-    resolve_library_inner(rscript, spec, false, python_request.as_ref(), &cache_dir)
+    resolve_library_inner(
+        rscript,
+        spec,
+        &cache_dir,
+        ResolveRequest {
+            primary_package: false,
+            python_request: python_request.as_ref(),
+            rscript_args,
+            library_root: None,
+            refresh,
+        },
+    )
 }
 
 struct ResolvedLibrary {
@@ -309,23 +368,54 @@ struct ResolvedLibrary {
     python: Option<PathBuf>,
 }
 
+struct ResolveRequest<'a> {
+    primary_package: bool,
+    python_request: Option<&'a python::EnvRequest>,
+    rscript_args: &'a [String],
+    library_root: Option<&'a Path>,
+    refresh: bool,
+}
+
 fn resolve_library_inner(
     rscript: &OsStr,
     spec: &RuntimeSpec,
-    primary_package: bool,
-    python_request: Option<&python::EnvRequest>,
     cache_dir: &Path,
+    request: ResolveRequest<'_>,
 ) -> Result<ResolvedLibrary, Box<dyn Error>> {
+    let ResolveRequest {
+        primary_package,
+        python_request,
+        rscript_args,
+        library_root,
+        refresh,
+    } = request;
+    let refresh = refresh || nonempty_env(REFRESH_ENV).is_some();
+    let no_local_sources = nonempty_env(NO_LOCAL_SOURCES_ENV).is_some();
+    let prefer_binaries = resolve_cache::prefer_binaries()?;
     let dependencies = normalized_dependencies(&spec.dependencies);
     let resolution_cache_paths = resolve_cache::paths(
         cache_dir,
         rscript,
+        rscript_args,
         &dependencies,
         spec.exclude_newer.as_deref(),
-        spec.quarto_render,
+        resolve_cache::QuartoCacheFlags {
+            render: spec.quarto_render,
+            reticulate: spec.quarto_reticulate,
+        },
+        library_root,
     )?;
-    let cached_library = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?;
-    let cached_python = python::read_cache(python_request)?;
+    let read_caches = || -> Result<_, Box<dyn Error>> {
+        if refresh {
+            Ok((None, None))
+        } else {
+            Ok((
+                resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?,
+                python::read_cache(python_request)?,
+            ))
+        }
+    };
+    let (cached_library, cached_python) = read_caches()?;
     if let Some(resolved) = &cached_library {
         if python_request.is_none() || cached_python.is_some() {
             return Ok(ResolvedLibrary {
@@ -337,8 +427,7 @@ fn resolve_library_inner(
     }
 
     let _resolver_lock = FileLock::acquire(&resolver_lock_path(cache_dir))?;
-    let cached_library = resolve_cache::read(resolution_cache_paths.as_ref(), primary_package)?;
-    let cached_python = python::read_cache(python_request)?;
+    let (cached_library, cached_python) = read_caches()?;
     if let Some(resolved) = &cached_library {
         if python_request.is_none() || cached_python.is_some() {
             return Ok(ResolvedLibrary {
@@ -351,14 +440,6 @@ fn resolve_library_inner(
 
     let resolve_r = cached_library.is_none();
     let resolve_python = python_request.is_some() && cached_python.is_none();
-    if !resolve_r && !resolve_python {
-        let resolved = cached_library.expect("cached library was checked above");
-        return Ok(ResolvedLibrary {
-            library: Some(resolved.library),
-            primary_package: resolved.primary_package,
-            python: cached_python,
-        });
-    }
 
     let driver = driver::cached_path(cache_dir, driver::RESOLVE_FILE, RESOLVE_DRIVER)?;
     let tmp = env::temp_dir();
@@ -395,9 +476,10 @@ fn resolve_library_inner(
         let _ = fs::remove_file(&restart_file);
 
         let mut cmd = Command::new(rscript);
-        cmd.arg(&driver)
+        cmd.args(rscript_args)
+            .arg(&driver)
             .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
+            .stdout(io::stderr())
             .stderr(Stdio::inherit())
             .env("IR_CACHE_DIR", cache_dir)
             // pak suppresses progress in noninteractive Rscript unless this is set.
@@ -409,18 +491,36 @@ fn resolve_library_inner(
             .env_remove("IR_RESOLVE_PACKAGE_RESULT_FILE")
             .env_remove("IR_RESOLUTION_MARKER")
             .env_remove("IR_PRIMARY_PACKAGE_MARKER")
+            .env_remove("IR_LIBRARY_ROOT")
             .env_remove("IR_QUARTO_RENDER")
+            .env_remove("IR_QUARTO_RETICULATE")
             .env_remove("IR_EXCLUDE_NEWER")
             .env_remove("IR_PYTHON_RESULT_FILE")
             .env_remove("IR_PYTHON_PACKAGES_FILE")
             .env_remove("IR_PYTHON_VERSION")
             .env_remove("IR_PYTHON_EXCLUDE_NEWER")
             .env_remove("IR_TOOLING_RESTART_FILE")
+            .env_remove(REFRESH_ENV)
+            .env_remove(NO_LOCAL_SOURCES_ENV)
             .env_remove(TOOLING_SAFE_MODE_ENV)
             .env("IR_TOOLING_RESTART_FILE", &restart_file);
+        if let Some(library_root) = library_root {
+            cmd.env("IR_LIBRARY_ROOT", library_root);
+        }
         if safe_mode {
             cmd.env(TOOLING_SAFE_MODE_ENV, "1");
         }
+        if refresh {
+            cmd.env(REFRESH_ENV, "1");
+        }
+        if no_local_sources {
+            cmd.arg(NO_LOCAL_SOURCES_DRIVER_ARG);
+        }
+        cmd.arg(if prefer_binaries {
+            "--ir-prefer-binaries"
+        } else {
+            "--ir-prefer-newest"
+        });
         if resolve_r {
             if let Some(result_file) = &result_file {
                 cmd.env("IR_RESOLVE_RESULT_FILE", result_file);
@@ -444,6 +544,9 @@ fn resolve_library_inner(
                 // Distinct from IR_QUARTO (the quarto executable, read in quarto.rs):
                 // this flag tells the resolver a Quarto render needs rmarkdown.
                 cmd.env("IR_QUARTO_RENDER", "1");
+            }
+            if spec.quarto_reticulate {
+                cmd.env("IR_QUARTO_RETICULATE", "1");
             }
         }
         if let (Some(request), Some(result_file), Some(packages_file)) =
@@ -471,7 +574,6 @@ fn resolve_library_inner(
         let current_status = child
             .wait()
             .map_err(|e| format!("failed to wait for dependency resolver: {e}"))?;
-
         if tooling_restart_requested(&current_status, &restart_file) {
             if !retried_tooling_restart {
                 retried_tooling_restart = true;
@@ -788,6 +890,13 @@ fn run_script(
     if let Some(python) = python {
         cmd.env("RETICULATE_PYTHON", python);
         activate_python_env(&mut cmd, python)?;
+    } else if env::var_os("RETICULATE_PYTHON").is_none() {
+        // `ir run` owns Python selection by default so package-level
+        // `py_require()` declarations produce portable scripts. This
+        // intentionally outranks reticulate's other selectors and requires a
+        // reticulate release that supports `managed`; do not add runtime probes
+        // for older releases or externally managed environments here.
+        cmd.env("RETICULATE_PYTHON", "managed");
     }
 
     if isolated {

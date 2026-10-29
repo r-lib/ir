@@ -1,6 +1,6 @@
 # ir
 
-`ir` runs self-describing R scripts and renders Quarto sources.
+`ir` runs self-describing R scripts and renders or previews Quarto sources.
 
 Put the packages and R version next to the code, then run the file.
 `ir` resolves the requirements, prepares a cached package library, and starts R with that library ready to use.
@@ -8,16 +8,13 @@ Put the packages and R version next to the code, then run the file.
 ```r
 #!/usr/bin/env -S ir run
 #| packages:
-#|   - dplyr>=1.0
-#|   - tidyr
-#| r-version: ">= 4.0"
+#|   - dplyr
+#|   - tidyr==1.3.1
+#| r-version: ">= 4.3"
 #| isolated: true
-#| exclude-newer: "2024-01-15"
+#| exclude-newer: "2024-02-01"
 
-library(dplyr)
-library(tidyr)
-
-1 + 1
+airquality |> tidyr::drop_na(Ozone) |> dplyr::count(Month)
 ```
 
 ```sh
@@ -25,15 +22,19 @@ ir run script.R
 ./script.R
 ```
 
-Full documentation: <https://t-kalinowski.github.io/ir/>
+This records a last-known-good environment: tidyr is pinned to the version
+tested with the script, while the snapshot date selects dplyr and the
+transitive dependencies.
+
+Full documentation: <https://r-lib.github.io/ir/>
 
 ## Why use it?
 
 - **The file explains itself.** R and Python package requirements live in the script or document, not in a separate setup note.
-- **Fast by design.** `ir` keeps package setup direct and reuses cached resolutions and libraries when the same requirements are seen again.
-- **Reproducibility is explicit.** Use `r-version`, `rscript`, or their command-line and environment equivalents to select R. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve packages as of a specific date. When `exclude-newer` is set without an R selection, `ir` selects the latest R minor version available on that date.
-- **It works with normal R habits.** Forward `Rscript` options, render Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
-- **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers for R, Rapp, and direct executable scripts without setting up a project by hand.
+- **Fast by design.** `ir` prefers pre-built R packages and reuses cached resolutions and libraries when the same requirements are seen again.
+- **Reproducibility is explicit.** Use frontmatter `r-version`, `--r-version`, or `IR_R_VERSION` to select R by version. Use `--rscript` or `IR_RSCRIPT` only when you need a machine-local Rscript override. Use `--exclude-newer`, `IR_EXCLUDE_NEWER`, or frontmatter `exclude-newer` to resolve the default CRAN and Bioconductor repositories from Posit Package Manager snapshots as of a specific date. Without another R selector, the date selects the latest R minor released by then. When `r-version` can match more than one R minor, the date limits selection to minor versions released by then.
+- **It works with normal R habits.** Forward `Rscript` options, render or preview Quarto documents, evaluate inline expressions, or use `--with` for one-off packages.
+- **Package tools are easy to try.** Run package executables with `rx`, or install persistent launchers backed by a durable tool store.
 
 `ir` is designed to be small, fast, and predictable: resolve once, reuse cached libraries aggressively, and avoid making you manage a project directory for a one-file workflow.
 
@@ -43,33 +44,55 @@ Full documentation: <https://t-kalinowski.github.io/ir/>
 ir run script.R
 ir run --vanilla script.R
 ir render report.qmd --to html
+ir preview report.qmd
 ir run --with cli -e 'cli::cli_alert_success("works")'
-ir run --r-version 4.5 script.R
-ir run --exclude-newer 2024-01-15 script.R
+ir run --with BiocGenerics -e 'library(BiocGenerics)'
+ir run --r-version 4.3 script.R
+ir run --exclude-newer 2024-02-01 script.R
 rx btw --help
 ir tool run --from btw btw --help
 ir tool install btw
 ir cache dir
 ```
 
+Bioconductor packages use their bare package names.
+pak selects the Bioconductor release compatible with the selected R.
+
 ## Install
+
+Install from PyPI with `uv`:
+
+```sh
+uv tool install r-lib-ir
+```
+
+This installs both `ir` and `rx`. If the `uv` tool executable directory is
+not already on `PATH`, run `uv tool update-shell`.
 
 Install a pre-built binary on Linux or macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh
 ```
 
-Install on Windows PowerShell:
+Install on Windows with Scoop using the `r-bucket` bucket:
 
 ```powershell
-irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
+scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+scoop install ir
 ```
 
-The installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
+Alternatively, install the Windows binary directly from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex
+```
+
+The direct installers download the latest release and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
+If `rig` is not on `PATH`, the installers print platform-specific rig install guidance.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 
@@ -96,16 +119,16 @@ On Windows PowerShell, run:
 .\scripts\install-dev-deps.ps1
 ```
 
-The setup scripts install Rust, Python, rig, the current R release, rig's
-`oldrel/2` R for the version-selection tests, and Quarto. They do not run tests
-or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on Windows to
-inspect the plan.
+The setup scripts install Rust, Python, rig, the current R release, R 4.3 for
+the version-selection and documentation example tests, and Quarto. They do not
+run tests or pre-warm package caches. Pass `--dry-run` on Unix or `-DryRun` on
+Windows to inspect the plan.
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, or a selected `rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
+- `R` / `Rscript` on `PATH`, or `--rscript`/`IR_RSCRIPT`, when R is not selected by version or date.
 - `rig` on `PATH` when using `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer` R selection.
-- `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
+- `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 
 On first use, `ir` prepares its resolver tooling in its cache, so you do not need to pre-install pak or renv.
 
@@ -113,12 +136,12 @@ On first use, `ir` prepares its resolver tooling in its cache, so you do not nee
 
 For command details, configuration, and edge cases, see:
 
-- [Scripts](https://t-kalinowski.github.io/ir/run.html)
-- [Quarto rendering](https://t-kalinowski.github.io/ir/quarto.html)
-- [Package tools](https://t-kalinowski.github.io/ir/tools.html)
-- [Cache management](https://t-kalinowski.github.io/ir/cache.html)
-- [Install and configuration](https://t-kalinowski.github.io/ir/config.html)
-- [CLI reference](https://t-kalinowski.github.io/ir/reference.html)
+- [Scripts](https://r-lib.github.io/ir/run.html)
+- [Quarto rendering and preview](https://r-lib.github.io/ir/quarto.html)
+- [Package tools](https://r-lib.github.io/ir/tools.html)
+- [Cache management](https://r-lib.github.io/ir/cache.html)
+- [Install and configuration](https://r-lib.github.io/ir/config.html)
+- [CLI reference](https://r-lib.github.io/ir/reference.html)
 
 ## License
 

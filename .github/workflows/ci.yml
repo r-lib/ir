@@ -37,6 +37,7 @@ jobs:
           r_user_cache_dir <- file.path(Sys.getenv("RUNNER_TEMP"), "ir-r-user-cache")
           dir.create(r_user_cache_dir, recursive = TRUE, showWarnings = FALSE)
           cat("R_USER_CACHE_DIR=", r_user_cache_dir, "\n", sep = "", file = Sys.getenv("GITHUB_ENV"), append = TRUE)
+          cat("IR_TEST_R_CACHE_DIR=", file.path(r_user_cache_dir, "R"), "\n", sep = "", file = Sys.getenv("GITHUB_ENV"), append = TRUE)
           date <- format(as.Date(Sys.time(), tz = "UTC"))
           cat("date=", date, "\n", sep = "", file = Sys.getenv("GITHUB_OUTPUT"), append = TRUE)
       - name: Cache R user cache
@@ -54,6 +55,7 @@ jobs:
             any::pak
             any::renv
             any::secretbase
+            any::filelock
             any::cli
             any::glue
             any::jsonlite
@@ -73,8 +75,8 @@ jobs:
             any::pkgsearch
             any::prettyunits
 
-      # `ir run --r-version` resolves through rig, so the version-selection test
-      # needs rig plus a second, non-default R.
+      # `ir run --r-version` resolves through rig, so version-selection and
+      # documentation-example tests need rig plus a second, non-default R.
       # Pin the default Rscript to the one set up above before installing rig.
       # On Linux `rig add` makes the first rig-managed R the default and relinks
       # /usr/local/bin/Rscript to it, so pinning the symlink (`which Rscript`)
@@ -98,7 +100,7 @@ jobs:
         run: |
           # Keep the GitHub setup actions above for Rust/Python/Quarto/default R
           # caching and environment setup. Use this script here only for rig and
-          # the second R needed by the version-selection tests.
+          # the second R needed by version-selection and documentation-example tests.
           scripts/install-dev-deps.sh \
             --skip rust \
             --skip python \
@@ -110,10 +112,12 @@ jobs:
       - name: Install rig and non-default R (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # Keep the GitHub setup actions above for Rust/Python/Quarto/default R
           # caching and environment setup. Use this script here only for rig and
-          # the second R needed by the version-selection tests.
+          # the second R needed by version-selection and documentation-example tests.
           .\scripts\install-dev-deps.ps1 `
             -Skip rust, python, quarto, r-release
 
@@ -143,6 +147,9 @@ jobs:
           "$IR_TEST_RSCRIPT" scripts/warm-renv-cache.R \
             --repos "${cran%/latest}/${IR_TEST_R_EXCLUDE_NEWER}" \
             jsonlite knitr rmarkdown
+          "$IR_TEST_RSCRIPT" scripts/warm-renv-cache.R \
+            --repos "${cran%/latest}/2024-02-01" \
+            dplyr tidyr@1.3.1 gt@0.10.1 rmarkdown
         env:
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
           R_LIBS_USER: ${{ runner.temp }}/ir-test-r-library
@@ -151,6 +158,23 @@ jobs:
         env:
           GITHUB_PAT: ${{ github.token }}
           R_PROFILE_USER: ${{ github.workspace }}/scripts/ci-rprofile.R
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: runner.os == 'Linux'
+
+      - name: Smoke test Python package
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/r-lib-ir-tool
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/r-lib-ir-bin
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          uv build --wheel --out-dir dist
+          uv tool install --no-index --find-links dist r-lib-ir
+          version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          test "$("$UV_TOOL_BIN_DIR/ir" --version)" = "ir $version"
+          test "$("$UV_TOOL_BIN_DIR/rx" --version)" = "rx $version"
 
   lint:
     name: rustfmt + clippy

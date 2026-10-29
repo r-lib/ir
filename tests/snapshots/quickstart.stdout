@@ -1,0 +1,110 @@
+ir quickstart for AI agents
+
+Goal:
+  Produce portable, self-describing R scripts and Quarto documents.
+  Put runtime metadata in frontmatter; keep the body plain R or Quarto code.
+
+Mental model:
+  `ir` reads frontmatter, resolves dependencies, materializes an ephemeral
+  cached environment, then launches Rscript or Quarto with that environment.
+  Do not call install.packages(), renv::restore(), groundhog, checkpoint, or
+  custom CRAN snapshot setup from the artifact. Declare metadata; `ir` handles
+  package installation and reuse.
+
+R script frontmatter:
+  #| packages:
+  #|   - dplyr
+  #|   - tidyr==1.3.1
+  #| r-version: ">= 4.3"
+  #| isolated: true
+  #| exclude-newer: "2024-02-01"
+
+Quarto frontmatter:
+  ---
+  title: Report
+  ir:
+    packages:
+      - dplyr
+      - gt==0.10.1
+    r-version: ">= 4.3"
+    isolated: true
+    exclude-newer: "2024-02-01"
+  ---
+
+Python:
+  Add `python-packages` and optional `python-version` to frontmatter.
+  In Quarto, put those keys under `ir:` with the R runtime metadata.
+  `ir` resolves a Python environment with reticulate's uv helper before launch,
+  activates it for subprocesses, and sets RETICULATE_PYTHON. `ir render` and
+  `ir preview` also set QUARTO_PYTHON and inject jupyter.
+  Add `reticulate` under `packages` when R code loads reticulate; `ir render`
+  and `ir preview` add it for knitr-backed Quarto documents with Python chunks.
+  Without Python metadata, `ir run` defaults an unset RETICULATE_PYTHON to
+  managed; set it explicitly to keep another Python selection.
+  `exclude-newer` also applies to Python unless `python-exclude-newer` is set.
+
+Bioconductor:
+  Use bare package names; pak selects the release compatible with the selected
+  R. `exclude-newer` dates the default CRAN and Bioconductor repositories.
+
+Isolation:
+  By default, the resolved R library is first on `.libPaths()` and ambient user
+  libraries remain available. With `isolated: true` or `--isolated`, ambient
+  user libraries are not available. Base, site, and system libraries remain.
+  `rx` and `ir tool run` are isolated package-executable runs.
+
+Package tools:
+  Some R packages ship executables in exec/, bin/, or bin/<arch>/. Use `rx`
+  or `ir tool run` to run those tools without installing the package, creating
+  a project library, or installing them first.
+  Tool runs resolve the provider package plus any `--with` dependencies into an
+  isolated cached R library, then launch the selected executable. Ambient user
+  R libraries are not used.
+  Use tools for ad hoc package frontends. Use `ir tool install` for repeated
+  shell use; installed tool libraries live outside the cache and survive
+  `ir cache clean`. For durable analytical artifacts, prefer `ir run` or
+  `ir render` or `ir preview` with frontmatter.
+
+Workflow:
+  Use `--with PKG` while exploring; promote stable dependencies to frontmatter.
+  Use `exclude-newer` for reproducible CRAN and Bioconductor state.
+  Write ordinary R after the metadata. Do not embed package-manager ceremony.
+
+System requirements:
+  R/Rscript must be available, either on PATH or selected with `--rscript`/`IR_RSCRIPT`.
+  Use rig for `r-version` selection; `exclude-newer` can choose the R minor or
+  limit a requirement that matches more than one R minor by date.
+  Quarto must be available for `ir render` and `ir preview`. OS libraries and
+  compilers required by packages remain system dependencies.
+
+Commands:
+  ir run script.R
+  ir render report.qmd
+  ir preview report.qmd
+  ir run --with cli -e 'cli::cli_alert_success("ok")'
+  ir run --with BiocGenerics -e 'library(BiocGenerics)'
+  ir tool run btw --help
+  rx btw --help
+  rx --from btw btw --help
+
+Argument boundaries:
+  ir run --with cli script.R --input data.csv
+      # `--with cli` is for ir; `--input data.csv` is passed to script.R.
+
+  ir render --with ggplot2 report.qmd --to html
+      # `--with ggplot2` is for ir; `--to html` is passed to Quarto.
+
+  ir preview --with ggplot2 report.qmd --no-browser
+      # `--with ggplot2` is for ir; `--no-browser` is passed to Quarto.
+
+  rx --from btw --with cli btw --help
+      # `--from` and `--with` are for rx; `--help` is passed to the btw executable.
+
+Inspection commands:
+  ir --help
+  ir run --help
+  ir render --help
+  ir preview --help
+  ir tool run --help
+  ir tool install --help
+  rx --help

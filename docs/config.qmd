@@ -4,31 +4,48 @@ title: Install and Configuration
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, a selected `rscript`, or `IR_RSCRIPT`, when R is not selected by `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
+- `R` / `Rscript` on `PATH`, `--rscript`, or `IR_RSCRIPT`, when R is not selected by frontmatter `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
 - `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
-- `quarto` on `PATH`, or `IR_QUARTO`, when rendering `.qmd`, `.Rmd`, or R script files.
-- `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
+- `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
+- `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`, `filelock`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
 - A Rust toolchain only when building from source.
 
 ## Install
 
+Install from PyPI with `uv`:
+
+```console
+$ uv tool install r-lib-ir
+```
+
+This installs both `ir` and `rx`. If the `uv` tool executable directory is
+not already on `PATH`, run `uv tool update-shell`.
+
 Install a pre-built binary on Linux or macOS:
 
 ```console
-$ curl -fsSL https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.sh | sh
+$ curl -fsSL https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.sh | sh
 ```
 
-Install on Windows PowerShell:
+Install on Windows with Scoop using the `r-bucket` bucket:
 
 ```console
-> irm https://raw.githubusercontent.com/t-kalinowski/ir/main/scripts/install.ps1 | iex
+> scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+> scoop install ir
 ```
 
-The installers download the latest release archive and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
+Alternatively, install the Windows binary directly from PowerShell:
+
+```console
+> irm https://raw.githubusercontent.com/r-lib/ir/main/scripts/install.ps1 | iex
+```
+
+The direct installers download the latest release archive and install `ir` and `rx` into `~/.local/bin` on Unix or `$HOME\bin` on Windows.
 On macOS, the default `~/.local/bin` directory is added to `~/.zprofile` when needed.
 On Windows, the install directory is added to the user `PATH`.
 On Linux, the installer tells you if the install directory is not on `PATH`.
+If `rig` is not on `PATH`, the installers print platform-specific rig install guidance.
 Set `IR_NO_MODIFY_PATH=1` to skip PATH changes.
 Set `IR_INSTALL_DIR` to choose another directory.
 
@@ -37,16 +54,20 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | Variable | Used by | Default |
 | --- | --- | --- |
 | `IR_CACHE_DIR` | all commands | Rust-owned per-user cache root |
-| `IR_EXCLUDE_NEWER` | `ir run` and `ir render` package snapshot date; also selects R when no explicit R selector is set | unset |
-| `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache | `86400` seconds |
+| `IR_EXCLUDE_NEWER` | `ir run`, `ir render`, and `ir preview` package snapshot date; also chooses the R minor when no R selector is set and limits multi-minor `r-version` requirements by date | unset |
+| `IR_LATEST_RESOLUTION_MAX_AGE_SECONDS` | latest resolution cache; `0` disables reuse of time-bounded resolution markers | `86400` seconds |
+| `IR_NO_LOCAL_SOURCES` | dependency-resolving commands | unset; any nonempty value prevents installing R packages from local sources |
+| `IR_PREFER_BINARIES` | R package installation | `1`; prefer pre-built packages, including older versions |
+| `IR_REFRESH` | dependency-resolving commands | unset; any nonempty value bypasses resolution markers |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
 | `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
-| `IR_QUARTO` | Quarto rendering | `quarto` on `PATH` |
-| `IR_TOOL_BIN_DIR` | `ir tool install` | first launcher-directory override |
+| `IR_QUARTO` | Quarto rendering and preview | `quarto` on `PATH` |
+| `IR_TOOL_STORE_DIR` | `ir tool install` | durable installed-tool library store |
+| `IR_TOOL_BIN_DIR` | `ir tool install` | first executable install directory override |
 | `IR_NO_MODIFY_PATH` | install scripts, `ir tool install` | disables automatic PATH setup when nonempty |
-| `RAPP_BIN_DIR` | `ir tool install` | second launcher-directory override |
-| `RAPP_NO_MODIFY_PATH` | `ir tool install` | also disables automatic launcher PATH setup when nonempty |
-| `XDG_BIN_HOME` | `ir tool install` on Unix | third launcher-directory override |
+| `RAPP_BIN_DIR` | `ir tool install` | second executable install directory override |
+| `RAPP_NO_MODIFY_PATH` | `ir tool install` | also disables automatic executable install directory PATH setup when nonempty |
+| `XDG_BIN_HOME` | `ir tool install` on Unix | third executable install directory override |
 | `XDG_DATA_HOME` | `ir tool install` on Unix | `<parent of XDG_DATA_HOME>/bin` |
 | `LOCALAPPDATA` | `ir tool install` on Windows | `%LOCALAPPDATA%\Programs\R\ir\bin` |
 | `USERPROFILE` | `ir tool install` on Windows | fallback under `%USERPROFILE%\AppData` |
@@ -54,18 +75,58 @@ Set `IR_INSTALL_DIR` to choose another directory.
 The default cache directory is computed before launching R.
 `IR_CACHE_DIR` is authoritative; otherwise `ir` uses the process `R_USER_CACHE_DIR`, process `XDG_CACHE_HOME`, or a platform default and appends `R/ir`.
 The selected path is passed to the resolver R session, so R startup files do not redirect the `ir` cache.
+Installed tool libraries use `IR_TOOL_STORE_DIR`.
+When unset, the default is `$XDG_DATA_HOME/ir/tools` or `~/.local/share/ir/tools` on Unix and macOS, and `%LOCALAPPDATA%\Programs\R\ir\tools` or `%USERPROFILE%\AppData\Local\Programs\R\ir\tools` on Windows.
+This store is persistent state and is not removed by `ir cache clean`.
 
-Package snapshot date precedence for `ir run` and `ir render` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
+IR prefers pre-built R packages, also called binaries, to avoid building packages from source.
+When a new source release arrives before its binary is ready, IR may install an older binary instead.
+
+Your version requirements still apply.
+A binary must also work with your R version, operating system, architecture, and the other packages being installed.
+Packages without a suitable binary can install from source alongside binary packages.
+If you request a specific Git ref, local package, URL, or `?source`, IR honors that request.
+
+`IR_PREFER_BINARIES=0` tells IR to prefer newer versions, even if they need a source build.
+IR can still use a binary for the chosen version.
+Unset, empty, and `1` all use the default; other values are rejected.
+Set the variable before starting IR, for example in your shell, rather than in an R startup file.
+
+```sh
+ir run --with cli -e 'print(packageVersion("cli"))'
+IR_PREFER_BINARIES=0 ir run --with cli -e 'print(packageVersion("cli"))'
+ir run --with 'cli>=3.6.0' -e 'print(packageVersion("cli"))'
+ir run --with 'cli?source' -e 'print(packageVersion("cli"))'
+```
+
+Binary preference applies to plain package names such as `cli`.
+A request like `cran::cli` keeps pak's usual preference for the newest compatible version.
+IR may use source if pak doesn't find a suitable binary; it doesn't try every older binary version.
+
+If a repository reports that the chosen binary is missing, IR tries that package from source once and checks its dependencies again.
+Other download or installation failures are still reported as errors.
+IR also reports an error if no package version can meet the requirements.
+
+Package snapshot date precedence for `ir run`, `ir render`, and `ir preview` is `--exclude-newer`, then `IR_EXCLUDE_NEWER`, then frontmatter `exclude-newer`.
 `IR_EXCLUDE_NEWER` is ignored when `--exclude-newer` is supplied.
 Set `--exclude-newer` or `IR_EXCLUDE_NEWER` to an empty string to override frontmatter `exclude-newer` and resolve latest packages.
 Future snapshot dates also resolve latest packages.
+Use `--refresh` or set `IR_REFRESH` to a nonempty value to rerun R and Python dependency resolution for one invocation without clearing cached downloads or materialised libraries.
+Set `IR_NO_LOCAL_SOURCES` to a nonempty value to prevent IR from installing direct or transitive R packages from local package refs, `file:` URLs, or `file:` repositories.
+IR checks the complete pak manifest before asking renv to materialise packages.
+Resolution markers and materialised libraries are shared with unrestricted invocations; the option does not verify the original source of packages reused without running package installation code.
+`exclude-newer` dates the default CRAN and Bioconductor repositories with PPM snapshots.
 When Python metadata is present, the selected `exclude-newer` value is also used during Python environment resolution unless `--python-exclude-newer` or frontmatter `python-exclude-newer` is set.
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.
-R selection precedence is command line, then environment, then frontmatter.
-Use `--rscript`, `IR_RSCRIPT`, or frontmatter `rscript` to select a specific Rscript executable.
+R selection precedence is command line, then environment, then frontmatter `r-version`.
+Use `--rscript` or `IR_RSCRIPT` to select a specific Rscript executable.
 Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
-Within one layer, set either `rscript` or `r-version`, not both.
-When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version available on that date.
-`--bin-dir <dir>` overrides the launcher-directory environment variables for `ir tool install`.
+Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
+Do not set both `--rscript` and `--r-version`, or both `IR_RSCRIPT` and `IR_R_VERSION`.
+Frontmatter `rscript` is rejected.
+When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version released by that date.
+When `r-version` can match more than one R minor, `exclude-newer` limits selection to minor versions released by that date.
+An exact `r-version` or explicit Rscript selection remains authoritative.
+`--bin-dir <dir>` overrides the executable install directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
-On Windows, it adds the default or environment-selected launcher directory to the user `Path`.
+On Windows, it adds the default or environment-selected executable install directory to the user `Path`.

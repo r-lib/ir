@@ -6,7 +6,7 @@ use clap::builder::styling::{AnsiColor, Styles};
 use clap::builder::StyledStr;
 use clap::{Arg, ArgAction, ColorChoice, Command as ClapCommand};
 
-use crate::quarto::RenderSource;
+use crate::quarto::{QuartoCommand, QuartoSource};
 use crate::runtime::nonempty_env;
 use crate::script::RunSource;
 
@@ -26,12 +26,15 @@ pub(crate) fn root() -> ClapCommand {
         .after_help(examples_help(concat!(
             "  ir run script.R\n",
             "  ir render report.qmd\n",
+            "  ir preview report.qmd\n",
             "  ir tool run btw\n",
             "  ir cache dir",
         )))
         .subcommand(run_command())
         .subcommand(render_command())
+        .subcommand(preview_command())
         .subcommand(tool_command())
+        .subcommand(quickstart_command())
         .subcommand(cache_command())
 }
 
@@ -39,6 +42,56 @@ fn examples_help(body: &'static str) -> StyledStr {
     let header = HELP_STYLES.get_header();
     let comment = HELP_STYLES.get_placeholder();
     let mut help = StyledStr::new();
+    let _ = writeln!(help, "{header}Examples:{header:#}");
+    for line in body.split_inclusive('\n') {
+        let (line, newline) = line
+            .strip_suffix('\n')
+            .map_or((line, ""), |line| (line, "\n"));
+        if line.trim_start().starts_with('#') {
+            let _ = write!(help, "{comment}{line}{comment:#}");
+        } else {
+            help.push_str(line);
+        }
+        help.push_str(newline);
+    }
+    help
+}
+
+fn tool_discovery_examples_help(body: &'static str) -> StyledStr {
+    let header = HELP_STYLES.get_header();
+    let comment = HELP_STYLES.get_placeholder();
+    let mut help = StyledStr::new();
+    let _ = writeln!(help, "{header}Tool discovery:{header:#}");
+    help.push_str("  Supported executables are discovered from installed package exec/, bin/,\n");
+    help.push_str("  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,\n");
+    help.push_str("  Rapp, and direct executable scripts; bin/ entries are run as-is.\n\n");
+    let _ = writeln!(help, "{header}Examples:{header:#}");
+    for line in body.split_inclusive('\n') {
+        let (line, newline) = line
+            .strip_suffix('\n')
+            .map_or((line, ""), |line| (line, "\n"));
+        if line.trim_start().starts_with('#') {
+            let _ = write!(help, "{comment}{line}{comment:#}");
+        } else {
+            help.push_str(line);
+        }
+        help.push_str(newline);
+    }
+    help
+}
+
+fn tool_install_examples_help(body: &'static str) -> StyledStr {
+    let header = HELP_STYLES.get_header();
+    let comment = HELP_STYLES.get_placeholder();
+    let mut help = StyledStr::new();
+    let _ = writeln!(help, "{header}Tool discovery:{header:#}");
+    help.push_str("  Supported executables are discovered from installed package exec/, bin/,\n");
+    help.push_str("  and architecture-specific bin/<arch>/ directories. exec/ supports Rscript,\n");
+    help.push_str("  Rapp, and direct executable scripts; bin/ entries are run as-is.\n\n");
+    let _ = writeln!(help, "{header}Install storage:{header:#}");
+    help.push_str("  `ir tool install` materializes the package library under the durable tool\n");
+    help.push_str("  store, configurable with IR_TOOL_STORE_DIR, then installs command names\n");
+    help.push_str("  into --bin-dir as launchers backed by that library.\n\n");
     let _ = writeln!(help, "{header}Examples:{header:#}");
     for line in body.split_inclusive('\n') {
         let (line, newline) = line
@@ -111,7 +164,7 @@ fn run_command() -> ClapCommand {
                 .long("exclude-newer")
                 .value_name("DATE")
                 .num_args(1)
-                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
+                .help("Use this date for default CRAN and Bioconductor PPM snapshots"),
         )
         .arg(
             Arg::new("python-exclude-newer")
@@ -120,6 +173,7 @@ fn run_command() -> ClapCommand {
                 .num_args(1)
                 .help("Resolve Python packages using this snapshot date"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
@@ -132,31 +186,56 @@ fn run_command() -> ClapCommand {
 }
 
 fn render_command() -> ClapCommand {
-    ClapCommand::new("render")
-        .about("Render a Quarto document or script")
-        .after_help(examples_help(concat!(
-            "  ir render report.qmd\n",
-            "  ir render report.qmd --to html\n\n",
-            "  ir render --with ggplot2 report.qmd --to html\n",
-            "      # --with is for ir; --to html is passed to quarto render.\n\n",
-            "  ir render --vanilla slides.qmd --output slides.html\n",
-            "      # --vanilla is passed to the Rscript used by Quarto.\n",
-            "      # --output slides.html is passed to quarto render.",
-        )))
+    quarto_command(QuartoCommand::Render)
+}
+
+fn preview_command() -> ClapCommand {
+    quarto_command(QuartoCommand::Preview)
+}
+
+fn quarto_command(command: QuartoCommand) -> ClapCommand {
+    let name = command.as_str();
+    let (about, examples) = match command {
+        QuartoCommand::Render => (
+            "Render a Quarto document or script",
+            concat!(
+                "  ir render report.qmd\n",
+                "  ir render report.qmd --to html\n\n",
+                "  ir render --with ggplot2 report.qmd --to html\n",
+                "      # --with is for ir; --to html is passed to quarto render.\n\n",
+                "  ir render --vanilla slides.qmd --output slides.html\n",
+                "      # --vanilla is passed to the Rscript used by Quarto.\n",
+                "      # --output slides.html is passed to quarto render.",
+            ),
+        ),
+        QuartoCommand::Preview => (
+            "Preview a Quarto document or script",
+            concat!(
+                "  ir preview report.qmd\n",
+                "  ir preview report.qmd --port 4321\n\n",
+                "  ir preview --with ggplot2 report.qmd --no-browser\n",
+                "      # --with is for ir; --no-browser is passed to quarto preview.",
+            ),
+        ),
+    };
+
+    ClapCommand::new(name)
+        .about(about)
+        .after_help(examples_help(examples))
         .arg(
             Arg::new("with")
                 .long("with")
                 .value_name("PKG")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a dependency for this render; may be repeated"),
+                .help(format!("Add a dependency for this {name}; may be repeated")),
         )
         .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
                 .num_args(1)
-                .help("Select the R version for this render with rig"),
+                .help(format!("Select the R version for this {name} with rig")),
         )
         .arg(
             Arg::new("rscript")
@@ -170,7 +249,7 @@ fn render_command() -> ClapCommand {
                 .long("exclude-newer")
                 .value_name("DATE")
                 .num_args(1)
-                .help("Resolve packages from the Posit Package Manager snapshot at this date"),
+                .help("Use this date for default CRAN and Bioconductor PPM snapshots"),
         )
         .arg(
             Arg::new("python-exclude-newer")
@@ -179,11 +258,12 @@ fn render_command() -> ClapCommand {
                 .num_args(1)
                 .help("Resolve Python packages using this snapshot date"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
                 .action(ArgAction::SetTrue)
-                .help("Disable the user library for this render"),
+                .help(format!("Disable the user library for this {name}")),
         )
         .arg(
             Arg::new("vanilla")
@@ -195,7 +275,7 @@ fn render_command() -> ClapCommand {
             Arg::new("source")
                 .value_name("SOURCE")
                 .required(true)
-                .help("Quarto document or script to render"),
+                .help(format!("Quarto document or script to {name}")),
         )
         .arg(
             Arg::new("quarto-args")
@@ -203,8 +283,12 @@ fn render_command() -> ClapCommand {
                 .num_args(0..)
                 .allow_hyphen_values(true)
                 .trailing_var_arg(true)
-                .help("Arguments passed to `quarto render`"),
+                .help(format!("Arguments passed to `quarto {name}`")),
         )
+}
+
+fn quickstart_command() -> ClapCommand {
+    ClapCommand::new("quickstart").about("Show a concise usage guide for AI agents")
 }
 
 fn tool_command() -> ClapCommand {
@@ -214,13 +298,14 @@ fn tool_command() -> ClapCommand {
         .after_help(section_help(
             "Tools",
             concat!(
-                "  A tool is a supported executable in an R package's exec/ directory.\n",
-                "  Rscript and Rapp entries use the selected Rscript; direct executable scripts\n",
-                "  run as package scripts.\n",
+                "  A tool is a supported executable in an R package's exec/, bin/, or\n",
+                "  architecture-specific bin/<arch>/ directory. exec/ supports Rscript, Rapp,\n",
+                "  and direct executable scripts; bin/ entries are run as-is.\n",
                 "  `ir tool run` resolves the package plus any --with dependencies into an\n",
                 "  isolated library, then runs the selected executable. The user R library is not\n",
                 "  used.\n",
-                "  `ir tool install` writes launchers that recreate the resolved tool runtime.",
+                "  `ir tool install` materializes a durable package library, then writes\n",
+                "  launchers backed by that library.",
             ),
         ))
         .subcommand(tool_run_command())
@@ -232,7 +317,7 @@ fn tool_run_command() -> ClapCommand {
     tool_run_args(
         ClapCommand::new("run")
             .about("Run an executable provided by an R package")
-            .after_help(examples_help(concat!(
+            .after_help(tool_discovery_examples_help(concat!(
                 "  ir tool run btw\n",
                 "  ir tool run btw --help\n",
                 "      # btw is shorthand for --from btw btw.\n\n",
@@ -251,7 +336,30 @@ fn tool_rx_command() -> ClapCommand {
             .override_usage("rx [OPTIONS] [ARGS]...")
             .about("Run a package executable")
             .version(env!("CARGO_PKG_VERSION"))
-            .after_help("Use `ir tool run` for more details."),
+            .after_help(concat!(
+                "Mental model:\n",
+                "  rx is the package-executable frontend for `ir tool run`.\n",
+                "  It resolves the provider package plus any --with dependencies into an\n",
+                "  isolated cached R library, then launches the selected executable.\n",
+                "  Package executables are discovered from installed package exec/, bin/,\n",
+                "  and architecture-specific bin/<arch>/ directories. bin/ entries are run\n",
+                "  as-is.\n",
+                "  The tool sees the resolved package library plus base, site, and system\n",
+                "  libraries; ambient user R libraries are not used.\n\n",
+                "Examples:\n",
+                "  rx btw --help\n",
+                "      # shorthand for: rx --from btw btw --help.\n\n",
+                "  rx --from pkg command --help\n",
+                "      # resolve package `pkg`, run executable `command`.\n\n",
+                "  rx --from pkg --with cli command --flag value\n",
+                "      # --from and --with are for rx; --flag value is passed to command.\n\n",
+                "Workflow:\n",
+                "  Use rx for ad hoc package tools and executable frontends.\n",
+                "  Use `ir tool install` for repeated shell use.\n",
+                "  For durable scripts and documents, use `ir run` or `ir render` with\n",
+                "  frontmatter; see `ir quickstart`.\n\n",
+                "Use `ir tool run --help` for full command details.",
+            )),
     )
 }
 
@@ -287,6 +395,7 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
                 .num_args(1)
                 .help("Select the Rscript executable"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("isolated")
                 .long("isolated")
@@ -300,8 +409,8 @@ fn tool_run_args(command: ClapCommand) -> ClapCommand {
 
 fn tool_install_command() -> ClapCommand {
     ClapCommand::new("install")
-        .about("Install package executable launchers")
-        .after_help(examples_help(concat!(
+        .about("Install package executables")
+        .after_help(tool_install_examples_help(concat!(
             "  ir tool install btw\n",
             "  ir tool install --bin-dir ~/.local/bin btw\n",
             "  ir tool install --with cli --bin-dir ~/.local/bin btw",
@@ -312,14 +421,14 @@ fn tool_install_command() -> ClapCommand {
                 .value_name("PKG")
                 .num_args(1)
                 .action(ArgAction::Append)
-                .help("Add a dependency for installed launchers; may be repeated"),
+                .help("Add a dependency for installed tools; may be repeated"),
         )
         .arg(
             Arg::new("r-version")
                 .long("r-version")
                 .value_name("SPEC")
                 .num_args(1)
-                .help("Select the R version for installed launchers with rig"),
+                .help("Select the R version for installed tools with rig"),
         )
         .arg(
             Arg::new("rscript")
@@ -333,14 +442,15 @@ fn tool_install_command() -> ClapCommand {
                 .long("bin-dir")
                 .value_name("DIR")
                 .num_args(1)
-                .help("Directory where launchers are written"),
+                .help("Directory where executables are installed"),
         )
         .arg(
             Arg::new("force")
                 .long("force")
                 .action(ArgAction::SetTrue)
-                .help("Overwrite an existing launcher path"),
+                .help("Overwrite an existing installed executable path"),
         )
+        .arg(refresh_arg())
         .arg(
             Arg::new("package-ref")
                 .value_name("PKG_REF")
@@ -381,6 +491,13 @@ fn raw_args_arg(help: &'static str) -> Arg {
         .help(help)
 }
 
+fn refresh_arg() -> Arg {
+    Arg::new("refresh")
+        .long("refresh")
+        .action(ArgAction::SetTrue)
+        .help("Ignore cached dependency resolution for this invocation")
+}
+
 pub(crate) struct PackageExecTarget {
     pub(crate) package_ref: String,
     pub(crate) executable: String,
@@ -396,18 +513,20 @@ pub(crate) struct RunArgs {
     pub(crate) source: RunSource,
     pub(crate) script_args: Vec<String>,
     pub(crate) isolated: bool,
+    pub(crate) refresh: bool,
 }
 
-pub(crate) struct RenderArgs {
+pub(crate) struct QuartoArgs {
     pub(crate) with_deps: Vec<String>,
     pub(crate) r_requirement: Option<String>,
     pub(crate) rscript: Option<String>,
     pub(crate) exclude_newer: Option<String>,
     pub(crate) python_exclude_newer: Option<String>,
-    pub(crate) source: RenderSource,
-    pub(crate) render_args: Vec<String>,
+    pub(crate) source: QuartoSource,
+    pub(crate) quarto_args: Vec<String>,
     pub(crate) isolated: bool,
     pub(crate) vanilla: bool,
+    pub(crate) refresh: bool,
 }
 
 pub(crate) struct ToolRunArgs {
@@ -417,6 +536,7 @@ pub(crate) struct ToolRunArgs {
     pub(crate) rscript: Option<String>,
     pub(crate) target: PackageExecTarget,
     pub(crate) tool_args: Vec<String>,
+    pub(crate) refresh: bool,
 }
 
 pub(crate) struct ToolInstallArgs {
@@ -427,6 +547,7 @@ pub(crate) struct ToolInstallArgs {
     pub(crate) bin_dir: PathBuf,
     pub(crate) setup_bin_dir_on_path: bool,
     pub(crate) force: bool,
+    pub(crate) refresh: bool,
 }
 
 /// Split the leading region of `ir run`'s arguments into Rscript options,
@@ -435,9 +556,9 @@ pub(crate) struct ToolInstallArgs {
 /// args.
 ///
 /// `-e <expr>`, `--with <spec>`, `--r-version <spec>`, `--rscript <path>`,
-/// `--exclude-newer <date>`, `--python-exclude-newer <date>` and `--isolated`
-/// are `ir`-level flags handled here. Any other `-...` argument is an Rscript
-/// option, forwarded verbatim to the user-code
+/// `--exclude-newer <date>`, `--python-exclude-newer <date>`, `--refresh`, and
+/// `--isolated` are `ir`-level flags handled here. Any other `-...` argument is
+/// an Rscript option, forwarded verbatim to the user-code
 /// phase. Scanning stops at the script path unless `-e` was given, in which case
 /// scanning stops after the last `-e <expr>` pair. Everything after the source
 /// boundary is passed to user code as program args.
@@ -450,6 +571,7 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
     let mut python_exclude_newer = None;
     let mut expressions = Vec::new();
     let mut isolated = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -504,6 +626,8 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
             python_exclude_newer = Some(value.to_string());
         } else if arg == "--isolated" {
             isolated = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-" {
             positional = Some(arg);
             break;
@@ -540,12 +664,27 @@ pub(crate) fn parse_run_args(args: Vec<String>) -> Result<RunArgs, Box<dyn Error
         source,
         script_args,
         isolated,
+        refresh,
     })
 }
 
 /// Parse `ir render`, which resolves metadata for a Quarto source and then
 /// forwards the source plus trailing args to `quarto render`.
-pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn Error>> {
+pub(crate) fn parse_render_args(args: Vec<String>) -> Result<QuartoArgs, Box<dyn Error>> {
+    parse_quarto_args(args, QuartoCommand::Render)
+}
+
+/// Parse `ir preview`, which resolves metadata for a Quarto source and then
+/// forwards the source plus trailing args to `quarto preview`.
+pub(crate) fn parse_preview_args(args: Vec<String>) -> Result<QuartoArgs, Box<dyn Error>> {
+    parse_quarto_args(args, QuartoCommand::Preview)
+}
+
+fn parse_quarto_args(
+    args: Vec<String>,
+    command: QuartoCommand,
+) -> Result<QuartoArgs, Box<dyn Error>> {
+    let name = command.as_str();
     let mut with_deps = Vec::new();
     let mut r_requirement = None;
     let mut rscript = None;
@@ -553,6 +692,7 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
     let mut python_exclude_newer = None;
     let mut isolated = false;
     let mut vanilla = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -562,37 +702,49 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
         } else if arg == "--from" || arg.starts_with("--from=") {
             return Err("`--from` is only supported by `ir tool run`".into());
         } else if arg == "--with" {
-            let value = iter
-                .next()
-                .ok_or("`--with` requires a package (try `ir render --with dplyr report.qmd`)")?;
+            let value = iter.next().ok_or_else(|| {
+                format!("`--with` requires a package (try `ir {name} --with dplyr report.qmd`)")
+            })?;
             push_with_deps(&mut with_deps, &value);
         } else if let Some(value) = arg.strip_prefix("--with=") {
             push_with_deps(&mut with_deps, value);
         } else if arg == "--r-version" {
-            let value = iter.next().ok_or(
-                "`--r-version` requires a version spec (try `ir render --r-version 4.5 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--r-version` requires a version spec \
+                     (try `ir {name} --r-version 4.5 report.qmd`)"
+                )
+            })?;
             r_requirement = Some(value);
         } else if let Some(value) = arg.strip_prefix("--r-version=") {
             r_requirement = Some(value.to_string());
         } else if arg == "--rscript" {
-            let value = iter.next().ok_or(
-                "`--rscript` requires a path or command (try `ir render --rscript /path/to/Rscript report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--rscript` requires a path or command \
+                     (try `ir {name} --rscript /path/to/Rscript report.qmd`)"
+                )
+            })?;
             rscript = Some(value);
         } else if let Some(value) = arg.strip_prefix("--rscript=") {
             rscript = Some(value.to_string());
         } else if arg == "--exclude-newer" {
-            let value = iter.next().ok_or(
-                "`--exclude-newer` requires a date (try `ir render --exclude-newer 2024-06-01 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--exclude-newer` requires a date \
+                     (try `ir {name} --exclude-newer 2024-06-01 report.qmd`)"
+                )
+            })?;
             exclude_newer = Some(value);
         } else if let Some(value) = arg.strip_prefix("--exclude-newer=") {
             exclude_newer = Some(value.to_string());
         } else if arg == "--python-exclude-newer" {
-            let value = iter.next().ok_or(
-                "`--python-exclude-newer` requires a date (try `ir render --python-exclude-newer 2024-06-01 report.qmd`)",
-            )?;
+            let value = iter.next().ok_or_else(|| {
+                format!(
+                    "`--python-exclude-newer` requires a date \
+                     (try `ir {name} --python-exclude-newer 2024-06-01 report.qmd`)"
+                )
+            })?;
             python_exclude_newer = Some(value);
         } else if let Some(value) = arg.strip_prefix("--python-exclude-newer=") {
             python_exclude_newer = Some(value.to_string());
@@ -600,30 +752,34 @@ pub(crate) fn parse_render_args(args: Vec<String>) -> Result<RenderArgs, Box<dyn
             isolated = true;
         } else if arg == "--vanilla" {
             vanilla = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-" {
-            return Err("`ir render` requires a source path, not stdin".into());
+            return Err(format!("`ir {name}` requires a source path, not stdin").into());
         } else if arg.starts_with('-') {
-            return Err(format!("unexpected option `{arg}` before render source").into());
+            return Err(format!("unexpected option `{arg}` before {name} source").into());
         } else {
             positional = Some(arg);
             break;
         }
     }
 
-    let render_args: Vec<String> = iter.collect();
-    let source =
-        positional.ok_or("`ir render` requires a source path (try `ir render report.qmd`)")?;
+    let quarto_args: Vec<String> = iter.collect();
+    let source = positional.ok_or_else(|| {
+        format!("`ir {name}` requires a source path (try `ir {name} report.qmd`)")
+    })?;
 
-    Ok(RenderArgs {
+    Ok(QuartoArgs {
         with_deps,
         r_requirement,
         rscript,
         exclude_newer,
         python_exclude_newer,
-        source: RenderSource::from_source_arg(source)?,
-        render_args,
+        source: QuartoSource::from_source_arg(source)?,
+        quarto_args,
         isolated,
         vanilla,
+        refresh,
     })
 }
 
@@ -679,7 +835,7 @@ impl ToolRunInvocation {
 }
 
 /// Parse `ir tool run`, which resolves a provider package and runs a command
-/// from that package's `exec/` directory. This is intentionally separate from
+/// from that package's executable directories. This is intentionally separate from
 /// `ir run`: script and expression runs are source-oriented, tool runs are
 /// package-oriented and isolated by default.
 pub(crate) fn parse_tool_run_args(
@@ -691,6 +847,7 @@ pub(crate) fn parse_tool_run_args(
     let mut r_requirement = None;
     let mut rscript = None;
     let mut from = None;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -741,6 +898,8 @@ pub(crate) fn parse_tool_run_args(
         } else if arg == "--isolated" {
             // `ir tool run` is always isolated; accept this for symmetry with
             // `ir run` without changing behavior.
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-e" {
             return Err(format!("`-e` is not supported by `{}`", invocation.command()).into());
         } else if arg.starts_with('-') {
@@ -783,6 +942,7 @@ pub(crate) fn parse_tool_run_args(
         rscript,
         target,
         tool_args,
+        refresh,
     })
 }
 
@@ -794,6 +954,7 @@ pub(crate) fn parse_tool_install_args(
     let mut rscript = None;
     let mut bin_dir = None;
     let mut force = false;
+    let mut refresh = false;
     let mut iter = args.into_iter();
     let mut positional = None;
 
@@ -831,6 +992,8 @@ pub(crate) fn parse_tool_install_args(
             bin_dir = Some(PathBuf::from(value));
         } else if arg == "--force" {
             force = true;
+        } else if arg == "--refresh" {
+            refresh = true;
         } else if arg == "-e" {
             return Err("`-e` is not supported by `ir tool install`".into());
         } else if arg.starts_with('-') {
@@ -858,6 +1021,7 @@ pub(crate) fn parse_tool_install_args(
         bin_dir: bin_dir.unwrap_or(tool_install_bin_dir()?),
         setup_bin_dir_on_path,
         force,
+        refresh,
     })
 }
 
@@ -892,8 +1056,9 @@ fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {
 
     #[cfg(unix)]
     {
-        let home = nonempty_env("HOME")
-            .ok_or("cannot determine launcher directory; set --bin-dir or IR_TOOL_BIN_DIR")?;
+        let home = nonempty_env("HOME").ok_or(
+            "cannot determine executable install directory; set --bin-dir or IR_TOOL_BIN_DIR",
+        )?;
         Ok(PathBuf::from(home).join(".local").join("bin"))
     }
 
@@ -906,8 +1071,9 @@ fn tool_install_bin_dir() -> Result<PathBuf, Box<dyn Error>> {
                 .join("ir")
                 .join("bin"));
         }
-        let home = nonempty_env("USERPROFILE")
-            .ok_or("cannot determine launcher directory; set --bin-dir or IR_TOOL_BIN_DIR")?;
+        let home = nonempty_env("USERPROFILE").ok_or(
+            "cannot determine executable install directory; set --bin-dir or IR_TOOL_BIN_DIR",
+        )?;
         Ok(PathBuf::from(home)
             .join("AppData")
             .join("Local")

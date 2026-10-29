@@ -16,7 +16,12 @@ if (!nzchar(ir_bin)) {
   if (!identical(status, 0L)) {
     stop("`cargo build` failed with status ", status, call. = FALSE)
   }
-  ir_bin <- file.path("..", "target", "debug", "ir")
+  ir_name <- if (.Platform$OS.type == "windows") "ir.exe" else "ir"
+  ir_bin <- normalizePath(
+    file.path("..", "target", "debug", ir_name),
+    winslash = "/",
+    mustWork = TRUE
+  )
 }
 
 cli_help <- function(...) {
@@ -71,6 +76,12 @@ cli_help("run")
 cli_help("render")
 ```
 
+## `ir preview`
+
+```{r}
+cli_help("preview")
+```
+
 ## `ir tool`
 
 ```{r}
@@ -105,4 +116,10 @@ cli_help("cache", "dir")
 
 ```{r}
 cli_help("cache", "clean")
+```
+
+## `ir quickstart`
+
+```{r}
+cli_help("quickstart")
 ```
