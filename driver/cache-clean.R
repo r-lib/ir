@@ -301,11 +301,19 @@ ir_clean_uv_cache <- function(uv, path) {
 uv <- ir_external_uv_binary()
 uv_cache <- ir_uv_dir(uv, c("cache", "dir"))
 
-ir_clear_cache("pak package cache", ir_pkgcache_cache_dirs())
-ir_clear_cache("pak metadata cache", ir_pkg_metadata_cache_dirs())
-ir_clear_cache("pak cache", ir_pak_cache_dirs())
-ir_clear_cache("ir download cache", ir_download_cache_dirs())
-ir_clear_cache("renv cache", ir_renv_cache_dirs())
+# Package namespaces may have lazy-load databases inside these caches.
+# Resolve every path and run uv before removing any backing files.
+caches <- list(
+  "pak package cache" = ir_pkgcache_cache_dirs(),
+  "pak metadata cache" = ir_pkg_metadata_cache_dirs(),
+  "pak cache" = ir_pak_cache_dirs(),
+  "ir download cache" = ir_download_cache_dirs(),
+  "renv cache" = ir_renv_cache_dirs(),
+  "reticulate cache" = ir_reticulate_cache_dir(),
+  "reticulate legacy cache" = ir_reticulate_legacy_cache_dir()
+)
+
 ir_clean_uv_cache(uv, uv_cache)
-ir_clear_cache("reticulate cache", ir_reticulate_cache_dir())
-ir_clear_cache("reticulate legacy cache", ir_reticulate_legacy_cache_dir())
+for (label in names(caches)) {
+  ir_clear_cache(label, caches[[label]])
+}

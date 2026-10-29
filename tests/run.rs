@@ -1826,6 +1826,57 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
 }
 
 #[test]
+fn cache_clean_all_resolves_loaded_package_paths_before_deleting_renv() {
+    let root = temp_dir("ir-cache-clean-loaded-rappdirs");
+    let cache = root.join("ir");
+    let renv_cache = root.join("renv-cache");
+    let library = renv_cache.join("library");
+    let legacy_cache = root.join("r-reticulate");
+    let profile = root.join("profile.R");
+    install_fake_r_package(
+        &library,
+        "rappdirs",
+        "export(user_cache_dir)\n",
+        r#"user_cache_dir <- function(appname, appauthor) {
+  file.path(Sys.getenv("IR_TEST_LEGACY_ROOT"), appname)
+}
+"#,
+    );
+    fs::write(
+        &profile,
+        r#"
+lib <- Sys.getenv("IR_TEST_RAPPDIRS_LIB")
+ns <- loadNamespace("rappdirs", lib.loc = lib)
+stopifnot(normalizePath(getNamespaceInfo(ns, "path"), winslash = "/") ==
+          normalizePath(file.path(lib, "rappdirs"), winslash = "/"))
+"#,
+    )
+    .unwrap();
+    for dir in [&cache, &legacy_cache] {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("cached"), "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache)
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_RAPPDIRS_LIB", &library)
+        .env("IR_TEST_LEGACY_ROOT", &root)
+        .env("RETICULATE_UV", "managed")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!renv_cache.exists());
+    assert!(!legacy_cache.exists());
+    assert!(!cache.exists());
+    assert_stdout_contains_path(&out, "Clearing reticulate legacy cache at: ", &legacy_cache);
+}
+
+#[test]
 fn cache_clean_all_removes_relocated_ir_downloads() {
     for from_profile in [false, true] {
         let root = temp_dir("ir-cache-clean-relocated-downloads");
