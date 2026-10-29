@@ -15,6 +15,7 @@ DRY_RUN=0
 PLATFORM="auto"
 SKIP_RUST=0
 SKIP_PYTHON=0
+SKIP_UV=0
 SKIP_QUARTO=0
 SKIP_R_RELEASE=0
 SKIP_TEST_R=0
@@ -23,13 +24,13 @@ usage() {
   cat <<EOF
 Usage: scripts/install-dev-deps.sh [--dry-run] [--platform macos|linux-deb] [--skip COMPONENT]
 
-Installs Rust, Python, rig, R release, R ${TEST_R_SPEC} for tests, and Quarto.
+Installs Rust, Python, uv, rig, R release, R ${TEST_R_SPEC} for tests, and Quarto.
 Use scripts/install-dev-deps.ps1 on Windows.
 
 Options:
   --dry-run           Print the commands without running them.
   --platform PLATFORM Print or run the plan for a supported platform.
-  --skip COMPONENT    Skip installing rust, python, quarto, r-release, or test-r.
+  --skip COMPONENT    Skip installing rust, python, uv, quarto, r-release, or test-r.
   -h, --help          Show this help.
 EOF
 }
@@ -80,6 +81,9 @@ skip_component() {
       ;;
     python)
       SKIP_PYTHON=1
+      ;;
+    uv)
+      SKIP_UV=1
       ;;
     quarto)
       SKIP_QUARTO=1
@@ -292,6 +296,11 @@ install_macos() {
     run brew install python
   fi
 
+  if [ "$SKIP_UV" -eq 0 ] && ! have_command uv; then
+    require_command brew
+    run brew install uv
+  fi
+
   if ! have_command rig; then
     install_macos_rig
   fi
@@ -319,6 +328,16 @@ install_linux_deb() {
 
   if [ "$SKIP_PYTHON" -eq 0 ]; then
     run_root apt-get install -y --no-install-recommends python3 python3-venv
+  fi
+
+  if [ "$SKIP_UV" -eq 0 ] && ! have_command uv; then
+    uv_tmp="${TMPDIR:-/tmp}/ir-uv-install.$$"
+    run curl -LsSf https://astral.sh/uv/install.sh -o "$uv_tmp"
+    run env UV_INSTALL_DIR="${HOME}/.local/bin" sh "$uv_tmp"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      rm -f "$uv_tmp"
+    fi
+    export PATH="${HOME}/.local/bin:${PATH}"
   fi
 
   if [ "$SKIP_RUST" -eq 0 ]; then
@@ -387,6 +406,7 @@ verify_install() {
   run cargo --version
   run rustc --version
   run python3 --version
+  run uv --version
   run rig --version
   run Rscript --version
   if [ "$SKIP_TEST_R" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then

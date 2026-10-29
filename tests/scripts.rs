@@ -171,6 +171,8 @@ fn install_dev_deps_sh_prints_linux_plan() {
     assert_success(&out);
     assert_stdout_contains(&out, "apt-get install");
     assert_stdout_contains(&out, "https://sh.rustup.rs");
+    assert_stdout_contains(&out, "https://astral.sh/uv/install.sh");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(&out, "api.github.com/repos/r-lib/rig/releases/latest");
     assert_stdout_contains(&out, "r-rig_");
     assert_stdout_contains(&out, ".deb");
@@ -204,6 +206,8 @@ fn install_dev_deps_sh_prints_macos_plan() {
     assert_stdout_contains(&out, "macOS-");
     assert_stdout_contains(&out, "installer -pkg");
     assert_stdout_contains(&out, "brew install --cask quarto");
+    assert_stdout_contains(&out, "brew install uv");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add 4.3");
     assert_stdout_contains(&out, "rig list --json");
@@ -234,6 +238,8 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
         "--skip",
         "python",
         "--skip",
+        "uv",
+        "--skip",
         "quarto",
         "--skip",
         "r-release",
@@ -247,6 +253,10 @@ fn install_dev_deps_sh_can_skip_action_managed_tools_for_ci() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("https://sh.rustup.rs"), "{stdout}");
     assert!(!stdout.contains("python3 python3-venv"), "{stdout}");
+    assert!(
+        !stdout.contains("https://astral.sh/uv/install.sh"),
+        "{stdout}"
+    );
     assert!(!stdout.contains("quarto-linux-"), "{stdout}");
     assert!(!stdout.contains("rig add release"), "{stdout}");
 }
@@ -275,7 +285,7 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("scripts\\install-dev-deps.ps1"));
     assert!(workflow.contains("Install rig and non-default R (Unix)"));
     assert!(workflow.contains("Install rig and non-default R (Windows)"));
-    assert!(workflow.contains("-Skip rust, python, quarto, r-release"));
+    assert!(workflow.contains("-Skip rust, python, uv, quarto, r-release"));
     assert!(workflow.contains("GITHUB_TOKEN: ${{ github.token }}"));
     assert!(!workflow.contains("IR_TEST_R_VERSION=4.4.3"));
     assert!(!workflow.contains("IR_TEST_R_EXCLUDE_NEWER=2025-02-28"));
@@ -285,6 +295,18 @@ fn ci_uses_dev_deps_script_for_non_default_r_setup() {
     assert!(workflow.contains("tidyr@1.3.1"));
     assert!(workflow.contains("gt@0.10.1"));
     assert!(workflow.contains("taiki-e/install-action@nextest"));
+    let uv_setup = workflow
+        .split("      - uses: astral-sh/setup-uv@")
+        .nth(1)
+        .unwrap();
+    let uv_setup = uv_setup.split("      - ").next().unwrap();
+    assert!(
+        !uv_setup.contains("if:"),
+        "uv is required on every test platform"
+    );
+    assert!(
+        workflow.find("astral-sh/setup-uv@").unwrap() < workflow.find("cargo nextest run").unwrap()
+    );
     assert!(!workflow
         .lines()
         .any(|line| line == "  R_USER_CACHE_DIR: ${{ github.workspace }}/.cache"));
@@ -695,6 +717,8 @@ fn install_dev_deps_ps1_prints_windows_plan() {
     assert!(!String::from_utf8_lossy(&out.stdout).contains("Rustlang.Rustup"));
     assert_stdout_contains(&out, "winget install --id posit.rig");
     assert_stdout_contains(&out, "winget install --id Posit.Quarto");
+    assert_stdout_contains(&out, "winget install --id astral-sh.uv");
+    assert_stdout_contains(&out, "uv --version");
     assert_stdout_contains(&out, "rig add release");
     assert_stdout_contains(&out, "rig add 4.3");
     assert!(
@@ -718,7 +742,7 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            "& .\\scripts\\install-dev-deps.ps1 -DryRun -Skip rust, python, quarto, r-release",
+            "& .\\scripts\\install-dev-deps.ps1 -DryRun -Skip rust, python, uv, quarto, r-release",
         ])
         .output()
         .unwrap();
@@ -739,6 +763,10 @@ fn install_dev_deps_ps1_uses_github_release_for_rig_on_github_actions() {
     assert_stdout_contains(&out, "rig add 4.3");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.contains("choco install rig"), "{stdout}");
+    assert!(
+        !stdout.contains("winget install --id astral-sh.uv"),
+        "{stdout}"
+    );
     assert!(
         !stdout.contains("winget install --id posit.rig"),
         "{stdout}"

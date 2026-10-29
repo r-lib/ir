@@ -259,6 +259,16 @@ ir_reticulate_cache_dir <- function() {
   ir_r_user_cache_dir("reticulate")
 }
 
+ir_uv_cache_args <- function(command) {
+  # Tool runs ignore project configuration but retain user/system configuration.
+  # A standalone workspace gives cache commands the same scope without changing
+  # the working directory used to resolve relative environment/config paths.
+  project <- tempfile("ir-uv-cache-")
+  stopifnot(dir.create(project))
+  writeLines("[tool.uv.workspace]", file.path(project, "pyproject.toml"))
+  c("cache", command, "--project", shQuote(project))
+}
+
 ir_uv_dir <- function(uv, args) {
   if (!nzchar(uv)) {
     return("")
@@ -290,7 +300,7 @@ ir_clean_uv_cache <- function(uv, path) {
   }
 
   cat("Clearing uv cache at: ", path, "\n", sep = "")
-  status <- suppressWarnings(system2(uv, c("cache", "clean")))
+  status <- suppressWarnings(system2(uv, ir_uv_cache_args("clean")))
   if (!is.null(status) && status != 0L) {
     stop("failed to run `", uv, " cache clean`", call. = FALSE)
   }
@@ -299,7 +309,7 @@ ir_clean_uv_cache <- function(uv, path) {
 }
 
 uv <- ir_external_uv_binary()
-uv_cache <- ir_uv_dir(uv, c("cache", "dir"))
+uv_cache <- ir_uv_dir(uv, ir_uv_cache_args("dir"))
 
 # Package namespaces may have lazy-load databases inside these caches.
 # Resolve every path and run uv before removing any backing files.

@@ -40,6 +40,10 @@ fn ci_dependencies_are_available() {
     quarto.arg("--version");
     assert_command_success(quarto, "quarto --version");
 
+    let mut uv = Command::new("uv");
+    uv.arg("--version");
+    assert_command_success(uv, "uv --version");
+
     let version = python_minor_version();
     assert!(!version.is_empty());
 }
@@ -2511,6 +2515,107 @@ requireNamespace <- function(package, ...) {
         "Clearing reticulate legacy cache at: ",
         &user_profile_reticulate_legacy_cache,
     );
+}
+
+#[test]
+fn cache_clean_all_matches_uv_tool_configuration_scope() {
+    let uv = command_on_path(if cfg!(windows) { "uv.exe" } else { "uv" })
+        .expect("uv is required for cache cleanup tests; run scripts/install-dev-deps");
+
+    for project_file in ["uv.toml", "pyproject.toml"] {
+        for cache_source in ["user", "environment", "explicit"] {
+            let root = temp_dir("ir-cache-clean-all-uv-config");
+            let project = root.join("project");
+            let config = root.join("config");
+            let user_cache = root.join("user-cache");
+            let project_cache = root.join("project-cache");
+            let override_cache = project.join("override-cache");
+            let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-config-profile");
+            let cache_setting = |path: &Path| {
+                format!(
+                    "cache-dir = {}\n",
+                    serde_json::to_string(&renviron_path(path)).unwrap()
+                )
+            };
+
+            fs::create_dir_all(config.join("uv")).unwrap();
+            fs::create_dir_all(project.join("tmp")).unwrap();
+            fs::write(config.join("uv/uv.toml"), cache_setting(&user_cache)).unwrap();
+            fs::write(project.join("pyproject.toml"), "[tool.uv.workspace]\n").unwrap();
+            let project_config = if project_file == "pyproject.toml" {
+                format!(
+                    "[tool.uv]\n{}[tool.uv.workspace]\n",
+                    cache_setting(&project_cache)
+                )
+            } else {
+                cache_setting(&project_cache)
+            };
+            fs::write(project.join(project_file), project_config).unwrap();
+            fs::write(
+                project.join("explicit-uv.toml"),
+                cache_setting(&override_cache),
+            )
+            .unwrap();
+            for cache in [&user_cache, &project_cache, &override_cache] {
+                fs::create_dir_all(cache).unwrap();
+                fs::write(cache.join("archive"), "cached").unwrap();
+            }
+
+            let mut command = ir_with_private_r_caches();
+            remove_uv_resolver_env(&mut command);
+            command
+                .current_dir(&project)
+                .env("IR_CACHE_DIR", root.join("ir"))
+                .env("R_USER_CACHE_DIR", root.join("r-user"))
+                .env("R_PROFILE_USER", &profile)
+                .env("RETICULATE_UV", &uv)
+                .env("XDG_CONFIG_HOME", &config)
+                .env("APPDATA", &config)
+                // The neutral workspace must also stop discovery inside this project.
+                .env("TMPDIR", project.join("tmp"))
+                .env("TMP", project.join("tmp"))
+                .env("TEMP", project.join("tmp"))
+                .env("UV_OFFLINE", "1")
+                .args(["cache", "clean", "--all"]);
+            match cache_source {
+                "environment" => {
+                    command.env("UV_CACHE_DIR", "override-cache");
+                }
+                "explicit" => {
+                    command.env("UV_CONFIG_FILE", "explicit-uv.toml");
+                }
+                _ => {}
+            }
+            let out = command.output().unwrap();
+
+            assert_success(&out);
+            assert!(
+                project_cache.join("archive").exists(),
+                "{project_file}, {cache_source}: project cache was removed"
+            );
+            let selected_cache = if cache_source == "user" {
+                &user_cache
+            } else {
+                &override_cache
+            };
+            assert!(
+                !selected_cache.join("archive").exists(),
+                "{project_file}, {cache_source}: selected cache was retained"
+            );
+            let preserved_cache = if cache_source == "user" {
+                &override_cache
+            } else {
+                &user_cache
+            };
+            assert!(preserved_cache.join("archive").exists());
+            let reported_cache = if cache_source == "environment" {
+                Path::new("override-cache")
+            } else {
+                selected_cache
+            };
+            assert_stdout_contains_path(&out, "Clearing uv cache at: ", reported_cache);
+        }
+    }
 }
 
 #[cfg(unix)]
