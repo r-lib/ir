@@ -119,97 +119,17 @@ ir_pkgcache_cache_dirs <- function() {
 }
 
 ir_pkg_metadata_cache_dirs <- function() {
-  c(
-    ir_pkg_config_path("pkg.metadata_cache_dir", "PKG_METADATA_CACHE_DIR"),
-    ir_pkgcache_default_metadata_cache_dirs()
-  )
+  ir_pkg_config_path("pkg.metadata_cache_dir", "PKG_METADATA_CACHE_DIR")
 }
 
 ir_pkgcache_default_cache_dir <- function() {
-  if (nzchar(Sys.getenv("R_PKG_CACHE_DIR", ""))) {
-    dirs <- ir_resolve_pkgcache_user_dirs()
-    if (is.null(dirs)) {
-      dirs <- ir_pkgcache_fallback_user_dirs()
-    }
-    if (!is.null(dirs)) {
-      return(dirs[["pkg"]])
-    }
-
-    return(character())
+  root <- Sys.getenv("R_PKG_CACHE_DIR", "")
+  if (nzchar(root)) {
+    # The root also contains resolver metadata outside pkg and _metadata.
+    return(normalizePath(file.path(root, "R", "pkgcache"), mustWork = FALSE))
   }
 
   ir_r_user_cache_dir("pkgcache")
-}
-
-ir_pkgcache_default_metadata_cache_dirs <- function() {
-  if (!nzchar(Sys.getenv("R_PKG_CACHE_DIR", ""))) {
-    return(character())
-  }
-
-  dirs <- ir_resolve_pkgcache_user_dirs()
-  if (is.null(dirs)) {
-    dirs <- ir_pkgcache_fallback_user_dirs()
-  }
-  if (is.null(dirs)) {
-    return(character())
-  }
-
-  c(dirs[["meta"]], dirs[["lock"]])
-}
-
-ir_resolve_pkgcache_user_dirs <- function() {
-  if (requireNamespace("pkgcache", quietly = TRUE)) {
-    dirs <- tryCatch(
-      ir_pkgcache_user_dirs_from_namespace(asNamespace("pkgcache")),
-      error = function(err) NULL
-    )
-    if (!is.null(dirs)) {
-      return(dirs)
-    }
-  }
-
-  if (requireNamespace("pak", quietly = TRUE)) {
-    dirs <- tryCatch({
-      ns <- asNamespace("pak")
-      load_private_package <- get(
-        "load_private_package",
-        envir = ns,
-        inherits = FALSE
-      )
-      load_private_package("pkgcache")
-      pkg_data <- get("pkg_data", envir = ns, inherits = FALSE)
-      ir_pkgcache_user_dirs_from_namespace(pkg_data$ns$pkgcache)
-    }, error = function(err) NULL)
-    if (!is.null(dirs)) {
-      return(dirs)
-    }
-  }
-
-  NULL
-}
-
-ir_pkgcache_fallback_user_dirs <- function() {
-  root <- Sys.getenv("R_PKG_CACHE_DIR", "")
-  if (!nzchar(root)) {
-    return(NULL)
-  }
-
-  pkgcache <- normalizePath(file.path(root, "R", "pkgcache"), mustWork = FALSE)
-  c(
-    pkg = file.path(pkgcache, "pkg"),
-    meta = file.path(pkgcache, "_metadata"),
-    lock = file.path(pkgcache, "_metadata.lock")
-  )
-}
-
-ir_pkgcache_user_dirs_from_namespace <- function(ns) {
-  get_user_cache_dir <- get("get_user_cache_dir", envir = ns, inherits = FALSE)
-  dirs <- get_user_cache_dir()
-  c(
-    pkg = as.character(dirs$pkg[[1L]]),
-    meta = as.character(dirs$meta[[1L]]),
-    lock = as.character(dirs$lock[[1L]])
-  )
 }
 
 ir_pak_cache_dirs <- function() {

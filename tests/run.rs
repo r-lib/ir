@@ -1756,12 +1756,7 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
     let cache_dir = temp_dir("ir-cache-clean-all-ir");
     let r_user_cache_dir = temp_dir("ir-cache-clean-all-r-user");
     let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-r-pkg");
-    let r_pkg_package_cache = r_pkg_cache_dir.join("R").join("pkgcache").join("pkg");
-    let r_pkg_metadata_cache = r_pkg_cache_dir.join("R").join("pkgcache").join("_metadata");
-    let r_pkg_metadata_lock = r_pkg_cache_dir
-        .join("R")
-        .join("pkgcache")
-        .join("_metadata.lock");
+    let r_pkg_cache = r_pkg_cache_dir.join("R").join("pkgcache");
     let renv_cache_dir = temp_dir("ir-cache-clean-all-renv");
     let legacy_reticulate_cache = legacy_reticulate_cache_dir(&r_user_cache_dir);
     let profile = masked_rappdirs_profile("ir-cache-clean-all-ir-profile");
@@ -1769,9 +1764,14 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
     let paths = [
         cache_dir.join("libraries").join("library").join("pkg"),
         r_pkg_cache_dir.join("lib").join("unrelated"),
-        r_pkg_package_cache.join("pkg"),
-        r_pkg_metadata_cache.join("metadata"),
-        r_pkg_metadata_lock.clone(),
+        r_pkg_cache.join("pkg").join("pkg"),
+        r_pkg_cache.join("_metadata").join("metadata"),
+        r_pkg_cache.join("_metadata.lock"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz.etag"),
+        r_pkg_cache.join("sysreqs").join("metadata"),
+        r_pkg_cache.join("deps").join("metadata"),
+        r_pkg_cache_dir.join("R").join("unrelated"),
         r_pkg_cache_dir.join("unrelated"),
         renv_cache_dir.join("v5").join("pkg"),
         r_user_cache_dir.join("R").join("reticulate").join("uv"),
@@ -1781,8 +1781,7 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, "cached").unwrap();
     }
-    let r_pkg_package_cache_resolved = fs::canonicalize(&r_pkg_package_cache).unwrap();
-    let r_pkg_metadata_cache_resolved = fs::canonicalize(&r_pkg_metadata_cache).unwrap();
+    let r_pkg_cache_resolved = fs::canonicalize(&r_pkg_cache).unwrap();
 
     let out = ir_with_private_r_caches()
         .env("IR_CACHE_DIR", &cache_dir)
@@ -1798,9 +1797,8 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
     assert_success(&out);
     assert!(!cache_dir.exists());
     assert!(r_pkg_cache_dir.join("lib").exists());
-    assert!(!r_pkg_package_cache.exists(), "{}", output_text(&out));
-    assert!(!r_pkg_metadata_cache.exists());
-    assert!(!r_pkg_metadata_lock.exists());
+    assert!(!r_pkg_cache.exists(), "{}", output_text(&out));
+    assert!(r_pkg_cache_dir.join("R").join("unrelated").exists());
     assert!(r_pkg_cache_dir.join("unrelated").exists());
     assert!(!renv_cache_dir.exists());
     assert!(!r_user_cache_dir.join("R").join("reticulate").exists());
@@ -1812,12 +1810,7 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
     assert_stdout_contains_path(
         &out,
         "Clearing pak package cache at: ",
-        &r_pkg_package_cache_resolved,
-    );
-    assert_stdout_contains_path(
-        &out,
-        "Clearing pak metadata cache at: ",
-        &r_pkg_metadata_cache_resolved,
+        &r_pkg_cache_resolved,
     );
     assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
     assert_stdout_contains_path(
@@ -1924,7 +1917,7 @@ fn cache_clean_all_uses_r_profile_cache_locations() {
     let cache_dir = temp_dir("ir-cache-clean-all-r-profile-ir");
     let r_user_cache_dir = temp_dir("ir-cache-clean-all-r-profile-r-user");
     let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-r-profile-r-pkg");
-    let r_pkg_package_cache = r_pkg_cache_dir.join("R").join("pkgcache").join("pkg");
+    let r_pkg_cache = r_pkg_cache_dir.join("R").join("pkgcache");
     let renv_cache_dir = temp_dir("ir-cache-clean-all-r-profile-renv");
     let legacy_reticulate_cache = legacy_reticulate_cache_dir(&r_user_cache_dir);
     let profile = temp_path("ir-cache-clean-all-r-profile", "R");
@@ -1950,7 +1943,10 @@ Sys.setenv(
     let paths = [
         cache_dir.join("libraries").join("library").join("pkg"),
         r_pkg_cache_dir.join("lib").join("unrelated"),
-        r_pkg_package_cache.join("pkg"),
+        r_pkg_cache.join("pkg").join("pkg"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz.etag"),
+        r_pkg_cache_dir.join("R").join("unrelated"),
         r_pkg_cache_dir.join("unrelated"),
         renv_cache_dir.join("v5").join("pkg"),
         r_user_cache_dir.join("R").join("reticulate").join("uv"),
@@ -1960,7 +1956,7 @@ Sys.setenv(
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, "cached").unwrap();
     }
-    let r_pkg_package_cache_resolved = fs::canonicalize(&r_pkg_package_cache).unwrap();
+    let r_pkg_cache_resolved = fs::canonicalize(&r_pkg_cache).unwrap();
 
     let out = ir_with_private_r_caches()
         .env("HOME", &home)
@@ -1978,7 +1974,8 @@ Sys.setenv(
     assert_success(&out);
     assert!(!cache_dir.exists());
     assert!(r_pkg_cache_dir.join("lib").exists());
-    assert!(!r_pkg_package_cache.exists(), "{}", output_text(&out));
+    assert!(!r_pkg_cache.exists(), "{}", output_text(&out));
+    assert!(r_pkg_cache_dir.join("R").join("unrelated").exists());
     assert!(r_pkg_cache_dir.join("unrelated").exists());
     assert!(!renv_cache_dir.exists());
     assert!(!r_user_cache_dir.join("R").join("reticulate").exists());
@@ -1986,7 +1983,7 @@ Sys.setenv(
     assert_stdout_contains_path(
         &out,
         "Clearing pak package cache at: ",
-        &r_pkg_package_cache_resolved,
+        &r_pkg_cache_resolved,
     );
     assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
     assert_stdout_contains_path(
