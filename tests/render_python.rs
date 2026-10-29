@@ -23,12 +23,9 @@ fn install_fake_r_package(lib: &Path, name: &str, namespace: &str, code: &str) {
     fs::write(package.join("NAMESPACE"), namespace).unwrap();
     fs::write(package.join("R").join(format!("{name}.R")), code).unwrap();
 
-    let out = std::process::Command::new(rscript())
-        .args([
-            "--vanilla",
-            "-e",
-            "args <- commandArgs(TRUE); dir.create(args[[1]], recursive = TRUE, showWarnings = FALSE); install.packages(args[[2]], lib = args[[1]], repos = NULL, type = 'source', INSTALL_opts = c('--no-byte-compile', '--no-help', '--no-docs'))",
-        ])
+    let out = rscript_command()
+        .arg("--vanilla")
+        .arg(fixture("install-fake-package.R"))
         .arg(lib)
         .arg(&package)
         .output()

@@ -65,6 +65,10 @@ ir_test_write_renv <- function(lib, code = ir_test_renv_code(),
                                version = "1.2.0",
                                built = as.character(getRversion())) {
   namespace <- if (grepl("restore <-", code, fixed = TRUE)) "export(restore)" else "export(use)"
+  # This fixture materializes libraries directly and has no package cache.
+  namespace <- c(namespace, "export(config)")
+  code <- paste("config <- list(cache.enabled = function() FALSE)", code,
+                sep = "\n")
   ir_test_write_pkg(lib, "renv", namespace, code,
                     version = version, built = built)
 }

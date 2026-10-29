@@ -40,9 +40,10 @@ ir_close_pak_remote <- function(grace = 5000) {
 ## --- resolver tooling bootstrap ---------------------------------------------
 
 # Packages the resolver itself needs. pak resolves dependencies, renv
-# materialises the library, secretbase hashes the cache keys. They are
+# materialises the library, secretbase hashes the cache keys, and filelock
+# coordinates installs sharing renv's cache. They are
 # installed into a dedicated tooling library so users need not pre-install them.
-ir_tooling_packages <- function() c("pak", "renv", "secretbase")
+ir_tooling_packages <- function() c("pak", "renv", "secretbase", "filelock")
 
 # Repository for tooling installs: always the latest PPM snapshot, independent
 # of the user's `exclude-newer`. ir's own tooling is not pinned to a user's

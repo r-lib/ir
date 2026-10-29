@@ -12,7 +12,7 @@ use std::process::Command;
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
         "pkgs <- c(",
-        "'pak', 'renv', 'secretbase', 'cli', 'glue', 'jsonlite', ",
+        "'pak', 'renv', 'secretbase', 'filelock', 'cli', 'glue', 'jsonlite', ",
         "'dplyr', 'tidyr', 'reticulate', 'knitr', 'rmarkdown', 'xfun', 'quarto', ",
         "'btw', 'Rapp', 'docopt', 'pkgsearch', 'prettyunits', 'fansi', ",
         "'htmltools'); ",
@@ -73,6 +73,8 @@ pkg_deps <- function(refs, ...) {
         }
         "renv" => {
             r#"
+# This fixture materializes libraries directly and has no package cache.
+config <- list(cache.enabled = function() FALSE)
 restore <- function(lockfile, library, repos, ...) {
   packages <- lockfile$Packages
   specs <- vapply(seq_along(packages), function(i) {
@@ -95,7 +97,7 @@ restore <- function(lockfile, library, repos, ...) {
         _ => "",
     };
     let namespace = if name == "renv" {
-        format!("{namespace}export(restore)\n")
+        format!("{namespace}export(restore)\nexport(config)\n")
     } else {
         namespace.to_string()
     };
@@ -117,11 +119,8 @@ restore <- function(lockfile, library, repos, ...) {
     .unwrap();
 
     let out = Command::new(rscript())
-        .args([
-            "--vanilla",
-            "-e",
-            "args <- commandArgs(TRUE); dir.create(args[[1]], recursive = TRUE, showWarnings = FALSE); install.packages(args[[2]], lib = args[[1]], repos = NULL, type = 'source', INSTALL_opts = c('--no-byte-compile', '--no-help', '--no-docs'))",
-        ])
+        .arg("--vanilla")
+        .arg(fixture("install-fake-package.R"))
         .arg(lib)
         .arg(&package)
         .output()
@@ -1001,7 +1000,9 @@ printf 'ir.fixture=python-exclude-newer-latest\\n'\n",
             ),
         );
 
-        let out = ir()
+        let mut command = ir();
+        remove_uv_resolver_env(&mut command);
+        let out = command
             .env("IR_CACHE_DIR", &cache_dir)
             .args(["run", "--exclude-newer", exclude_newer, "--rscript"])
             .arg(&rscript)
@@ -1408,17 +1409,6 @@ printf 'ir.fixture=python-uv-config-cache\\n'\n",
     );
 }
 
-fn remove_uv_resolver_env(command: &mut Command) {
-    for (name, _) in std::env::vars_os() {
-        if name
-            .to_str()
-            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
-        {
-            command.env_remove(name);
-        }
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn run_python_only_resolution_clears_inherited_r_resolver_env() {
@@ -1483,7 +1473,9 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
         ),
     );
 
-    let out = ir()
+    let mut command = ir();
+    remove_uv_resolver_env(&mut command);
+    let out = command
         .env("IR_CACHE_DIR", &cache_dir)
         .args(["run", "--rscript"])
         .arg(&rscript)
@@ -1494,7 +1486,9 @@ printf 'ir.fixture=cleared-r-resolver-env\\n'\n",
 
     fs::remove_dir_all(cache_dir.join("python")).unwrap();
 
-    let out = ir()
+    let mut command = ir();
+    remove_uv_resolver_env(&mut command);
+    let out = command
         .env("IR_CACHE_DIR", &cache_dir)
         .env("IR_RESOLVE_RESULT_FILE", "/tmp/stale-r-result")
         .env("IR_RESOLVE_PACKAGE_RESULT_FILE", "/tmp/stale-r-package")
@@ -1746,6 +1740,65 @@ fn cache_clean_removes_cache_dir() {
     assert!(!cache_dir.exists());
     assert_stdout_contains(&out, &format!("Clearing cache at: {}", cache_dir.display()));
     assert_stdout_contains(&out, "Removed 1 file");
+}
+
+#[test]
+fn test_commands_keep_r_caches_outside_the_ambient_user_cache() {
+    let cache_dir = temp_cache("ir-test-cache-isolation");
+    let ambient_cache = temp_dir("ir-test-ambient-r-cache");
+    let profile = temp_path("ir-test-cache-isolation-profile", "R");
+    fs::write(
+        &profile,
+        format!(
+            "options(repos = c(CRAN = {}))\n",
+            serde_json::to_string(&r_repository_url(&ambient_cache)).unwrap()
+        ),
+    )
+    .unwrap();
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &ambient_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("PKG_USE_BIOCONDUCTOR", "false")
+        .args([
+            "run",
+            "--vanilla",
+            "-e",
+            concat!(
+                "paths <- c(renv::paths$cache(), ",
+                "pak::meta_summary()$cachepath, pak::cache_summary()$cachepath); ",
+                "invisible(lapply(paths, dir.create, recursive = TRUE, showWarnings = FALSE)); ",
+                "writeLines(normalizePath(paths, winslash = '/', mustWork = TRUE))"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert_success(&out);
+
+    let ambient_cache = ambient_cache.canonicalize().unwrap();
+    let test_root = std::env::var_os("IR_TEST_R_CACHE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .canonicalize()
+        .unwrap();
+    let output = stdout(&out);
+    let caches: Vec<_> = output
+        .lines()
+        .map(|path| Path::new(path).canonicalize().unwrap())
+        .collect();
+    assert_eq!(caches.len(), 3, "{output}");
+    for cache in caches {
+        assert!(
+            !cache.starts_with(&ambient_cache),
+            "test command used an ambient R cache: {}",
+            cache.display()
+        );
+        assert!(
+            cache.starts_with(&test_root),
+            "test command used a cache outside the disposable test root: {}",
+            cache.display()
+        );
+    }
 }
 
 #[test]

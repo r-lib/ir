@@ -32,6 +32,14 @@ fn real_pak_library(prefix: &str) -> TempPath {
     let pak_path = real_pak_path();
     let pak_library = temp_dir(prefix);
     symlink(pak_path, pak_library.join("pak")).unwrap();
+    // Keep the fixture's other real tooling available when it replaces
+    // .libPaths() to exercise renv/secretbase selection in isolation.
+    let out = Command::new(rscript())
+        .args(["--vanilla", "-e", "cat(find.package('filelock'))"])
+        .output()
+        .unwrap();
+    assert_success(&out);
+    symlink(PathBuf::from(stdout(&out)), pak_library.join("filelock")).unwrap();
     pak_library
 }
 

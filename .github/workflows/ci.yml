@@ -37,6 +37,7 @@ jobs:
           r_user_cache_dir <- file.path(Sys.getenv("RUNNER_TEMP"), "ir-r-user-cache")
           dir.create(r_user_cache_dir, recursive = TRUE, showWarnings = FALSE)
           cat("R_USER_CACHE_DIR=", r_user_cache_dir, "\n", sep = "", file = Sys.getenv("GITHUB_ENV"), append = TRUE)
+          cat("IR_TEST_R_CACHE_DIR=", file.path(r_user_cache_dir, "R"), "\n", sep = "", file = Sys.getenv("GITHUB_ENV"), append = TRUE)
           date <- format(as.Date(Sys.time(), tz = "UTC"))
           cat("date=", date, "\n", sep = "", file = Sys.getenv("GITHUB_OUTPUT"), append = TRUE)
       - name: Cache R user cache
@@ -54,6 +55,7 @@ jobs:
             any::pak
             any::renv
             any::secretbase
+            any::filelock
             any::cli
             any::glue
             any::jsonlite

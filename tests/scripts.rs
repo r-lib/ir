@@ -1,6 +1,6 @@
 mod support;
 
-use support::{rscript, temp_cache, temp_dir, temp_path};
+use support::{rscript_command, temp_cache, temp_dir, temp_path};
 
 use std::fs;
 use std::path::Path;
@@ -389,7 +389,7 @@ fn warm_renv_cache_replaces_unnamed_at_cran_with_real_package() {
     let profile = temp_path("ir-warm-real-profile", "R");
     fs::write(&profile, "options(repos = \"@CRAN@\")\n").unwrap();
 
-    let out = Command::new(rscript())
+    let out = rscript_command()
         .current_dir(repo_root())
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_LIBS_USER", &user_library)
@@ -425,7 +425,7 @@ fn warm_renv_cache_ignores_corrupt_user_source_cache() {
     fs::create_dir_all(corrupt_archive.parent().unwrap()).unwrap();
     fs::write(&corrupt_archive, b"partial archive").unwrap();
 
-    let out = Command::new(rscript())
+    let out = rscript_command()
         .current_dir(repo_root())
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_USER_CACHE_DIR", &user_cache)
@@ -456,7 +456,7 @@ fn warm_renv_cache_rewrites_plain_ppm_latest_with_real_binary_package() {
     )
     .unwrap();
 
-    let out = Command::new(rscript())
+    let out = rscript_command()
         .current_dir(repo_root())
         .env("RENV_PATHS_CACHE", &renv_cache)
         .env("R_LIBS_USER", &user_library)

@@ -40,6 +40,7 @@ static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
+    configure_r_test_caches(&mut command);
     command
         .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
         .env_remove("IR_PREFER_BINARIES")
@@ -49,8 +50,58 @@ pub(crate) fn ir() -> Command {
 
 pub(crate) fn rx() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rx"));
+    configure_r_test_caches(&mut command);
     command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
     command
+}
+
+pub(crate) fn rscript_command() -> Command {
+    let mut command = Command::new(rscript());
+    configure_r_test_caches(&mut command);
+    command
+}
+
+// For fixtures that supply fake Python without invoking uv.
+pub(crate) fn remove_uv_resolver_env(command: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("UV_") || name == "RETICULATE_UV")
+        {
+            command.env_remove(name);
+        }
+    }
+}
+
+fn configure_r_test_caches(command: &mut Command) {
+    thread_local! {
+        static CACHE: TempPath = temp_dir("ir-test-r-caches");
+    }
+    let configure = |command: &mut Command, root: &Path| {
+        for (variable, subdir) in [
+            ("RENV_PATHS_ROOT", "renv"),
+            ("RENV_PATHS_CACHE", "renv/cache"),
+            ("RENV_PATHS_BINARY", "renv/binary"),
+            ("RENV_PATHS_CELLAR", "renv/cellar"),
+            ("R_PKG_CACHE_DIR", "pak"),
+            ("PKG_PACKAGE_CACHE_DIR", "pak/packages"),
+        ] {
+            command.env(variable, root.join(subdir));
+        }
+        // The driver keeps mutable source archives under its IR cache lock.
+        // The warm-cache script also supplies its own temporary source cache.
+        command.env_remove("RENV_PATHS_SOURCE");
+        // pkgdepends owns these mutable paths inside its R session tempdir.
+        command
+            .env_remove("PKG_CACHE_DIR")
+            .env_remove("PKG_METADATA_CACHE_DIR");
+    };
+    if let Some(root) = std::env::var_os("IR_TEST_R_CACHE_DIR") {
+        assert!(!root.is_empty(), "IR_TEST_R_CACHE_DIR must not be empty");
+        configure(command, Path::new(&root));
+    } else {
+        CACHE.with(|root| configure(command, root));
+    }
 }
 
 fn test_tool_store_dir() -> &'static Path {

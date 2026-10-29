@@ -10,8 +10,8 @@
 #   2. Resolve dependencies with pak.
 #   3. Hash the install refs to derive a content-addressed library path under
 #      <cache_dir>.
-#   4. Materialise that path as a light-weight library of symlinks into
-#      renv's package cache via renv::restore().
+#   4. Materialise that path with independent package copies from renv's cache
+#      via renv::restore().
 #
 # The resulting library path is written to the temp result file named by
 # IR_RESOLVE_RESULT_FILE. stdout/stderr stay available for pak progress.
@@ -79,6 +79,20 @@ ir_resolve_refs <- function(refs, source = character()) {
                        upgrade = !prefer)
   res <- res[res$type != "deps", , drop = FALSE]
   res$direct <- res$direct | res$package %in% requested
+  identified <- vapply(seq_len(nrow(res)), function(i) {
+    digest <- c(res$md5sum[[i]], res$sha256[[i]],
+                res$metadata[[i]]["RemoteEtag"])
+    # Repository records can use the package version as RemoteSha.
+    if (!ir_is_standard_resolved_ref(res[i, , drop = FALSE]))
+      digest <- c(digest, res$metadata[[i]]["RemoteSha"])
+    any(!is.na(digest) & nzchar(digest))
+  }, logical(1))
+  local <- res$type == "local"
+  res$ir_cacheable <- !local & identified
+  # Without content metadata, a fresh resolution must not reuse a prior
+  # installation or download from the same mutable locator.
+  res$ir_identity <- ifelse(!local & !identified,
+                            tempfile("ir-unidentified-artifact-"), "")
   res
 }
 
@@ -349,14 +363,17 @@ ir_is_standard_resolved_ref <- function(res) {
 }
 
 ir_install_spec <- function(res, i) {
-  # Include both locator and content identity. In particular, an old source
+  # Include the locator, source subdirectory and content identity. An old source
   # installation must never satisfy a newly selected binary of that version.
-  digest <- c(res$md5sum[[i]], res$sha256[[i]], res$metadata[[i]]["RemoteSha"])
+  digest <- c(res$md5sum[[i]], res$sha256[[i]],
+              res$metadata[[i]][c("RemoteSha", "RemoteEtag")],
+              res$ir_identity[[i]])
   paste(c(res$package[[i]], res$version[[i]], res$platform[[i]],
-          res$sources[[i]], digest), collapse = "\n")
+          res$sources[[i]], ir_named_value(res$metadata[[i]], "RemoteSubdir"),
+          digest), collapse = "\n")
 }
 
-ir_install_records <- function(res, cache_dir) {
+ir_install_records <- function(res) {
   records <- lapply(seq_len(nrow(res)), function(i) {
     # URL lockfile records preserve the selected repository artifact. Keep
     # pak's provenance for explicit sources, including Git SHAs and subdirs.
@@ -367,11 +384,11 @@ ir_install_records <- function(res, cache_dir) {
     record$Source <- if (repository) "URL" else res$type[[i]]
     if (repository) record$RemoteType <- "url"
     if (res$type[[i]] == "local") record$Path <- res$remote[[i]]$path
-    record$Cacheable <- res$type[[i]] != "local"
-    # Rust serializes installs per IR cache root. Separate roots must not
-    # replace the same mutable renv cache entry while its links are in use.
-    record$Hash <- secretbase::sha256(paste(cache_dir, ir_install_spec(res, i),
-                                          sep = "\n"))
+    record$Cacheable <- res$ir_cacheable[[i]]
+    record$Hash <- secretbase::sha256(paste("ir-installed-artifact-v1",
+                                          ir_install_spec(res, i),
+                                          as.character(getRversion()),
+                                          R.version$platform, sep = "\n"))
     if (repository || res$type[[i]] == "url")
       record$RemoteUrl <- res$sources[[i]][[1L]]
     # Supply the selected candidate's requirements for installation ordering.
@@ -392,6 +409,55 @@ ir_install_records <- function(res, cache_dir) {
 ir_install_specs <- function(res) {
   sort(unique(vapply(seq_len(nrow(res)), function(i) ir_install_spec(res, i),
                      character(1))))
+}
+
+ir_restore <- function(res, library, repos) {
+  locks <- list()
+  on.exit(for (lock in rev(locks)) filelock::unlock(lock), add = TRUE)
+
+  if (any(res$ir_cacheable) && isTRUE(renv::config$cache.enabled()) &&
+      isTRUE(renv::settings$use.cache())) {
+    caches <- character()
+    for (cache in renv::paths$cache()) {
+      ancestor <- cache
+      while (!dir.exists(ancestor) && dirname(ancestor) != ancestor)
+        ancestor <- dirname(ancestor)
+      # Locks live in writable cache roots. Owners of read-only roots must
+      # keep entries stable while copying, even if nested paths are writable.
+      if (file.access(ancestor, 2L) != 0L) next
+      dir.create(cache, recursive = TRUE, showWarnings = FALSE)
+      if (!dir.exists(cache))
+        stop("could not create renv cache directory: ", cache, call. = FALSE)
+      caches <- c(caches, normalizePath(cache, winslash = "/", mustWork = TRUE))
+    }
+
+    # Order canonical paths so overlapping cache lists cannot deadlock.
+    for (cache in sort(unique(caches), method = "radix")) {
+      path <- file.path(cache, ".ir-install.lock")
+      # Let the user's umask govern new locks; never change existing modes.
+      if (!file.exists(path) && !file.create(path))
+        stop("could not create shared renv cache lock: ", path, call. = FALSE)
+      lock <- tryCatch({
+        lock <- filelock::lock(path, timeout = 0)
+        if (is.null(lock)) {
+          message("Waiting for shared renv cache lock: ", path)
+          lock <- filelock::lock(path)
+        }
+        lock
+      }, error = function(error) {
+        stop("could not lock shared renv cache `", path, "`: ",
+             conditionMessage(error), call. = FALSE)
+      })
+      locks[[length(locks) + 1L]] <- lock
+    }
+  }
+
+  # renv's own lock covers publication, but not reads. Keep cooperating IR
+  # restores serialized until their independent library copies are complete.
+  renv::restore(lockfile = list(R = list(Version = as.character(getRversion())),
+                                Packages = ir_install_records(res)),
+                library = library, packages = res$package, repos = repos,
+                prompt = FALSE, transactional = TRUE)
 }
 
 ## --- pipeline ---------------------------------------------------------------
@@ -433,10 +499,8 @@ ir_resolve_main <- function() {
   exclude_newer <- ir_exclude_newer(ir_env_optional("IR_EXCLUDE_NEWER"))
 
   if (!is.null(result_file)) {
-    # renv's parallel downloader writes directly to its archive paths. Keep
-    # those mutable files under the same cache lock as IR's libraries.
-    if (is.null(ir_env_optional("RENV_PATHS_SOURCE")))
-      Sys.setenv(RENV_PATHS_SOURCE = file.path(cache_dir, "downloads"))
+    source_root <- ir_env_optional("RENV_PATHS_SOURCE")
+    if (is.null(source_root)) source_root <- file.path(cache_dir, "downloads")
 
     ## 0. Bootstrap pak before repository normalization. On Linux PPM URLs are
     ## resolved through pak::repo_resolve(), so pak must be available first.
@@ -580,16 +644,16 @@ ir_resolve_main <- function() {
     }
 
     ## 3. Hash install specs -> content-addressed library path
-    # Match the scope of the renv cache entries backing this library: the IR
-    # cache root, R version and platform.
-    key <- paste(c("ir-artifact-library-v4", cache_dir, install_specs,
+    # Libraries belong to one IR cache root, including when their parent is
+    # an external tool store. Installed artifacts are shared independently.
+    key <- paste(c("ir-artifact-library-v5", cache_dir, install_specs,
                    as.character(getRversion()),
                    R.version$platform),
                  collapse = "\n")
     if (is.null(library_root)) library_root <- cache_dir
     library_path <- file.path(library_root, "libraries", secretbase::sha256(key))
 
-    ## 4. Materialise the symlinked library via renv::restore()
+    ## 4. Materialise an independent library via renv::restore()
     # Skip when the library already holds every resolved package: repeat runs of
     # an unchanged script then cost nothing beyond resolution.
     dir.create(library_path, recursive = TRUE, showWarnings = FALSE)
@@ -606,12 +670,15 @@ ir_resolve_main <- function() {
       # Repository records carry exact URLs; renv owns downloads and its cache.
       effective_repositories <- ir_effective_repositories()
       writeLines("Installation in progress", incomplete)
-      options(renv.cache.linkable = TRUE, renv.config.install.remotes = FALSE)
+      # renv's URL archive cache does not distinguish content at one locator.
+      # Keep downloads owned by this root and selected artifact plan, even
+      # when the caller configured a shared source-cache parent.
+      download_key <- secretbase::sha256(paste(c(cache_dir, install_specs),
+                                              collapse = "\n"))
+      Sys.setenv(RENV_PATHS_SOURCE = file.path(source_root, "ir", download_key))
+      options(renv.cache.linkable = FALSE, renv.config.install.remotes = FALSE)
       error <- tryCatch({
-        renv::restore(lockfile = list(R = list(Version = as.character(getRversion())),
-                                      Packages = ir_install_records(res, cache_dir)),
-                      library = library_path, repos = effective_repositories,
-                      prompt = FALSE, transactional = TRUE)
+        ir_restore(res, library = library_path, repos = effective_repositories)
         NULL
       }, error = identity)
       if (!is.null(error)) {
