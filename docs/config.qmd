@@ -4,12 +4,15 @@ title: Install and Configuration
 
 ## Requirements
 
-- `R` / `Rscript` on `PATH`, `--rscript`, or `IR_RSCRIPT`, when R is not selected by frontmatter `r-version`, `IR_R_VERSION`, `--r-version`, or date-only `exclude-newer`.
+- `Rscript` on `PATH`, an explicit `--rscript`/`IR_RSCRIPT`, or `rig` on `PATH` to find or install R.
 - `rig` on `PATH` when `r-version`, `IR_R_VERSION`, or `--r-version` is set, or when date-only `exclude-newer` selects R.
 - `quarto` on `PATH`, or `IR_QUARTO`, when rendering or previewing `.qmd`, `.Rmd`, or R script files.
 - `ir` installs its own resolver tooling (`pak`, `renv`, `secretbase`, `filelock`) on first use into a dedicated library under the cache directory, so you do not need to pre-install them.
   Copies already on the R library path are reused instead of installing a private one.
 - A Rust toolchain only when building from source.
+
+Automatic R installation requires a current development build of rig (0.11.1-dev) with `rig add --no-default` and `--without-path`.
+These flags are not available in rig 0.11.0; older rig versions can still select an already installed R.
 
 ## Install
 
@@ -60,7 +63,7 @@ Set `IR_INSTALL_DIR` to choose another directory.
 | `IR_PREFER_BINARIES` | R package installation | `1`; prefer pre-built packages, including older versions |
 | `IR_REFRESH` | dependency-resolving commands | unset; any nonempty value bypasses resolution markers |
 | `IR_R_VERSION` | R version selected through `rig` | unset |
-| `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH` |
+| `IR_RSCRIPT` | Rscript executable path or command | `Rscript` on `PATH`, otherwise rig's `release` selection |
 | `IR_QUARTO` | Quarto rendering and preview | `quarto` on `PATH` |
 | `IR_TOOL_STORE_DIR` | `ir tool install` | durable installed-tool library store |
 | `IR_TOOL_BIN_DIR` | `ir tool install` | first executable install directory override |
@@ -120,13 +123,23 @@ When Python metadata is present, the selected `exclude-newer` value is also used
 Set `python-exclude-newer` to `null`, or set `--python-exclude-newer` or frontmatter `python-exclude-newer` to an empty string, to resolve latest Python packages while keeping `exclude-newer` for R.
 R selection precedence is command line, then environment, then frontmatter `r-version`.
 Use `--rscript` or `IR_RSCRIPT` to select a specific Rscript executable.
-Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select an installed R through `rig`.
+IR uses that executable as requested and reports an error if it cannot be launched.
+Use `--r-version`, `IR_R_VERSION`, or frontmatter `r-version` to select R through `rig`.
+IR first checks the installations in rig's configured mode, then its user installations.
+If no installed R matches, IR asks rig to install a matching version in user mode, without administrator privileges.
+Without an R selector, IR uses `Rscript` on `PATH`; if it is absent, IR uses rig's `release` selection.
 Requirements that can match more than one R minor select released versions; use `devel` to select R-devel explicitly.
 Do not set both `--rscript` and `--r-version`, or both `IR_RSCRIPT` and `IR_R_VERSION`.
 Frontmatter `rscript` is rejected.
 When `exclude-newer` is set without an explicit R selector, `ir` uses `rig` to select the latest R minor version released by that date.
 When `r-version` can match more than one R minor, `exclude-newer` limits selection to minor versions released by that date.
 An exact `r-version` or explicit Rscript selection remains authoritative.
+
+R installations use rig's default or configured directories; `IR_CACHE_DIR` does not control their location.
+They persist between runs, can be shared with other tools, and are not removed by `ir cache clean`.
+IR passes `--no-default` and `--without-path` when installing R so rig leaves the default R and shell `PATH` unchanged.
+Rig may still register its user installation directory with IDEs.
+
 `--bin-dir <dir>` overrides the executable install directory environment variables for `ir tool install`.
 On macOS, `ir tool install` adds the default `~/.local/bin` directory to the zsh profile when needed.
 On Windows, it adds the default or environment-selected executable install directory to the user `Path`.

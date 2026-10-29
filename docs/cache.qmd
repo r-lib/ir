@@ -11,6 +11,8 @@ Equivalent artifacts share an installed cache entry across IR cache roots.
 The entry identifies the selected source or binary, its content metadata, the full R version, and the platform.
 Downloads have separate subdirectories for each IR root and resolved artifact set, including under an explicit `RENV_PATHS_SOURCE`.
 Tools installed with `ir tool install` keep their libraries under `IR_TOOL_STORE_DIR`, so they survive `ir cache clean`.
+R installations created through rig use rig's default or configured directories, outside IR's cache.
+They persist between runs and can be shared with other tools.
 
 IR serializes installations that share a writable renv cache and copies packages into each library.
 Newly materialized libraries remain usable if a renv entry is replaced or removed, or another IR cache is cleaned.
@@ -68,7 +70,7 @@ $ ir cache clean --force
 
 `ir cache dir` prints the cache root.
 `ir cache clean` removes IR's cache directory, including saved package choices, downloads, resolver tooling, cached R libraries, and records for Python environments.
-It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
+It does not remove installed tool libraries under `IR_TOOL_STORE_DIR` or R installations managed by rig.
 `--force` is accepted and has the same behavior.
 
 ## Existing duplicate entries

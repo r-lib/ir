@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use super::rig_client::InstalledR;
+use super::rig_client::{AvailableR, InstalledR};
 
 #[derive(Debug)]
 pub(crate) enum VersionRequirement {
@@ -49,7 +49,26 @@ pub(crate) fn parse_version_requirement(req: &str) -> Result<VersionRequirement,
     if req.is_empty() {
         return Err("`r-version` must not be empty".into());
     }
+    if req.starts_with('-') {
+        return Err(format!("`r-version` has an unsupported version spec `{req}`").into());
+    }
     Ok(VersionRequirement::Bare(req.to_string()))
+}
+
+pub(crate) fn check_installed_version(req: &str, version: &str) -> Result<(), Box<dyn Error>> {
+    // Rig interprets symbolic selectors (including oldrel/n, which need not
+    // create an alias). Numeric requests must match the reported R version.
+    if let Some(required) = parse_version(req) {
+        if !parse_version(version)
+            .map(|installed| installed.starts_with(&required))
+            .unwrap_or(false)
+        {
+            return Err(
+                format!("rig reported R {version} after installing requested R {req}").into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn select_installed_r<'a>(
@@ -79,22 +98,27 @@ pub(crate) fn select_installed_r_through_minor<'a>(
         .max_by(|a, b| compare_installed_r(a, b))
 }
 
-pub(crate) fn matching_unreleased_alias<'a>(
+pub(crate) fn select_available_r<'a>(
     requirement: &VersionRequirement,
-    installed: &'a [InstalledR],
-) -> Option<&'a str> {
-    installed.iter().find_map(|version| {
-        let alias = version
-            .aliases
-            .iter()
-            .find(|alias| is_unreleased_alias(alias))?;
-        requirement
-            .matches_candidate(&version.name, &version.version, &version.aliases)
-            .then_some(alias.as_str())
-    })
+    available: &'a [AvailableR],
+    latest_minor: Option<&str>,
+) -> Option<&'a AvailableR> {
+    let latest_minor = latest_minor.and_then(parse_version);
+    available
+        .iter()
+        .filter(|version| {
+            version.kind == "release"
+                && version.url.is_some()
+                && requirement.matches_candidate(&version.name, &version.version, &[])
+                && latest_minor
+                    .as_deref()
+                    .map(|minor| version_minor_is_at_most(&version.version, minor))
+                    .unwrap_or(true)
+        })
+        .max_by(|a, b| compare_versions(&a.version, &b.version))
 }
 
-pub(crate) fn rig_install_hint(requirement: &VersionRequirement) -> Option<&str> {
+pub(crate) fn rig_install_request(requirement: &VersionRequirement) -> Option<&str> {
     match requirement {
         VersionRequirement::Bare(req) => Some(req),
         VersionRequirement::Comparison {
@@ -110,10 +134,11 @@ impl VersionRequirement {
     fn matches_installed(&self, installed: &InstalledR) -> bool {
         // Broad requirements select released R versions. R-devel and R-next
         // remain available through their aliases or exact numeric versions.
-        if installed
-            .aliases
-            .iter()
-            .any(|alias| is_unreleased_alias(alias))
+        if (is_unreleased_alias(&installed.name)
+            || installed
+                .aliases
+                .iter()
+                .any(|alias| is_unreleased_alias(alias)))
             && self.is_broad()
         {
             return false;
@@ -175,7 +200,10 @@ impl VersionRequirement {
 }
 
 fn is_unreleased_alias(alias: &str) -> bool {
-    matches!(alias, "devel" | "next")
+    matches!(
+        alias,
+        "devel" | "next" | "devel-arm64" | "next-arm64" | "devel-x86_64" | "next-x86_64"
+    )
 }
 
 fn version_minor_is_at_most(candidate: &str, latest_minor: &[u64]) -> bool {

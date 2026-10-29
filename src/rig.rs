@@ -10,65 +10,50 @@ pub fn resolve_rscript(req: &str, exclude_newer: Option<&str>) -> Result<OsStrin
         .map(|value| r_selection::parse_iso_date_field("exclude-newer", value))
         .transpose()?;
     let requirement = r_selection::parse_version_requirement(req)?;
-    let installed = rig_client::list()?;
+    let latest_minor = exclude_newer
+        .as_deref()
+        .filter(|_| requirement.is_broad())
+        .map(rig_releases::latest_minor_version_on)
+        .transpose()?;
 
-    if let Some(exclude_newer) = exclude_newer.filter(|_| requirement.is_broad()) {
-        let latest_minor = rig_releases::latest_minor_version_on(&exclude_newer)?;
-        if let Some(installed) =
-            r_selection::select_installed_r_through_minor(&requirement, &installed, &latest_minor)
-        {
-            return installed.rscript();
-        }
-
-        return Err(format!(
-            "`r-version: {req}` and `exclude-newer: {exclude_newer}` have no matching installed R. R {latest_minor} was the latest R minor released by that date. Install a compatible R with `rig install`, or adjust `r-version` or `exclude-newer`."
-        )
-        .into());
-    }
-
-    if let Some(installed) = r_selection::select_installed_r(&requirement, &installed) {
-        return installed.rscript();
-    }
-
-    if let Some(alias) = r_selection::matching_unreleased_alias(&requirement, &installed) {
-        let label = match alias {
-            "devel" => "R-devel",
-            "next" => "R-next",
-            _ => unreachable!("unexpected unreleased R alias"),
+    // Preserve selection from rig's configured installation scope, then reuse
+    // user installations before asking rig to download anything.
+    for installed in [rig_client::list, rig_client::list_user] {
+        let installed = installed()?;
+        let selected = match latest_minor.as_deref() {
+            Some(minor) => {
+                r_selection::select_installed_r_through_minor(&requirement, &installed, minor)
+            }
+            None => r_selection::select_installed_r(&requirement, &installed),
         };
-        return Err(format!(
-            "`r-version: {req}` matches only installed {label}. Requirements that can match more than one R minor select released versions. Install a matching release with `rig install`, or opt into {label} with `r-version: {alias}` or `--r-version {alias}`."
-        )
-        .into());
+        if let Some(selected) = selected {
+            return selected.rscript();
+        }
     }
 
-    Err(missing_r_version_error(req, &requirement).into())
+    let version = if requirement.is_broad() {
+        let available = rig_client::available()?;
+        r_selection::select_available_r(&requirement, &available, latest_minor.as_deref())
+            .ok_or_else(|| match exclude_newer {
+                Some(date) => format!(
+                    "no released R available to install matches `r-version: {req}` and `exclude-newer: {date}`"
+                ),
+                None => format!("no released R available to install matches `r-version: {req}`"),
+            })?
+            .version
+            .clone()
+    } else {
+        r_selection::rig_install_request(&requirement)
+            .expect("non-broad requirements are version numbers or aliases")
+            .to_string()
+    };
+    let installed = rig_client::install(&version)?;
+    r_selection::check_installed_version(&version, &installed.version)?;
+    installed.rscript()
 }
 
 pub fn resolve_rscript_for_exclude_newer(exclude_newer: &str) -> Result<OsString, Box<dyn Error>> {
     let exclude_newer = r_selection::parse_iso_date_field("exclude-newer", exclude_newer)?;
-    let installed = rig_client::list()?;
     let req = rig_releases::latest_minor_version_on(&exclude_newer)?;
-    let requirement = r_selection::parse_version_requirement(&req)?;
-
-    if let Some(installed) = r_selection::select_installed_r(&requirement, &installed) {
-        return installed.rscript();
-    }
-
-    Err(format!(
-        "`exclude-newer` {exclude_newer} implies `r-version: {req}` because R {req} was the latest R minor version available on that date, but no matching R is installed. Run `rig install {req}`, set `IR_RSCRIPT`, pass `--rscript`, or specify `r-version` or `--r-version`."
-    )
-    .into())
-}
-
-fn missing_r_version_error(req: &str, requirement: &r_selection::VersionRequirement) -> String {
-    if let Some(version) = r_selection::rig_install_hint(requirement) {
-        return format!(
-            "R {version} is required but is not installed. Run `rig install {version}`."
-        );
-    }
-
-    format!(
-        "R {req} is required but no matching R is installed. Install a matching R with `rig install`, or specify a different `r-version` or `--r-version`."
-    )
+    resolve_rscript(&req, None)
 }

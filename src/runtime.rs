@@ -158,7 +158,10 @@ pub(crate) fn rscript_for_spec(
         return rig::resolve_rscript_for_exclude_newer(exclude_newer);
     }
 
-    Ok(rscript_command())
+    if let Some(rscript) = resolve_command_path(OsStr::new("Rscript")) {
+        return Ok(rscript);
+    }
+    rig::resolve_rscript("release", None)
 }
 
 fn cli_r_selection(
@@ -939,11 +942,6 @@ fn python_virtual_env(bin_dir: &Path) -> Option<&Path> {
     (name == "bin" || name.eq_ignore_ascii_case("Scripts"))
         .then(|| bin_dir.parent())
         .flatten()
-}
-
-/// The default Rscript executable to use when R is not selected explicitly.
-pub(crate) fn rscript_command() -> OsString {
-    resolve_rscript_command(OsStr::new("Rscript"))
 }
 
 pub(crate) fn resolve_rscript_command(command: &OsStr) -> OsString {

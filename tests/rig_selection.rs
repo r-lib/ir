@@ -331,9 +331,16 @@ fn run_with_r_version_range_does_not_select_devel() {
         &format!(
             concat!(
                 "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  'list --json'|'list --json --user')\n",
                 "cat <<'JSON'\n",
                 r#"[{{"name":"4.7","version":"4.7.0","aliases":["devel"],"binary":"{}"}}]"#,
                 "\nJSON\n",
+                "  ;;\n",
+                "  'available --all --json --user')\n",
+                "    echo '[{{\"name\":\"devel\",\"version\":\"4.7.0\",\"type\":\"devel\",\"url\":\"https://example.com/r-devel\"}}]' ;;\n",
+                "  *) echo unexpected rig invocation >&2; exit 64 ;;\n",
+                "esac\n",
             ),
             devel_binary.display()
         ),
@@ -347,10 +354,7 @@ fn run_with_r_version_range_does_not_select_devel() {
         .output()
         .unwrap();
 
-    assert_failure_contains(
-        &only_devel,
-        &["matches only installed R-devel", "--r-version devel"],
-    );
+    assert_failure_contains(&only_devel, &["no released R available", ">= 4.2"]);
 }
 
 #[cfg(unix)]
@@ -407,9 +411,16 @@ fn run_with_r_version_range_does_not_select_next() {
         &format!(
             concat!(
                 "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  'list --json'|'list --json --user')\n",
                 "cat <<'JSON'\n",
                 r#"[{{"name":"4.7","version":"4.7.0","aliases":["next"],"binary":"{}"}}]"#,
                 "\nJSON\n",
+                "  ;;\n",
+                "  'available --all --json --user')\n",
+                "    echo '[{{\"name\":\"next\",\"version\":\"4.7.0\",\"type\":\"rc\",\"url\":\"https://example.com/r-next\"}}]' ;;\n",
+                "  *) echo unexpected rig invocation >&2; exit 64 ;;\n",
+                "esac\n",
             ),
             next_binary.display()
         ),
@@ -423,10 +434,7 @@ fn run_with_r_version_range_does_not_select_next() {
         .output()
         .unwrap();
 
-    assert_failure_contains(
-        &only_next,
-        &["matches only installed R-next", "--r-version next"],
-    );
+    assert_failure_contains(&only_next, &["no released R available", ">= 4.2"]);
 }
 
 #[cfg(unix)]
@@ -488,9 +496,16 @@ fn run_frontmatter_r_version_range_and_exclude_newer_selects_compatible_minor() 
         &format!(
             concat!(
                 "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  'list --json'|'list --json --user')\n",
                 "cat <<'JSON'\n",
                 r#"[{{"name":"4.6","version":"4.6.1","aliases":["release"],"binary":"{}"}}]"#,
                 "\nJSON\n",
+                "  ;;\n",
+                "  'available --all --json --user')\n",
+                "    echo '[{{\"name\":\"4.6.1\",\"version\":\"4.6.1\",\"type\":\"release\",\"url\":\"https://example.com/r-4.6.1\"}}]' ;;\n",
+                "  *) echo unexpected rig invocation >&2; exit 64 ;;\n",
+                "esac\n",
             ),
             r46_binary.display()
         ),
@@ -512,7 +527,7 @@ fn run_frontmatter_r_version_range_and_exclude_newer_selects_compatible_minor() 
         &[
             "`r-version: >= 4.3`",
             "`exclude-newer: 2024-02-01`",
-            "R 4.3 was the latest R minor released by that date",
+            "no released R available to install matches",
         ],
     );
 }
@@ -686,7 +701,7 @@ fn run_with_exclude_newer_prefers_unsuffixed_rig_install_over_x86_64_on_arm_maco
 
 #[cfg(unix)]
 #[test]
-fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
+fn run_with_exact_minor_r_version_reports_install_failure() {
     let cache_dir = temp_dir("ir-exact-minor-missing-cache");
     let bin_dir = temp_dir("ir-exact-minor-missing-bin");
     let r43_dir = temp_dir("ir-exact-minor-missing-r43");
@@ -709,7 +724,8 @@ fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
 ]"#,
                 "\nJSON\n",
                 "    ;;\n",
-                "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
+                "  \"available --all\") echo unexpected available >&2; exit 65 ;;\n",
+                "  \"add --user\") echo download failed >&2; exit 66 ;;\n",
                 "  *) exit 64 ;;\n",
                 "esac\n",
             ),
@@ -726,13 +742,13 @@ fn run_with_exact_minor_r_version_errors_when_no_installed_patch_matches() {
         .output()
         .unwrap();
 
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
+    assert_failure_contains(&out, &["rig add --user", "download failed"]);
     assert_stderr_lacks(&out, "unexpected available");
 }
 
 #[cfg(unix)]
 #[test]
-fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
+fn run_with_exact_major_r_version_requires_matching_available_release() {
     let cache_dir = temp_dir("ir-exact-major-missing-cache");
     let bin_dir = temp_dir("ir-exact-major-missing-bin");
     let r3_dir = temp_dir("ir-exact-major-missing-r3");
@@ -755,7 +771,8 @@ fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
 ]"#,
                 "\nJSON\n",
                 "    ;;\n",
-                "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
+                "  \"available --all\") echo '[]' ;;\n",
+                "  \"add --user\") echo download failed >&2; exit 66 ;;\n",
                 "  *) exit 64 ;;\n",
                 "esac\n",
             ),
@@ -772,7 +789,7 @@ fn run_with_exact_major_r_version_errors_when_no_installed_minor_matches() {
         .output()
         .unwrap();
 
-    assert_failure_contains(&out, &["R 4 is required", "Run `rig install 4`"]);
+    assert_failure_contains(&out, &["no released R available", "== 4"]);
     assert_stderr_lacks(&out, "unexpected available");
 }
 
@@ -788,7 +805,8 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
             "#!/bin/sh\n",
             "case \"$1 $2\" in\n",
             "  \"list --json\") echo '[]' ;;\n",
-            "  \"available --json\") echo unexpected available >&2; exit 65 ;;\n",
+            "  \"available --all\") echo unexpected available >&2; exit 65 ;;\n",
+            "  \"add --user\") echo download failed >&2; exit 66 ;;\n",
             "  *) exit 64 ;;\n",
             "esac\n",
         ),
@@ -802,7 +820,7 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
         .output()
         .unwrap();
 
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
+    assert_failure_contains(&out, &["rig add --user", "download failed"]);
     assert_stderr_lacks(&out, "unexpected available");
 
     let out = ir()
@@ -813,7 +831,7 @@ fn run_with_missing_r_version_does_not_query_available_releases() {
         .output()
         .unwrap();
 
-    assert_failure_contains(&out, &["R 4.4 is required", "Run `rig install 4.4`"]);
+    assert_failure_contains(&out, &["rig add --user", "download failed"]);
     assert_stderr_lacks(&out, "unexpected available");
 }
 
@@ -924,25 +942,44 @@ fn run_with_exclude_newer_on_release_date_selects_that_minor_r() {
 #[cfg(unix)]
 #[test]
 fn run_with_exclude_newer_requires_latest_available_minor_r() {
-    let out = run_with_installed_r_versions(
-        "ir-exclude-newer-missing-latest-minor",
-        &[("4.4.3", "r44")],
-        &[
+    let cache_dir = temp_dir("ir-exclude-newer-missing-latest-minor-cache");
+    let bin_dir = temp_dir("ir-exclude-newer-missing-latest-minor-bin");
+    let r44_dir = temp_dir("ir-exclude-newer-missing-latest-minor-r44");
+    let r44_binary = selected_r_binary(&r44_dir, "r44");
+    write_executable(
+        &bin_dir.join("rig"),
+        &format!(
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$*\" in\n",
+                "  'list --json'|'list --json --user')\n",
+                "cat <<'JSON'\n",
+                r#"[{{"name":"4.4.3","version":"4.4.3","aliases":[],"binary":"{}"}}]"#,
+                "\nJSON\n",
+                "  ;;\n",
+                "  'add --user --no-default --without-path --without-pak --json 4.5')\n",
+                "    echo download failed for R 4.5 >&2; exit 66 ;;\n",
+                "  *) echo unexpected rig invocation >&2; exit 64 ;;\n",
+                "esac\n",
+            ),
+            r44_binary.display()
+        ),
+    );
+    let out = ir()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", path_with_bin_dir(&bin_dir))
+        .env_remove("IR_RSCRIPT")
+        .args([
             "run",
             "--exclude-newer",
             "2026-03-20",
             "-e",
             "cat('ignored')",
-        ],
-    );
-    assert_failure_contains(
-        &out,
-        &[
-            "`exclude-newer` 2026-03-20 implies `r-version:",
-            "latest R minor version available on that date",
-            "Run `rig install",
-        ],
-    );
+        ])
+        .output()
+        .unwrap();
+    assert_failure_contains(&out, &["rig add --user", "download failed for R 4.5"]);
+    assert!(out.stdout.is_empty(), "{}", output_text(&out));
 }
 
 #[cfg(unix)]
@@ -1420,6 +1457,7 @@ fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_rel
             "case \"$1\" in\n",
             "  list) echo '[]' ;;\n",
             "  available) echo unexpected available >&2; exit 65 ;;\n",
+            "  add) echo download failed >&2; exit 66 ;;\n",
             "  *) exit 64 ;;\n",
             "esac\n",
         ),
@@ -1441,13 +1479,7 @@ fn missing_exact_minor_r_version_with_exclude_newer_does_not_query_available_rel
         .output()
         .unwrap();
 
-    assert_failure_contains(
-        &out,
-        &[
-            "R 4.4 is required but is not installed",
-            "Run `rig install 4.4`",
-        ],
-    );
+    assert_failure_contains(&out, &["rig add --user", "download failed"]);
     assert_stderr_lacks(&out, "unexpected available");
 }
 
