@@ -161,6 +161,14 @@ pub(crate) fn rscript_for_spec(
     Ok(rscript_command())
 }
 
+pub(crate) fn rscript_for_env() -> Result<OsString, Box<dyn Error>> {
+    if let Some(selection) = env_r_selection()? {
+        return resolve_r_selection(selection, None);
+    }
+
+    Ok(rscript_command())
+}
+
 fn cli_r_selection(
     r_requirement: Option<&str>,
     rscript: Option<&str>,
@@ -1164,11 +1172,15 @@ fn unique_path(dir: &Path, prefix: &str, ext: &str) -> PathBuf {
     dir.join(format!("{prefix}-{}-{nanos}.{ext}", std::process::id()))
 }
 
-struct PrivateTempFile {
+pub(crate) struct PrivateTempFile {
     path: PathBuf,
 }
 
 impl PrivateTempFile {
+    pub(crate) fn create(prefix: &str, ext: &str) -> Result<Self, Box<dyn Error>> {
+        Self::write(unique_path(&env::temp_dir(), prefix, ext), "")
+    }
+
     fn write(path: PathBuf, contents: &str) -> Result<Self, Box<dyn Error>> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -1182,7 +1194,7 @@ impl PrivateTempFile {
         Ok(Self { path })
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }

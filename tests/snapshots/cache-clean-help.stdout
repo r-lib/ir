@@ -4,4 +4,5 @@ Usage: ir cache clean [OPTIONS]
 
 Options:
       --force  Accepted for compatibility; same as `ir cache clean`
+      --all    Also clear pak, renv, reticulate, and external uv caches
   -h, --help   Print help

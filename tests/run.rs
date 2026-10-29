@@ -8,6 +8,15 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+const RAPPDIRS_UNAVAILABLE_PROFILE: &str = r#"
+requireNamespace <- function(package, ...) {
+  if (identical(package, "rappdirs")) {
+    return(FALSE)
+  }
+  base::requireNamespace(package, ...)
+}
+"#;
+
 #[test]
 fn ci_dependencies_are_available() {
     let r_expr = concat!(
@@ -30,6 +39,8 @@ fn ci_dependencies_are_available() {
     let mut quarto = Command::new("quarto");
     quarto.arg("--version");
     assert_command_success(quarto, "quarto --version");
+
+    uv_executable();
 
     let version = python_minor_version();
     assert!(!version.is_empty());
@@ -1740,6 +1751,1443 @@ fn cache_clean_removes_cache_dir() {
     assert!(!cache_dir.exists());
     assert_stdout_contains(&out, &format!("Clearing cache at: {}", cache_dir.display()));
     assert_stdout_contains(&out, "Removed 1 file");
+}
+
+#[test]
+fn cache_clean_all_removes_ir_and_tool_caches() {
+    let cache_dir = temp_dir("ir-cache-clean-all-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-r-pkg");
+    let r_pkg_cache = r_pkg_cache_dir.join("R").join("pkgcache");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-renv");
+    let legacy_reticulate_cache = legacy_reticulate_cache_dir(&r_user_cache_dir);
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-ir-profile");
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("unrelated"),
+        r_pkg_cache.join("pkg").join("pkg"),
+        r_pkg_cache.join("_metadata").join("metadata"),
+        r_pkg_cache.join("_metadata.lock"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz.etag"),
+        r_pkg_cache.join("sysreqs").join("metadata"),
+        r_pkg_cache.join("deps").join("metadata"),
+        r_pkg_cache_dir.join("R").join("unrelated"),
+        r_pkg_cache_dir.join("unrelated"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache.join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+    let r_pkg_cache_resolved = fs::canonicalize(&r_pkg_cache).unwrap();
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!cache_dir.exists());
+    assert!(r_pkg_cache_dir.join("lib").exists());
+    assert!(!r_pkg_cache.exists(), "{}", output_text(&out));
+    assert!(r_pkg_cache_dir.join("R").join("unrelated").exists());
+    assert!(r_pkg_cache_dir.join("unrelated").exists());
+    assert!(!renv_cache_dir.exists());
+    assert!(!r_user_cache_dir.join("R").join("reticulate").exists());
+    assert!(!legacy_reticulate_cache.exists());
+    assert_stdout_contains(
+        &out,
+        &format!("Clearing ir cache at: {}", cache_dir.display()),
+    );
+    assert_stdout_contains_path(
+        &out,
+        "Clearing pak package cache at: ",
+        &r_pkg_cache_resolved,
+    );
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
+    assert_stdout_contains_path(
+        &out,
+        "Clearing reticulate cache at: ",
+        &r_user_cache_dir.join("R").join("reticulate"),
+    );
+    assert_stdout_contains_path(
+        &out,
+        "Clearing reticulate legacy cache at: ",
+        &legacy_reticulate_cache,
+    );
+}
+
+#[test]
+fn cache_clean_all_releases_loaded_packages_before_deleting_renv() {
+    let root = temp_dir("ir-cache-clean-loaded-rappdirs");
+    let cache = root.join("ir");
+    let renv_cache = root.join("renv-cache");
+    let library = renv_cache.join("library");
+    let legacy_cache = root.join("r-reticulate");
+    let profile = root.join("profile.R");
+    let exit_marker = root.join("exited");
+    install_fake_r_package(
+        &library,
+        "rappdirs",
+        "export(user_cache_dir)\n",
+        r#"user_cache_dir <- function(appname, appauthor) {
+  file.path(Sys.getenv("IR_TEST_LEGACY_ROOT"), appname)
+}
+"#,
+    );
+    fs::write(
+        &profile,
+        r#"
+lib <- Sys.getenv("IR_TEST_RAPPDIRS_LIB")
+ns <- loadNamespace("rappdirs", lib.loc = lib)
+stopifnot(normalizePath(getNamespaceInfo(ns, "path"), winslash = "/") ==
+          normalizePath(file.path(lib, "rappdirs"), winslash = "/"))
+library(stats)
+backing <- file.path(lib, paste0("ir_cache_fixture", .Platform$dynlib.ext))
+stopifnot(file.copy(getLoadedDLLs()[["stats"]][["path"]], backing))
+dll <- dyn.load(backing)
+stopifnot(normalizePath(dll[["path"]]) == normalizePath(backing))
+.Last <- function() {
+  write(if (file.exists(backing)) "present" else "missing",
+        Sys.getenv("IR_TEST_EXIT_MARKER"), append = TRUE)
+}
+"#,
+    )
+    .unwrap();
+    for dir in [&cache, &legacy_cache] {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("cached"), "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache)
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_RAPPDIRS_LIB", &library)
+        .env("IR_TEST_LEGACY_ROOT", &root)
+        .env("IR_TEST_EXIT_MARKER", &exit_marker)
+        .env("RETICULATE_UV", "managed")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(
+        fs::read_to_string(exit_marker)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["present"]
+    );
+    assert!(!renv_cache.exists());
+    assert!(!legacy_cache.exists());
+    assert!(!cache.exists());
+    assert_stdout_contains_path(&out, "Clearing reticulate legacy cache at: ", &legacy_cache);
+}
+
+#[test]
+fn cache_clean_all_removes_relocated_ir_downloads() {
+    for from_profile in [false, true] {
+        let root = temp_dir("ir-cache-clean-relocated-downloads");
+        let cache = root.join("cache");
+        let source = root.join("source");
+        let downloads = source.join("ir");
+        let profile = root.join("profile.R");
+        let source_setting = if from_profile {
+            format!(
+                "Sys.setenv(RENV_PATHS_SOURCE = {})\n",
+                serde_json::to_string(&renviron_path(&source)).unwrap()
+            )
+        } else {
+            String::new()
+        };
+        fs::write(
+            &profile,
+            format!("{RAPPDIRS_UNAVAILABLE_PROFILE}\n{source_setting}"),
+        )
+        .unwrap();
+        for path in [
+            cache.join("libraries/pkg"),
+            downloads.join("first-plan/url/pkg.tar.gz"),
+            downloads.join("second-plan/url/pkg.tar.gz"),
+            source.join("url/unrelated.tar.gz"),
+            source.join("unrelated"),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "cached").unwrap();
+        }
+
+        let mut command = ir_with_private_r_caches();
+        command
+            .env("IR_CACHE_DIR", &cache)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean"]);
+        if !from_profile {
+            command.env("RENV_PATHS_SOURCE", &source);
+        }
+
+        assert_success(&command.output().unwrap());
+        assert!(!cache.exists());
+        assert!(downloads.join("first-plan/url/pkg.tar.gz").exists());
+        assert!(downloads.join("second-plan/url/pkg.tar.gz").exists());
+
+        let out = command.arg("--all").output().unwrap();
+        assert_success(&out);
+        assert!(!downloads.exists(), "{}", output_text(&out));
+        assert!(source.join("url/unrelated.tar.gz").exists());
+        assert!(source.join("unrelated").exists());
+        assert_stdout_contains_path(&out, "Clearing ir download cache at: ", &downloads);
+    }
+}
+
+#[test]
+fn cache_clean_all_without_relocated_downloads_preserves_working_directory() {
+    for source_setting in [None, Some("")] {
+        let root = temp_dir("ir-cache-clean-default-downloads");
+        let unrelated = root.join("ir/url/unrelated.tar.gz");
+        fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+        fs::write(&unrelated, "unrelated").unwrap();
+        let profile = masked_rappdirs_profile("ir-cache-clean-default-downloads-profile");
+
+        let mut command = ir_with_private_r_caches();
+        command
+            .current_dir(&root)
+            .env("IR_CACHE_DIR", root.join("cache"))
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean", "--all"]);
+        if let Some(value) = source_setting {
+            command.env("RENV_PATHS_SOURCE", value);
+        }
+
+        assert_success(&command.output().unwrap());
+        assert_eq!(fs::read_to_string(unrelated).unwrap(), "unrelated");
+    }
+}
+
+#[test]
+fn cache_clean_all_treats_cache_paths_literally() {
+    let root = temp_dir("ir-cache-clean-all-literal-paths");
+    let cache_dir = root.join("ir");
+    let renv_cache = root.join("renv[1]");
+    let unrelated = root.join("renv1");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-literal-profile");
+    for configured_path in [renv_cache.as_path(), Path::new("~/renv[1]")] {
+        for path in [&cache_dir, &renv_cache, &unrelated] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("marker"), "cached").unwrap();
+        }
+
+        let out = ir_with_private_r_caches()
+            .env("HOME", &root)
+            .env("R_USER", &root)
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PKG_CACHE_DIR", root.join("pak"))
+            .env("RENV_PATHS_CACHE", configured_path)
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean", "--all"])
+            .output()
+            .unwrap();
+
+        assert!(unrelated.join("marker").exists(), "{}", output_text(&out));
+        assert_success(&out);
+        assert!(!renv_cache.exists());
+        assert!(!cache_dir.exists());
+    }
+}
+
+#[test]
+fn cache_clean_all_preserves_ir_cache_when_r_selection_is_invalid() {
+    let cache_dir = temp_dir("ir-cache-clean-all-invalid-r-selection");
+    let library = cache_dir.join("libraries").join("library");
+    fs::create_dir_all(&library).unwrap();
+    fs::write(library.join("pkg"), "cached").unwrap();
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", "Rscript")
+        .env("IR_R_VERSION", "4.4")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    assert!(cache_dir.exists());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("cannot set both `IR_R_VERSION` and `IR_RSCRIPT`"),
+        "{}",
+        output_text(&out)
+    );
+}
+
+#[test]
+fn cache_clean_all_missing_rscript_advice_uses_env_selection() {
+    let cache_dir = temp_dir("ir-cache-clean-all-missing-rscript-cache");
+    let path = temp_dir("ir-cache-clean-all-missing-rscript-path");
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("PATH", &path)
+        .env_remove("IR_RSCRIPT")
+        .env_remove("IR_R_VERSION")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "{}", output_text(&out));
+    let text = output_text(&out);
+    assert!(
+        text.contains("Install R or set IR_RSCRIPT."),
+        "{}",
+        output_text(&out)
+    );
+    assert!(
+        !text.contains("pass --rscript"),
+        "cache clean must not suggest unsupported --rscript\n{}",
+        output_text(&out)
+    );
+}
+
+#[test]
+fn cache_clean_all_uses_r_profile_cache_locations() {
+    let home = temp_dir("ir-cache-clean-all-r-profile-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-r-profile-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-r-profile-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-r-profile-r-pkg");
+    let r_pkg_cache = r_pkg_cache_dir.join("R").join("pkgcache");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-r-profile-renv");
+    let legacy_reticulate_cache = legacy_reticulate_cache_dir(&r_user_cache_dir);
+    let profile = temp_path("ir-cache-clean-all-r-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+{RAPPDIRS_UNAVAILABLE_PROFILE}
+Sys.setenv(
+  R_USER_CACHE_DIR = {},
+  R_PKG_CACHE_DIR = {},
+  RENV_PATHS_CACHE = {}
+)
+"#,
+            serde_json::to_string(&renviron_path(&r_user_cache_dir)).unwrap(),
+            serde_json::to_string(&renviron_path(&r_pkg_cache_dir)).unwrap(),
+            serde_json::to_string(&renviron_path(&renv_cache_dir)).unwrap(),
+        ),
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("unrelated"),
+        r_pkg_cache.join("pkg").join("pkg"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz"),
+        r_pkg_cache.join("bioc-sysreqs.dcf.gz.etag"),
+        r_pkg_cache_dir.join("R").join("unrelated"),
+        r_pkg_cache_dir.join("unrelated"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache.join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+    let r_pkg_cache_resolved = fs::canonicalize(&r_pkg_cache).unwrap();
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("R_PKG_CACHE_DIR")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!cache_dir.exists());
+    assert!(r_pkg_cache_dir.join("lib").exists());
+    assert!(!r_pkg_cache.exists(), "{}", output_text(&out));
+    assert!(r_pkg_cache_dir.join("R").join("unrelated").exists());
+    assert!(r_pkg_cache_dir.join("unrelated").exists());
+    assert!(!renv_cache_dir.exists());
+    assert!(!r_user_cache_dir.join("R").join("reticulate").exists());
+    assert!(!legacy_reticulate_cache.exists());
+    assert_stdout_contains_path(
+        &out,
+        "Clearing pak package cache at: ",
+        &r_pkg_cache_resolved,
+    );
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
+    assert_stdout_contains_path(
+        &out,
+        "Clearing reticulate cache at: ",
+        &r_user_cache_dir.join("R").join("reticulate"),
+    );
+}
+
+#[test]
+fn cache_clean_all_uses_pak_pkg_options() {
+    let home = temp_dir("ir-cache-clean-all-pak-options-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-pak-options-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-pak-options-r-user");
+    let pak_cache = r_user_cache_dir.join("R").join("pak");
+    let pkgcache_cache = r_user_cache_dir.join("R").join("pkgcache");
+    let download_cache = temp_dir("ir-cache-clean-all-pak-options-download");
+    let package_cache = temp_dir("ir-cache-clean-all-pak-options-package");
+    let metadata_cache = temp_dir("ir-cache-clean-all-pak-options-metadata");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-pak-options-renv");
+    let profile = temp_path("ir-cache-clean-all-pak-options-profile", "R");
+
+    fs::write(
+        &profile,
+        format!(
+            r#"
+{RAPPDIRS_UNAVAILABLE_PROFILE}
+options(
+  pkg.cache_dir = {},
+  pkg.package_cache_dir = {},
+  pkg.metadata_cache_dir = {}
+)
+"#,
+            serde_json::to_string(&renviron_path(&download_cache)).unwrap(),
+            serde_json::to_string(&renviron_path(&package_cache)).unwrap(),
+            serde_json::to_string(&renviron_path(&metadata_cache)).unwrap(),
+        ),
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        pak_cache.join("pkg"),
+        pkgcache_cache.join("pkg"),
+        download_cache.join("pkg"),
+        package_cache.join("pkg"),
+        metadata_cache.join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("R_PKG_CACHE_DIR")
+        .env_remove("PKG_CACHE_DIR")
+        .env_remove("PKG_PACKAGE_CACHE_DIR")
+        .env_remove("PKG_METADATA_CACHE_DIR")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(pak_cache.exists());
+    assert!(!pkgcache_cache.exists());
+    assert!(!download_cache.exists());
+    assert!(!package_cache.exists());
+    assert!(!metadata_cache.exists());
+    assert_stdout_contains_path(&out, "Clearing pak cache at: ", &download_cache);
+    assert_stdout_contains_path(&out, "Clearing pak package cache at: ", &pkgcache_cache);
+    assert_stdout_contains_path(&out, "Clearing pak package cache at: ", &package_cache);
+    assert_stdout_contains_path(&out, "Clearing pak metadata cache at: ", &metadata_cache);
+}
+
+#[test]
+fn cache_clean_all_uses_pak_pkg_environment_variables() {
+    let home = temp_dir("ir-cache-clean-all-pak-env-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-pak-env-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-pak-env-r-user");
+    let pak_cache = r_user_cache_dir.join("R").join("pak");
+    let pkgcache_cache = r_user_cache_dir.join("R").join("pkgcache");
+    let download_cache = temp_dir("ir-cache-clean-all-pak-env-download");
+    let package_cache = temp_dir("ir-cache-clean-all-pak-env-package");
+    let metadata_cache = temp_dir("ir-cache-clean-all-pak-env-metadata");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-pak-env-renv");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-pak-env-profile");
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        pak_cache.join("pkg"),
+        pkgcache_cache.join("pkg"),
+        download_cache.join("pkg"),
+        package_cache.join("pkg"),
+        metadata_cache.join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("PKG_CACHE_DIR", &download_cache)
+        .env("PKG_PACKAGE_CACHE_DIR", &package_cache)
+        .env("PKG_METADATA_CACHE_DIR", &metadata_cache)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("R_PKG_CACHE_DIR")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(pak_cache.exists());
+    assert!(!pkgcache_cache.exists());
+    assert!(!download_cache.exists());
+    assert!(!package_cache.exists());
+    assert!(!metadata_cache.exists());
+    assert_stdout_contains_path(&out, "Clearing pak cache at: ", &download_cache);
+    assert_stdout_contains_path(&out, "Clearing pak package cache at: ", &pkgcache_cache);
+    assert_stdout_contains_path(&out, "Clearing pak package cache at: ", &package_cache);
+    assert_stdout_contains_path(&out, "Clearing pak metadata cache at: ", &metadata_cache);
+}
+
+#[test]
+fn cache_clean_all_preserves_default_windows_pak_cache() {
+    let home = temp_dir("ir-cache-clean-all-windows-pak-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-windows-pak-ir");
+    let local_app_data = temp_dir("ir-cache-clean-all-windows-pak-local-app");
+    let xdg_cache_home = temp_dir("ir-cache-clean-all-windows-pak-xdg");
+    let profile = temp_path("ir-cache-clean-all-windows-pak-profile", "R");
+    let pak_cache = local_app_data.join("R").join("Cache").join("pak");
+
+    fs::write(
+        &profile,
+        r#"
+requireNamespace <- function(package, ...) {
+  if (identical(package, "rappdirs")) {
+    return(FALSE)
+  }
+  base::requireNamespace(package, ...)
+}
+.Platform <- .Platform
+.Platform$OS.type <- "windows"
+Sys.info <- function() c(sysname = "Windows")
+"#,
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        pak_cache.join("lib").join("pkg"),
+        xdg_cache_home.join("R").join("pkgcache").join("pkg"),
+        xdg_cache_home
+            .join("R")
+            .join("renv")
+            .join("cache")
+            .join("pkg"),
+        xdg_cache_home.join("R").join("reticulate").join("uv"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("LOCALAPPDATA", &local_app_data)
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("R_PKG_CACHE_DIR")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(pak_cache.exists());
+    assert!(!xdg_cache_home.join("R").join("pkgcache").exists());
+    assert!(!xdg_cache_home.join("R").join("renv").join("cache").exists());
+    assert!(!xdg_cache_home.join("R").join("reticulate").exists());
+}
+
+#[test]
+fn cache_clean_all_removes_existing_legacy_renv_root_without_global_renv() {
+    let cache_dir = temp_dir("ir-cache-clean-all-legacy-renv-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-legacy-renv-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-legacy-renv-r-pkg");
+    let renv_data_home = temp_dir("ir-cache-clean-all-legacy-renv-data");
+    let renv_cache_dir = legacy_renv_root_dir(&renv_data_home).join("cache");
+    let profile = temp_path("ir-cache-clean-all-legacy-renv-profile", "R");
+
+    fs::write(
+        &profile,
+        r#"
+Sys.info <- function() c(sysname = "Linux")
+requireNamespace <- function(...) FALSE
+"#,
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("XDG_DATA_HOME", &renv_data_home)
+        .env("LOCALAPPDATA", &renv_data_home)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!renv_cache_dir.exists());
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &renv_cache_dir);
+}
+
+#[test]
+fn cache_clean_all_treats_empty_xdg_data_home_as_unset() {
+    let home = temp_dir("ir-cache-clean-all-empty-xdg-home");
+    let workdir = temp_dir("ir-cache-clean-all-empty-xdg-workdir");
+    let cache_dir = temp_dir("ir-cache-clean-all-empty-xdg-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-empty-xdg-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-empty-xdg-r-pkg");
+    let profile = temp_path("ir-cache-clean-all-empty-xdg-profile", "R");
+    let legacy_renv_cache = home.join(".local").join("share").join("renv").join("cache");
+    let relative_renv_cache = workdir.join("renv").join("cache");
+
+    fs::write(
+        &profile,
+        r#"
+Sys.info <- function() c(sysname = "Linux")
+requireNamespace <- function(...) FALSE
+"#,
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        legacy_renv_cache.join("v5").join("pkg"),
+        relative_renv_cache.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .current_dir(&workdir)
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("XDG_DATA_HOME", "")
+        .env("RETICULATE_UV", "managed")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!legacy_renv_cache.exists());
+    assert!(relative_renv_cache.exists());
+    assert_stdout_contains_path(&out, "Clearing renv cache at: ", &legacy_renv_cache);
+}
+
+#[test]
+fn cache_clean_all_uses_absolute_windows_r_user_dir_fallback() {
+    let workdir = temp_dir("ir-cache-clean-all-windows-user-profile-workdir");
+    let home = temp_dir("ir-cache-clean-all-windows-user-profile-real-home");
+    let user_profile = temp_dir("ir-cache-clean-all-windows-user-profile-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-windows-user-profile-ir");
+    let profile = temp_path("ir-cache-clean-all-windows-user-profile-profile", "R");
+    let user_profile_pkgcache = user_profile
+        .join("AppData")
+        .join("Local")
+        .join("R")
+        .join("cache")
+        .join("R")
+        .join("pkgcache");
+    let user_profile_reticulate_legacy_cache = user_profile
+        .join("AppData")
+        .join("Local")
+        .join("r-reticulate")
+        .join("Cache");
+    let relative_pkgcache = workdir.join("R").join("cache").join("R").join("pkgcache");
+
+    fs::write(
+        &profile,
+        r#"
+.Platform <- .Platform
+.Platform$OS.type <- "windows"
+Sys.info <- function() c(sysname = "Windows")
+tools <- asNamespace("tools")
+if (exists("R_user_dir", envir = tools, inherits = FALSE)) {
+  unlockBinding("R_user_dir", tools)
+  assign("R_user_dir", NULL, envir = tools)
+  lockBinding("R_user_dir", tools)
+}
+requireNamespace <- function(package, ...) {
+  if (identical(package, "rappdirs") || identical(package, "renv")) {
+    return(FALSE)
+  }
+  base::requireNamespace(package, ...)
+}
+"#,
+    )
+    .unwrap();
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        user_profile_pkgcache.join("pkg"),
+        user_profile_reticulate_legacy_cache.join("legacy"),
+        relative_pkgcache.join("pkg"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .current_dir(&workdir)
+        .env("HOME", &home)
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("USERPROFILE", &user_profile)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env_remove("APPDATA")
+        .env_remove("LOCALAPPDATA")
+        .env_remove("R_USER_CACHE_DIR")
+        .env_remove("R_PKG_CACHE_DIR")
+        .env_remove("XDG_CACHE_HOME")
+        .env_remove("RENV_PATHS_CACHE")
+        .env_remove("RENV_PATHS_ROOT")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!user_profile_pkgcache.exists());
+    assert!(!user_profile_reticulate_legacy_cache.exists());
+    assert!(relative_pkgcache.exists());
+    assert_stdout_contains_path(
+        &out,
+        "Clearing pak package cache at: ",
+        &user_profile_pkgcache,
+    );
+    assert_stdout_contains_path(
+        &out,
+        "Clearing reticulate legacy cache at: ",
+        &user_profile_reticulate_legacy_cache,
+    );
+}
+
+#[test]
+fn cache_clean_all_fails_promptly_when_launched_by_uv() {
+    let root = temp_dir("ir-cache-clean-all-uv-parent");
+    let uv = uv_executable();
+    let wheel = root.join("ir_cache_clean_fixture-1.0-py3-none-any.whl");
+    let build = Command::new(python_executable())
+        .args(["-c", r#"
+import sys, zipfile
+files = {
+    'ir_cache_clean_fixture.py': '''import os, subprocess, sys
+def main():
+    return subprocess.call([os.environ['IR_TEST_BIN'], *sys.argv[1:]])
+''',
+    'ir_cache_clean_fixture-1.0.dist-info/METADATA': 'Metadata-Version: 2.1\nName: ir-cache-clean-fixture\nVersion: 1.0\n',
+    'ir_cache_clean_fixture-1.0.dist-info/WHEEL': 'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n',
+    'ir_cache_clean_fixture-1.0.dist-info/entry_points.txt': '[console_scripts]\nir-cache-clean-fixture = ir_cache_clean_fixture:main\n',
+}
+files['ir_cache_clean_fixture-1.0.dist-info/RECORD'] = ''.join(f'{name},,\n' for name in files)
+with zipfile.ZipFile(sys.argv[1], 'w') as wheel:
+    for name, content in files.items():
+        wheel.writestr(name, content)
+"#])
+        .arg(&wheel)
+        .output()
+        .unwrap();
+    assert_success(&build);
+
+    let cache = root.join("ir");
+    let uv_cache = root.join("uv-cache");
+    let renv_cache = root.join("renv-cache");
+    for path in [&cache, &uv_cache, &renv_cache] {
+        fs::create_dir_all(path).unwrap();
+        fs::write(path.join("sentinel"), "cached").unwrap();
+    }
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-parent-profile");
+    let mut command = Command::new(&uv);
+    for (name, value) in ir_with_private_r_caches().get_envs() {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    }
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .env("IR_TEST_BIN", env!("CARGO_BIN_EXE_ir"))
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_CACHE_DIR", &cache)
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("RENV_PATHS_CACHE", &renv_cache)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", &uv)
+        .env("UV_CACHE_DIR", &uv_cache)
+        .env("UV_TOOL_DIR", root.join("uv-tools"))
+        .env("UV_NO_CONFIG", "1")
+        .env("UV_PYTHON_DOWNLOADS", "never")
+        // Bound the broken behavior too; cleanup must override this to avoid waiting.
+        .env("UV_LOCK_TIMEOUT", "1")
+        .args(["tool", "run", "--isolated", "--offline", "--python"])
+        .arg(python_executable())
+        .arg("--from")
+        .arg(&wheel)
+        .args(["ir-cache-clean-fixture", "cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("standalone installation of ir"),
+        "{}",
+        output_text(&out)
+    );
+    for path in [&cache, &uv_cache, &renv_cache] {
+        assert!(path.join("sentinel").exists(), "{}", path.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_limits_uv_lock_waits_across_versions() {
+    for version in ["0.6.3", "0.8.18", "0.8.19", "0.9.15", "0.9.16"] {
+        let root = temp_dir("ir-cache-clean-all-uv-lock-version");
+        let uv = root.join("uv");
+        let cache = root.join("ir");
+        let uv_cache = root.join("uv-cache");
+        let clean_marker = root.join("clean-called");
+        let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-lock-version-profile");
+        write_executable(
+            &uv,
+            r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv %s\n' "$IR_TEST_UV_VERSION" ;;
+  cache:dir) printf '%s\n' "$UV_CACHE_DIR" ;;
+  cache:clean)
+    [ "$UV_LOCK_TIMEOUT" = 0 ] || { echo 'expected zero lock timeout' >&2; exit 3; }
+    touch "$IR_TEST_UV_CLEAN_MARKER" ;;
+  *) exit 2 ;;
+esac
+"#,
+        );
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("sentinel"), "cached").unwrap();
+        let out = ir_with_private_r_caches()
+            .env("IR_CACHE_DIR", &cache)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", &uv)
+            .env("UV_CACHE_DIR", &uv_cache)
+            .env("UV_LOCK_TIMEOUT", "300")
+            .env("IR_TEST_UV_VERSION", version)
+            .env("IR_TEST_UV_CLEAN_MARKER", &clean_marker)
+            .args(["cache", "clean", "--all"])
+            .output()
+            .unwrap();
+        if ["0.8.19", "0.9.15"].contains(&version) {
+            assert!(!out.status.success());
+            assert!(
+                stderr(&out).contains("upgrade uv to 0.9.16 or newer"),
+                "{}",
+                output_text(&out)
+            );
+            assert!(!clean_marker.exists());
+            assert!(cache.join("sentinel").exists());
+        } else {
+            assert_success(&out);
+            assert!(clean_marker.exists());
+            assert!(!cache.exists());
+        }
+    }
+}
+
+#[test]
+fn cache_clean_all_uses_profile_uv_environment_and_working_directory() {
+    let root = temp_dir("ir-cache-clean-profile-uv");
+    let working_directory = root.join("profile-working-directory");
+    let selected = working_directory.join("relative-uv-cache");
+    let unrelated = root.join("unrelated-uv-cache");
+    let profile = root.join("profile.R");
+    for cache in [&selected, &unrelated] {
+        fs::create_dir_all(cache).unwrap();
+        fs::write(cache.join("archive"), "cached").unwrap();
+    }
+    fs::write(
+        &profile,
+        format!(
+            r#"{RAPPDIRS_UNAVAILABLE_PROFILE}
+setwd(Sys.getenv("IR_TEST_PROFILE_WORKING_DIRECTORY"))
+Sys.setenv(UV_CACHE_DIR = "relative-uv-cache")
+Sys.unsetenv("UV_CONFIG_FILE")
+"#,
+        ),
+    )
+    .unwrap();
+
+    let mut command = ir_with_private_r_caches();
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .current_dir(&root)
+        .env("IR_CACHE_DIR", root.join("ir"))
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_PROFILE_WORKING_DIRECTORY", &working_directory)
+        .env("RETICULATE_UV", uv_executable())
+        .env("UV_CACHE_DIR", &unrelated)
+        .env("UV_CONFIG_FILE", root.join("missing-config.toml"))
+        .env("UV_OFFLINE", "1")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!selected.join("archive").exists());
+    assert!(unrelated.join("archive").exists());
+    assert_stdout_contains_path(
+        &out,
+        "Clearing uv cache at: ",
+        Path::new("relative-uv-cache"),
+    );
+}
+
+#[test]
+fn cache_clean_all_matches_uv_tool_configuration_scope() {
+    let uv = uv_executable();
+
+    for project_file in ["uv.toml", "pyproject.toml"] {
+        for cache_source in ["user", "environment", "explicit"] {
+            let root = temp_dir("ir-cache-clean-all-uv-config");
+            let project = root.join("project");
+            let config = root.join("config");
+            let user_cache = root.join("user-cache");
+            let project_cache = root.join("project-cache");
+            let override_cache = project.join("override-cache");
+            let profile = masked_rappdirs_profile("ir-cache-clean-all-uv-config-profile");
+            let cache_setting = |path: &Path| {
+                format!(
+                    "cache-dir = {}\n",
+                    serde_json::to_string(&renviron_path(path)).unwrap()
+                )
+            };
+
+            fs::create_dir_all(config.join("uv")).unwrap();
+            fs::create_dir_all(project.join("tmp")).unwrap();
+            fs::write(config.join("uv/uv.toml"), cache_setting(&user_cache)).unwrap();
+            fs::write(project.join("pyproject.toml"), "[tool.uv.workspace]\n").unwrap();
+            let project_config = if project_file == "pyproject.toml" {
+                format!(
+                    "[tool.uv]\n{}[tool.uv.workspace]\n",
+                    cache_setting(&project_cache)
+                )
+            } else {
+                cache_setting(&project_cache)
+            };
+            fs::write(project.join(project_file), project_config).unwrap();
+            fs::write(
+                project.join("explicit-uv.toml"),
+                cache_setting(&override_cache),
+            )
+            .unwrap();
+            for cache in [&user_cache, &project_cache, &override_cache] {
+                fs::create_dir_all(cache).unwrap();
+                fs::write(cache.join("archive"), "cached").unwrap();
+            }
+
+            let mut command = ir_with_private_r_caches();
+            remove_uv_resolver_env(&mut command);
+            command
+                .current_dir(&project)
+                .env("IR_CACHE_DIR", root.join("ir"))
+                .env("R_USER_CACHE_DIR", root.join("r-user"))
+                .env("R_PROFILE_USER", &profile)
+                .env("RETICULATE_UV", &uv)
+                .env("XDG_CONFIG_HOME", &config)
+                .env("APPDATA", &config)
+                // The neutral workspace must also stop discovery inside this project.
+                .env("TMPDIR", project.join("tmp"))
+                .env("TMP", project.join("tmp"))
+                .env("TEMP", project.join("tmp"))
+                .env("UV_OFFLINE", "1")
+                .args(["cache", "clean", "--all"]);
+            match cache_source {
+                "environment" => {
+                    command.env("UV_CACHE_DIR", "override-cache");
+                }
+                "explicit" => {
+                    command.env("UV_CONFIG_FILE", "explicit-uv.toml");
+                }
+                _ => {}
+            }
+            let out = command.output().unwrap();
+
+            assert_success(&out);
+            assert!(
+                project_cache.join("archive").exists(),
+                "{project_file}, {cache_source}: project cache was removed"
+            );
+            let selected_cache = if cache_source == "user" {
+                &user_cache
+            } else {
+                &override_cache
+            };
+            assert!(
+                !selected_cache.join("archive").exists(),
+                "{project_file}, {cache_source}: selected cache was retained"
+            );
+            let preserved_cache = if cache_source == "user" {
+                &override_cache
+            } else {
+                &user_cache
+            };
+            assert!(preserved_cache.join("archive").exists());
+            let reported_cache = if cache_source == "environment" {
+                Path::new("override-cache")
+            } else {
+                selected_cache
+            };
+            assert_stdout_contains_path(&out, "Clearing uv cache at: ", reported_cache);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_removes_external_uv_cache_only() {
+    let cache_dir = temp_dir("ir-cache-clean-all-external-uv-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-external-uv-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-external-uv-r-pkg");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-external-uv-renv");
+    let bin_dir = temp_dir("ir-cache-clean-all-external-uv-bin");
+    let uv_cache_dir = temp_dir("ir-cache-clean-all-external-uv-cache");
+    let uv_python_dir = temp_dir("ir-cache-clean-all-external-uv-python");
+    let uv_tool_dir = temp_dir("ir-cache-clean-all-external-uv-tool");
+    let uv_log = temp_path("ir-cache-clean-all-external-uv-log", "txt");
+    let uv = bin_dir.join("uv");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-external-uv-profile");
+
+    write_executable(
+        &uv,
+        r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv 0.6.3\n' ;;
+  cache:dir) printf '%s\n' "$IR_TEST_UV_CACHE_DIR" ;;
+  cache:clean) printf 'cache clean\n' > "$IR_TEST_UV_LOG"; /bin/rm -rf "$IR_TEST_UV_CACHE_DIR" ;;
+  python:dir) printf '%s\n' "$IR_TEST_UV_PYTHON_DIR" ;;
+  tool:dir) printf '%s\n' "$IR_TEST_UV_TOOL_DIR" ;;
+  *) echo "unexpected uv args: $*" >&2; exit 2 ;;
+esac
+"#,
+    );
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+        uv_cache_dir.join("archive"),
+        uv_python_dir.join("cpython"),
+        uv_tool_dir.join("tools"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("PATH", prepend_path(&bin_dir))
+        .env_remove("RETICULATE_UV")
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_UV_CACHE_DIR", &uv_cache_dir)
+        .env("IR_TEST_UV_PYTHON_DIR", &uv_python_dir)
+        .env("IR_TEST_UV_TOOL_DIR", &uv_tool_dir)
+        .env("IR_TEST_UV_LOG", &uv_log)
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(fs::read_to_string(&uv_log).unwrap(), "cache clean\n");
+    assert!(!uv_cache_dir.exists());
+    assert!(uv_python_dir.exists());
+    assert!(uv_tool_dir.exists());
+    assert_stdout_contains(
+        &out,
+        &format!("Clearing uv cache at: {}", uv_cache_dir.display()),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("uv Python cache"), "{stdout}");
+    assert!(!stdout.contains("uv tool cache"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_resolves_reticulate_uv_before_clearing_reticulate_cache() {
+    let cache_dir = temp_dir("ir-cache-clean-all-reticulate-uv-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-reticulate-uv-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-reticulate-uv-r-pkg");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-reticulate-uv-renv");
+    let uv_cache_dir = temp_dir("ir-cache-clean-all-reticulate-uv-cache");
+    let uv_python_dir = temp_dir("ir-cache-clean-all-reticulate-uv-python");
+    let uv_tool_dir = temp_dir("ir-cache-clean-all-reticulate-uv-tool");
+    let reticulate_cache = r_user_cache_dir.join("R").join("reticulate");
+    let uv = reticulate_cache.join("bin").join("uv");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-reticulate-uv-profile");
+
+    fs::create_dir_all(uv.parent().unwrap()).unwrap();
+    write_executable(
+        &uv,
+        r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv 0.9.16\n' ;;
+  cache:dir) printf '%s\n' "$IR_TEST_UV_CACHE_DIR" ;;
+  cache:clean) /bin/rm -rf "$IR_TEST_UV_CACHE_DIR" ;;
+  python:dir) printf '%s\n' "$IR_TEST_UV_PYTHON_DIR" ;;
+  tool:dir) printf '%s\n' "$IR_TEST_UV_TOOL_DIR" ;;
+  *) echo "unexpected uv args: $*" >&2; exit 2 ;;
+esac
+"#,
+    );
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+        uv_cache_dir.join("archive"),
+        uv_python_dir.join("cpython"),
+        uv_tool_dir.join("tools"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", &uv)
+        .env("IR_TEST_UV_CACHE_DIR", &uv_cache_dir)
+        .env("IR_TEST_UV_PYTHON_DIR", &uv_python_dir)
+        .env("IR_TEST_UV_TOOL_DIR", &uv_tool_dir)
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!cache_dir.exists());
+    assert!(!reticulate_cache.exists());
+    assert!(!uv_cache_dir.exists());
+    assert!(uv_python_dir.exists());
+    assert!(uv_tool_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_preserves_reticulate_managed_uv_tool_dir_without_external_uv() {
+    let home = temp_dir("ir-cache-clean-all-managed-uv-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-managed-uv-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-managed-uv-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-managed-uv-r-pkg");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-managed-uv-renv");
+    let path_bin = temp_dir("ir-cache-clean-all-managed-uv-path");
+    let uv_tool_dir = temp_dir("ir-cache-clean-all-managed-uv-tool");
+    let uv_log = temp_path("ir-cache-clean-all-managed-uv-log", "txt");
+    let reticulate_cache = r_user_cache_dir.join("R").join("reticulate");
+    let uv = reticulate_cache.join("uv").join("bin").join("uv");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-managed-uv-profile");
+
+    fs::create_dir_all(uv.parent().unwrap()).unwrap();
+    write_executable(
+        &uv,
+        r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv 0.6.3\n' ;;
+  tool:dir) printf 'tool dir\n' > "$IR_TEST_UV_LOG"; printf '%s\n' "$IR_TEST_UV_TOOL_DIR" ;;
+  *) echo "unexpected uv args: $*" >&2; exit 2 ;;
+esac
+"#,
+    );
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+        uv_tool_dir.join("tools"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("PATH", &path_bin)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("RETICULATE_UV", "managed")
+        .env("IR_TEST_UV_TOOL_DIR", &uv_tool_dir)
+        .env("IR_TEST_UV_LOG", &uv_log)
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!reticulate_cache.exists());
+    assert!(uv_tool_dir.exists());
+    assert!(!uv_log.exists());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("uv tool cache"), "{stdout}");
+}
+
+#[test]
+fn cache_clean_all_preserves_external_cache_with_cached_managed_uv() {
+    let root = temp_dir("ir-cache-clean-all-cached-managed-uv");
+    let cache_dir = root.join("ir");
+    let r_user_cache_dir = root.join("r-user");
+    let reticulate_cache = r_user_cache_dir.join("R").join("reticulate");
+    let external_uv_cache = root.join("external-uv");
+    let profile = root.join("profile.R");
+    let uv_name = if cfg!(windows) { "uv.exe" } else { "uv" };
+    let uv = uv_executable();
+    let managed_uv = reticulate_cache.join("uv").join("bin").join(uv_name);
+
+    fs::create_dir_all(managed_uv.parent().unwrap()).unwrap();
+    fs::copy(uv, &managed_uv).unwrap();
+    for cache in [
+        &cache_dir,
+        &external_uv_cache,
+        &reticulate_cache.join("uv/cache"),
+    ] {
+        fs::create_dir_all(cache).unwrap();
+        fs::write(cache.join("archive"), "cached").unwrap();
+    }
+    fs::write(
+        &profile,
+        format!(
+            "{RAPPDIRS_UNAVAILABLE_PROFILE}\noptions(reticulate.uv_binary = structure(Sys.getenv('IR_TEST_MANAGED_UV'), `reticulate-managed` = TRUE))\n"
+        ),
+    )
+    .unwrap();
+
+    let mut command = ir_with_private_r_caches();
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_MANAGED_UV", &managed_uv)
+        .env("UV_CACHE_DIR", &external_uv_cache)
+        .env("UV_NO_CONFIG", "1")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(external_uv_cache.join("archive").exists());
+    assert!(!reticulate_cache.exists());
+    assert!(!cache_dir.exists());
+    assert!(!stdout(&out).contains("Clearing uv cache at:"));
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_finds_external_uv_under_home_local_bin() {
+    let home = temp_dir("ir-cache-clean-all-home-local-uv-home");
+    let cache_dir = temp_dir("ir-cache-clean-all-home-local-uv-ir");
+    let r_user_cache_dir = temp_dir("ir-cache-clean-all-home-local-uv-r-user");
+    let r_pkg_cache_dir = temp_dir("ir-cache-clean-all-home-local-uv-r-pkg");
+    let renv_cache_dir = temp_dir("ir-cache-clean-all-home-local-uv-renv");
+    let path_bin = temp_dir("ir-cache-clean-all-home-local-uv-path");
+    let uv_cache_dir = temp_dir("ir-cache-clean-all-home-local-uv-cache");
+    let uv_python_dir = temp_dir("ir-cache-clean-all-home-local-uv-python");
+    let uv_tool_dir = temp_dir("ir-cache-clean-all-home-local-uv-tool");
+    let uv = home.join(".local").join("bin").join("uv");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-home-local-uv-profile");
+
+    fs::create_dir_all(uv.parent().unwrap()).unwrap();
+    write_executable(
+        &uv,
+        r#"#!/bin/sh
+case "$1:$2" in
+  --version:) printf 'uv 0.6.3\n' ;;
+  cache:dir) printf '%s\n' "$IR_TEST_UV_CACHE_DIR" ;;
+  cache:clean) /bin/rm -rf "$IR_TEST_UV_CACHE_DIR" ;;
+  python:dir) printf '%s\n' "$IR_TEST_UV_PYTHON_DIR" ;;
+  tool:dir) printf '%s\n' "$IR_TEST_UV_TOOL_DIR" ;;
+  *) echo "unexpected uv args: $*" >&2; exit 2 ;;
+esac
+"#,
+    );
+
+    let paths = [
+        cache_dir.join("libraries").join("library").join("pkg"),
+        r_pkg_cache_dir.join("lib").join("pkg"),
+        r_pkg_cache_dir.join("R").join("pkgcache").join("pkg"),
+        renv_cache_dir.join("v5").join("pkg"),
+        r_user_cache_dir.join("R").join("reticulate").join("uv"),
+        legacy_reticulate_cache_dir(&r_user_cache_dir).join("legacy"),
+        uv_cache_dir.join("archive"),
+        uv_python_dir.join("cpython"),
+        uv_tool_dir.join("tools"),
+    ];
+    for path in &paths {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "cached").unwrap();
+    }
+
+    let out = ir_with_private_r_caches()
+        .env("HOME", &home)
+        .env("PATH", &path_bin)
+        .env("IR_RSCRIPT", rscript())
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("R_USER_CACHE_DIR", &r_user_cache_dir)
+        .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
+        .env("RENV_PATHS_CACHE", &renv_cache_dir)
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_UV_CACHE_DIR", &uv_cache_dir)
+        .env("IR_TEST_UV_PYTHON_DIR", &uv_python_dir)
+        .env("IR_TEST_UV_TOOL_DIR", &uv_tool_dir)
+        .env_remove("RETICULATE_UV")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!uv_cache_dir.exists());
+    assert!(uv_python_dir.exists());
+    assert!(uv_tool_dir.exists());
+    assert_stdout_contains(
+        &out,
+        &format!("Clearing uv cache at: {}", uv_cache_dir.display()),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("uv Python cache"), "{stdout}");
+    assert!(!stdout.contains("uv tool cache"), "{stdout}");
+}
+
+fn legacy_reticulate_cache_dir(r_user_cache_dir: &Path) -> std::path::PathBuf {
+    r_user_cache_dir.join("r-reticulate")
+}
+
+fn masked_rappdirs_profile(name: &str) -> TempPath {
+    let profile = temp_path(name, "R");
+    fs::write(&profile, RAPPDIRS_UNAVAILABLE_PROFILE).unwrap();
+    profile
+}
+
+fn legacy_renv_root_dir(data_home: &Path) -> std::path::PathBuf {
+    data_home.join("renv")
+}
+
+#[cfg(unix)]
+fn prepend_path(path: &Path) -> std::ffi::OsString {
+    let path_env = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(path.to_path_buf()).chain(std::env::split_paths(&path_env));
+    std::env::join_paths(paths).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_clean_all_honors_ir_rscript_env() {
+    let cache_dir = temp_dir("ir-cache-clean-all-ir-rscript-cache");
+    let bin_dir = temp_dir("ir-cache-clean-all-ir-rscript-bin");
+    let marker = temp_path("ir-cache-clean-all-ir-rscript-marker", "txt");
+    let rscript = bin_dir.join("Rscript");
+
+    write_executable(
+        &rscript,
+        "#!/bin/sh\ncat >/dev/null\nprintf 'selected\\n' > \"$IR_TEST_MARKER\"\n",
+    );
+
+    let out = ir_with_private_r_caches()
+        .env("IR_CACHE_DIR", &cache_dir)
+        .env("IR_RSCRIPT", &rscript)
+        .env("IR_TEST_MARKER", &marker)
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(fs::read_to_string(&marker).unwrap(), "selected\n");
 }
 
 #[test]

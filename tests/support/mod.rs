@@ -38,9 +38,30 @@ fn executable_file(path: &Path) -> bool {
 
 static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn uv_executable() -> OsString {
+    let uv = command_on_path(if cfg!(windows) { "uv.exe" } else { "uv" })
+        .expect("uv is required for tests; run scripts/install-dev-deps");
+    let output = Command::new(&uv).arg("--version").output().unwrap();
+    assert_success(&output);
+    let text = stdout(&output);
+    let version: Vec<u32> = text
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .split('.')
+        .map(|part| part.parse().unwrap())
+        .collect();
+    assert!(
+        (version[0], version[1], version[2]) >= (0, 9, 16),
+        "uv 0.9.16 or newer is required for tests; upgrade uv (found {})",
+        text.trim()
+    );
+    uv
+}
+
 pub(crate) fn ir() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ir"));
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command
         .env("IR_TOOL_STORE_DIR", test_tool_store_dir())
         .env_remove("IR_PREFER_BINARIES")
@@ -48,16 +69,30 @@ pub(crate) fn ir() -> Command {
     command
 }
 
+pub(crate) fn ir_with_private_r_caches() -> Command {
+    // Destructive cache tests must not remove CI's shared warm cache.
+    let mut command = ir();
+    configure_r_test_caches(&mut command, false);
+    // R startup files can otherwise replace these private paths. Fixtures may
+    // still select their own profiles explicitly after constructing the command.
+    command
+        .env("R_ENVIRON", "")
+        .env("R_ENVIRON_USER", "")
+        .env("R_PROFILE", "")
+        .env("R_PROFILE_USER", "");
+    command
+}
+
 pub(crate) fn rx() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rx"));
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command.env("IR_TOOL_STORE_DIR", test_tool_store_dir());
     command
 }
 
 pub(crate) fn rscript_command() -> Command {
     let mut command = Command::new(rscript());
-    configure_r_test_caches(&mut command);
+    configure_r_test_caches(&mut command, true);
     command
 }
 
@@ -73,7 +108,7 @@ pub(crate) fn remove_uv_resolver_env(command: &mut Command) {
     }
 }
 
-fn configure_r_test_caches(command: &mut Command) {
+fn configure_r_test_caches(command: &mut Command, allow_shared: bool) {
     thread_local! {
         static CACHE: TempPath = temp_dir("ir-test-r-caches");
     }
@@ -96,7 +131,12 @@ fn configure_r_test_caches(command: &mut Command) {
             .env_remove("PKG_CACHE_DIR")
             .env_remove("PKG_METADATA_CACHE_DIR");
     };
-    if let Some(root) = std::env::var_os("IR_TEST_R_CACHE_DIR") {
+    let shared_root = if allow_shared {
+        std::env::var_os("IR_TEST_R_CACHE_DIR")
+    } else {
+        None
+    };
+    if let Some(root) = shared_root {
         assert!(!root.is_empty(), "IR_TEST_R_CACHE_DIR must not be empty");
         configure(command, Path::new(&root));
     } else {
@@ -383,6 +423,22 @@ pub(crate) fn assert_stdout_contains(output: &Output, needle: &str) {
         "missing {needle:?}\n{}",
         output_text(output)
     );
+}
+
+pub(crate) fn assert_stdout_contains_path(output: &Output, prefix: &str, path: &Path) {
+    let text = normalize_cli_path_text(&stdout(output));
+    let needle = normalize_cli_path_text(&format!("{prefix}{}", path.display()));
+    assert!(
+        text.contains(&needle),
+        "missing {needle:?}\n{}",
+        output_text(output)
+    );
+}
+
+fn normalize_cli_path_text(text: &str) -> String {
+    text.replace('\\', "/")
+        .replace("//?/UNC/", "//")
+        .replace("//?/", "")
 }
 
 pub(crate) fn assert_command_success(mut command: Command, label: &str) {

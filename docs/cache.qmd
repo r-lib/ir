@@ -64,12 +64,19 @@ If the refresh fails, the previous cached result is kept.
 $ ir cache dir
 $ ir cache clean
 $ ir cache clean --force
+$ ir cache clean --all
 ```
 
 `ir cache dir` prints the cache root.
 `ir cache clean` removes IR's cache directory, including saved package choices, downloads, resolver tooling, cached R libraries, and records for Python environments.
 It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.
+`--all` also removes the pak, renv, reticulate, and external uv caches that `ir` uses, printing each cache path before it is cleared.
+If downloads were relocated with `RENV_PATHS_SOURCE`, `--all` also removes `<RENV_PATHS_SOURCE>/ir`, including partitions from other IR cache roots.
+Other contents of `RENV_PATHS_SOURCE` remain in place.
+If uv reports that its cache is in use, `--all` fails before clearing caches.
+Stop other uv commands and rerun with a standalone IR installation, outside `uvx` or `uv tool run`.
+uv versions 0.8.19–0.9.15 require an upgrade to 0.9.16 or newer for this operation.
 
 ## Existing duplicate entries
 

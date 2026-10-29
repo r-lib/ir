@@ -19,6 +19,7 @@ $RustupInitUrl = "https://win.rustup.rs"
 $RigLatestReleaseApi = "https://api.github.com/repos/r-lib/rig/releases/latest"
 $SkipRust = $false
 $SkipPython = $false
+$SkipUv = $false
 $SkipQuarto = $false
 $SkipRRelease = $false
 $SkipTestR = $false
@@ -27,6 +28,7 @@ foreach ($component in $Skip) {
     switch ($component) {
         "rust" { $SkipRust = $true }
         "python" { $SkipPython = $true }
+        "uv" { $SkipUv = $true }
         "quarto" { $SkipQuarto = $true }
         "r-release" { $SkipRRelease = $true }
         "test-r" { $SkipTestR = $true }
@@ -167,6 +169,7 @@ function Add-PathIfExists {
 function Add-KnownInstallPaths {
     Add-PathIfExists (Join-Path $HOME ".cargo\bin")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps")
+    Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links")
     Add-PathIfExists (Join-Path $env:LOCALAPPDATA "Programs\Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "Quarto\bin")
     Add-PathIfExists (Join-Path $env:ProgramFiles "R\bin")
@@ -363,6 +366,11 @@ if (-not $SkipPython -and -not (Test-AnyRunnableTool @("python", "python3"))) {
     Add-KnownInstallPaths
 }
 
+if (-not $SkipUv -and -not (Test-Tool "uv")) {
+    Install-WingetPackage "astral-sh.uv"
+    Add-KnownInstallPaths
+}
+
 if (-not (Test-Tool "rig")) {
     Install-Rig
     Add-KnownInstallPaths
@@ -389,6 +397,7 @@ Set-TestRMetadata
 Invoke-Step "cargo" @("--version")
 Invoke-Step "rustc" @("--version")
 Invoke-Step (Get-PythonTool) @("--version")
+Invoke-Step "uv" @("--version")
 Invoke-Step "rig" @("--version")
 Invoke-Step "Rscript" @("--version")
 if (-not $SkipTestR) {
