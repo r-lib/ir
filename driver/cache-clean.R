@@ -29,7 +29,7 @@ ir_clear_cache <- function(label, paths) {
 
     files <- ir_count_files(path)
     cat("Clearing ", label, " at: ", path, "\n", sep = "")
-    unlink(path, recursive = TRUE, force = TRUE)
+    unlink(path.expand(path), recursive = TRUE, force = TRUE, expand = FALSE)
     if (file.exists(path)) {
       stop("failed to remove ", label, " `", path, "`", call. = FALSE)
     }
@@ -328,15 +328,6 @@ ir_external_uv_binary <- function() {
 
 ir_reticulate_cache_dir <- function() {
   ir_r_user_cache_dir("reticulate")
-}
-
-ir_reticulate_managed_uv_binary <- function() {
-  file.path(
-    ir_reticulate_cache_dir(),
-    "uv",
-    "bin",
-    if (.Platform$OS.type == "windows") "uv.exe" else "uv"
-  )
 }
 
 ir_uv_dir <- function(uv, args) {

@@ -4,9 +4,8 @@ mod support;
 
 use support::*;
 
-use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 const RAPPDIRS_UNAVAILABLE_PROFILE: &str = r#"
@@ -1834,6 +1833,39 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
 }
 
 #[test]
+fn cache_clean_all_treats_cache_paths_literally() {
+    let root = temp_dir("ir-cache-clean-all-literal-paths");
+    let cache_dir = root.join("ir");
+    let renv_cache = root.join("renv[1]");
+    let unrelated = root.join("renv1");
+    let profile = masked_rappdirs_profile("ir-cache-clean-all-literal-profile");
+    for configured_path in [renv_cache.as_path(), Path::new("~/renv[1]")] {
+        for path in [&cache_dir, &renv_cache, &unrelated] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("marker"), "cached").unwrap();
+        }
+
+        let out = ir()
+            .env("HOME", &root)
+            .env("R_USER", &root)
+            .env("IR_CACHE_DIR", &cache_dir)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PKG_CACHE_DIR", root.join("pak"))
+            .env("RENV_PATHS_CACHE", configured_path)
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean", "--all"])
+            .output()
+            .unwrap();
+
+        assert!(unrelated.join("marker").exists(), "{}", output_text(&out));
+        assert_success(&out);
+        assert!(!renv_cache.exists());
+        assert!(!cache_dir.exists());
+    }
+}
+
+#[test]
 fn cache_clean_all_preserves_ir_cache_when_r_selection_is_invalid() {
     let cache_dir = temp_dir("ir-cache-clean-all-invalid-r-selection");
     let library = cache_dir.join("libraries").join("library");
@@ -2385,6 +2417,7 @@ esac
 
     let out = ir()
         .env("PATH", prepend_path(&bin_dir))
+        .env_remove("RETICULATE_UV")
         .env("IR_CACHE_DIR", &cache_dir)
         .env("R_USER_CACHE_DIR", &r_user_cache_dir)
         .env("R_PKG_CACHE_DIR", &r_pkg_cache_dir)
@@ -2632,10 +2665,10 @@ fn legacy_renv_root_dir(data_home: &Path) -> std::path::PathBuf {
 }
 
 #[cfg(unix)]
-fn prepend_path(path: &Path) -> OsString {
+fn prepend_path(path: &Path) -> std::ffi::OsString {
     let path_env = std::env::var_os("PATH").unwrap_or_default();
     let paths = std::iter::once(path.to_path_buf()).chain(std::env::split_paths(&path_env));
-    std::env::join_paths(paths.collect::<Vec<PathBuf>>()).unwrap()
+    std::env::join_paths(paths).unwrap()
 }
 
 #[cfg(unix)]
