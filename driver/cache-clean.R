@@ -136,6 +136,15 @@ ir_pak_cache_dirs <- function() {
   ir_pkg_config_path("pkg.cache_dir", "PKG_CACHE_DIR")
 }
 
+ir_download_cache_dirs <- function() {
+  source <- Sys.getenv("RENV_PATHS_SOURCE", "")
+  if (!nzchar(source)) {
+    return(character())
+  }
+
+  file.path(source, "ir")
+}
+
 ir_renv_cache_dirs <- function() {
   cache <- Sys.getenv("RENV_PATHS_CACHE", "")
   if (nzchar(cache)) {
@@ -295,6 +304,7 @@ uv_cache <- ir_uv_dir(uv, c("cache", "dir"))
 ir_clear_cache("pak package cache", ir_pkgcache_cache_dirs())
 ir_clear_cache("pak metadata cache", ir_pkg_metadata_cache_dirs())
 ir_clear_cache("pak cache", ir_pak_cache_dirs())
+ir_clear_cache("ir download cache", ir_download_cache_dirs())
 ir_clear_cache("renv cache", ir_renv_cache_dirs())
 ir_clean_uv_cache(uv, uv_cache)
 ir_clear_cache("reticulate cache", ir_reticulate_cache_dir())

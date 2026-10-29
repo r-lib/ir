@@ -72,6 +72,8 @@ $ ir cache clean --all
 It does not remove installed tool libraries under `IR_TOOL_STORE_DIR`.
 `--force` is accepted and has the same behavior.
 `--all` also removes the pak, renv, reticulate, and external uv caches that `ir` uses, printing each cache path before it is cleared.
+If downloads were relocated with `RENV_PATHS_SOURCE`, `--all` also removes `<RENV_PATHS_SOURCE>/ir`, including partitions from other IR cache roots.
+Other contents of `RENV_PATHS_SOURCE` remain in place.
 
 ## Existing duplicate entries
 

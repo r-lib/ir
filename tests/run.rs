@@ -1826,6 +1826,89 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
 }
 
 #[test]
+fn cache_clean_all_removes_relocated_ir_downloads() {
+    for from_profile in [false, true] {
+        let root = temp_dir("ir-cache-clean-relocated-downloads");
+        let cache = root.join("cache");
+        let source = root.join("source");
+        let downloads = source.join("ir");
+        let profile = root.join("profile.R");
+        let source_setting = if from_profile {
+            format!(
+                "Sys.setenv(RENV_PATHS_SOURCE = {})\n",
+                serde_json::to_string(&renviron_path(&source)).unwrap()
+            )
+        } else {
+            String::new()
+        };
+        fs::write(
+            &profile,
+            format!("{RAPPDIRS_UNAVAILABLE_PROFILE}\n{source_setting}"),
+        )
+        .unwrap();
+        for path in [
+            cache.join("libraries/pkg"),
+            downloads.join("first-plan/url/pkg.tar.gz"),
+            downloads.join("second-plan/url/pkg.tar.gz"),
+            source.join("url/unrelated.tar.gz"),
+            source.join("unrelated"),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "cached").unwrap();
+        }
+
+        let mut command = ir_with_private_r_caches();
+        command
+            .env("IR_CACHE_DIR", &cache)
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean"]);
+        if !from_profile {
+            command.env("RENV_PATHS_SOURCE", &source);
+        }
+
+        assert_success(&command.output().unwrap());
+        assert!(!cache.exists());
+        assert!(downloads.join("first-plan/url/pkg.tar.gz").exists());
+        assert!(downloads.join("second-plan/url/pkg.tar.gz").exists());
+
+        let out = command.arg("--all").output().unwrap();
+        assert_success(&out);
+        assert!(!downloads.exists(), "{}", output_text(&out));
+        assert!(source.join("url/unrelated.tar.gz").exists());
+        assert!(source.join("unrelated").exists());
+        assert_stdout_contains_path(&out, "Clearing ir download cache at: ", &downloads);
+    }
+}
+
+#[test]
+fn cache_clean_all_without_relocated_downloads_preserves_working_directory() {
+    for source_setting in [None, Some("")] {
+        let root = temp_dir("ir-cache-clean-default-downloads");
+        let unrelated = root.join("ir/url/unrelated.tar.gz");
+        fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+        fs::write(&unrelated, "unrelated").unwrap();
+        let profile = masked_rappdirs_profile("ir-cache-clean-default-downloads-profile");
+
+        let mut command = ir_with_private_r_caches();
+        command
+            .current_dir(&root)
+            .env("IR_CACHE_DIR", root.join("cache"))
+            .env("R_USER_CACHE_DIR", root.join("r-user"))
+            .env("R_PROFILE_USER", &profile)
+            .env("RETICULATE_UV", "managed")
+            .args(["cache", "clean", "--all"]);
+        if let Some(value) = source_setting {
+            command.env("RENV_PATHS_SOURCE", value);
+        }
+
+        assert_success(&command.output().unwrap());
+        assert_eq!(fs::read_to_string(unrelated).unwrap(), "unrelated");
+    }
+}
+
+#[test]
 fn cache_clean_all_treats_cache_paths_literally() {
     let root = temp_dir("ir-cache-clean-all-literal-paths");
     let cache_dir = root.join("ir");
