@@ -2128,6 +2128,7 @@ fn cache_clean_all_preserves_default_windows_pak_cache() {
     let home = temp_dir("ir-cache-clean-all-windows-pak-home");
     let cache_dir = temp_dir("ir-cache-clean-all-windows-pak-ir");
     let local_app_data = temp_dir("ir-cache-clean-all-windows-pak-local-app");
+    let xdg_cache_home = temp_dir("ir-cache-clean-all-windows-pak-xdg");
     let profile = temp_path("ir-cache-clean-all-windows-pak-profile", "R");
     let pak_cache = local_app_data.join("R").join("Cache").join("pak");
 
@@ -2150,6 +2151,13 @@ Sys.info <- function() c(sysname = "Windows")
     let paths = [
         cache_dir.join("libraries").join("library").join("pkg"),
         pak_cache.join("lib").join("pkg"),
+        xdg_cache_home.join("R").join("pkgcache").join("pkg"),
+        xdg_cache_home
+            .join("R")
+            .join("renv")
+            .join("cache")
+            .join("pkg"),
+        xdg_cache_home.join("R").join("reticulate").join("uv"),
     ];
     for path in &paths {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2160,6 +2168,7 @@ Sys.info <- function() c(sysname = "Windows")
         .env("HOME", &home)
         .env("IR_CACHE_DIR", &cache_dir)
         .env("LOCALAPPDATA", &local_app_data)
+        .env("XDG_CACHE_HOME", &xdg_cache_home)
         .env("R_PROFILE_USER", &profile)
         .env("RETICULATE_UV", "managed")
         .env_remove("R_PKG_CACHE_DIR")
@@ -2172,6 +2181,9 @@ Sys.info <- function() c(sysname = "Windows")
 
     assert_success(&out);
     assert!(pak_cache.exists());
+    assert!(!xdg_cache_home.join("R").join("pkgcache").exists());
+    assert!(!xdg_cache_home.join("R").join("renv").join("cache").exists());
+    assert!(!xdg_cache_home.join("R").join("reticulate").exists());
 }
 
 #[test]
