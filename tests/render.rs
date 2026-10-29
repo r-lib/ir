@@ -150,6 +150,41 @@ fn docs_run_page_dark_mode_styles_console_blocks() {
 }
 
 #[test]
+fn docs_keep_init_secondary_to_the_core_workflow() {
+    let docs_dir = docs_copy("ir-docs-init-order-project");
+    for (file, core, init) in [
+        (
+            "index.qmd",
+            "Declare package requirements in script frontmatter",
+            "Initialize an existing R script",
+        ),
+        (
+            "index.qmd",
+            "$ ir run script.R",
+            "$ ir init --file script.R",
+        ),
+        (
+            "config.qmd",
+            "- `R` / `Rscript` on `PATH`",
+            "for `ir init` dependency discovery",
+        ),
+        ("reference.qmd", "## `ir preview`", "## `ir init`"),
+    ] {
+        let contents = fs::read_to_string(docs_dir.join(file)).unwrap();
+        let core = contents
+            .find(core)
+            .unwrap_or_else(|| panic!("missing core workflow in {file}\n{contents}"));
+        let init = contents
+            .find(init)
+            .unwrap_or_else(|| panic!("missing ir init in {file}\n{contents}"));
+        assert!(
+            init > core,
+            "ir init should follow the core workflow in {file}\n{contents}"
+        );
+    }
+}
+
+#[test]
 fn docs_reference_keeps_quickstart_low_prominence() {
     let docs_dir = docs_copy("ir-docs-quickstart-reference-project");
     let (output_dir, output_dir_name) =

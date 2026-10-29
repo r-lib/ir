@@ -27,12 +27,14 @@ pub(crate) fn root() -> ClapCommand {
             "  ir run script.R\n",
             "  ir render report.qmd\n",
             "  ir preview report.qmd\n",
+            "  ir init --file script.R\n",
             "  ir tool run btw\n",
             "  ir cache dir",
         )))
         .subcommand(run_command())
         .subcommand(render_command())
         .subcommand(preview_command())
+        .subcommand(init_command())
         .subcommand(tool_command())
         .subcommand(quickstart_command())
         .subcommand(cache_command())
@@ -187,6 +189,20 @@ fn run_command() -> ClapCommand {
 
 fn render_command() -> ClapCommand {
     quarto_command(QuartoCommand::Render)
+}
+
+fn init_command() -> ClapCommand {
+    ClapCommand::new("init")
+        .about("Add ir metadata to an existing script")
+        .after_help(examples_help("  ir init --file analysis.R"))
+        .arg(
+            Arg::new("file")
+                .long("file")
+                .value_name("FILE")
+                .num_args(1)
+                .required(true)
+                .help("Existing R script to modify in place"),
+        )
 }
 
 fn preview_command() -> ClapCommand {

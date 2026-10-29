@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) const INIT_FILE: &str = env!("IR_INIT_DRIVER_FILE");
 pub(crate) const RESOLVE_FILE: &str = env!("IR_RESOLVE_DRIVER_FILE");
 
 pub(crate) fn cached_path(
