@@ -1828,13 +1828,14 @@ fn cache_clean_all_removes_ir_and_tool_caches() {
 }
 
 #[test]
-fn cache_clean_all_resolves_loaded_package_paths_before_deleting_renv() {
+fn cache_clean_all_releases_loaded_packages_before_deleting_renv() {
     let root = temp_dir("ir-cache-clean-loaded-rappdirs");
     let cache = root.join("ir");
     let renv_cache = root.join("renv-cache");
     let library = renv_cache.join("library");
     let legacy_cache = root.join("r-reticulate");
     let profile = root.join("profile.R");
+    let exit_marker = root.join("exited");
     install_fake_r_package(
         &library,
         "rappdirs",
@@ -1851,6 +1852,15 @@ lib <- Sys.getenv("IR_TEST_RAPPDIRS_LIB")
 ns <- loadNamespace("rappdirs", lib.loc = lib)
 stopifnot(normalizePath(getNamespaceInfo(ns, "path"), winslash = "/") ==
           normalizePath(file.path(lib, "rappdirs"), winslash = "/"))
+library(stats)
+backing <- file.path(lib, paste0("ir_cache_fixture", .Platform$dynlib.ext))
+stopifnot(file.copy(getLoadedDLLs()[["stats"]][["path"]], backing))
+dll <- dyn.load(backing)
+stopifnot(normalizePath(dll[["path"]]) == normalizePath(backing))
+.Last <- function() {
+  write(if (file.exists(backing)) "present" else "missing",
+        Sys.getenv("IR_TEST_EXIT_MARKER"), append = TRUE)
+}
 "#,
     )
     .unwrap();
@@ -1866,12 +1876,20 @@ stopifnot(normalizePath(getNamespaceInfo(ns, "path"), winslash = "/") ==
         .env("R_PROFILE_USER", &profile)
         .env("IR_TEST_RAPPDIRS_LIB", &library)
         .env("IR_TEST_LEGACY_ROOT", &root)
+        .env("IR_TEST_EXIT_MARKER", &exit_marker)
         .env("RETICULATE_UV", "managed")
         .args(["cache", "clean", "--all"])
         .output()
         .unwrap();
 
     assert_success(&out);
+    assert_eq!(
+        fs::read_to_string(exit_marker)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["present"]
+    );
     assert!(!renv_cache.exists());
     assert!(!legacy_cache.exists());
     assert!(!cache.exists());
@@ -2644,6 +2662,55 @@ esac
             assert!(!cache.exists());
         }
     }
+}
+
+#[test]
+fn cache_clean_all_uses_profile_uv_environment_and_working_directory() {
+    let root = temp_dir("ir-cache-clean-profile-uv");
+    let working_directory = root.join("profile-working-directory");
+    let selected = working_directory.join("relative-uv-cache");
+    let unrelated = root.join("unrelated-uv-cache");
+    let profile = root.join("profile.R");
+    for cache in [&selected, &unrelated] {
+        fs::create_dir_all(cache).unwrap();
+        fs::write(cache.join("archive"), "cached").unwrap();
+    }
+    fs::write(
+        &profile,
+        format!(
+            r#"{RAPPDIRS_UNAVAILABLE_PROFILE}
+setwd(Sys.getenv("IR_TEST_PROFILE_WORKING_DIRECTORY"))
+Sys.setenv(UV_CACHE_DIR = "relative-uv-cache")
+Sys.unsetenv("UV_CONFIG_FILE")
+"#,
+        ),
+    )
+    .unwrap();
+
+    let mut command = ir_with_private_r_caches();
+    remove_uv_resolver_env(&mut command);
+    let out = command
+        .current_dir(&root)
+        .env("IR_CACHE_DIR", root.join("ir"))
+        .env("R_USER_CACHE_DIR", root.join("r-user"))
+        .env("R_PROFILE_USER", &profile)
+        .env("IR_TEST_PROFILE_WORKING_DIRECTORY", &working_directory)
+        .env("RETICULATE_UV", uv_executable())
+        .env("UV_CACHE_DIR", &unrelated)
+        .env("UV_CONFIG_FILE", root.join("missing-config.toml"))
+        .env("UV_OFFLINE", "1")
+        .args(["cache", "clean", "--all"])
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert!(!selected.join("archive").exists());
+    assert!(unrelated.join("archive").exists());
+    assert_stdout_contains_path(
+        &out,
+        "Clearing uv cache at: ",
+        Path::new("relative-uv-cache"),
+    );
 }
 
 #[test]

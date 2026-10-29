@@ -1172,11 +1172,15 @@ fn unique_path(dir: &Path, prefix: &str, ext: &str) -> PathBuf {
     dir.join(format!("{prefix}-{}-{nanos}.{ext}", std::process::id()))
 }
 
-struct PrivateTempFile {
+pub(crate) struct PrivateTempFile {
     path: PathBuf,
 }
 
 impl PrivateTempFile {
+    pub(crate) fn create(prefix: &str, ext: &str) -> Result<Self, Box<dyn Error>> {
+        Self::write(unique_path(&env::temp_dir(), prefix, ext), "")
+    }
+
     fn write(path: PathBuf, contents: &str) -> Result<Self, Box<dyn Error>> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -1190,7 +1194,7 @@ impl PrivateTempFile {
         Ok(Self { path })
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }

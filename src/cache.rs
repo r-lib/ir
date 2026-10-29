@@ -7,8 +7,9 @@ use std::process::{Command, Stdio};
 
 use clap::ArgMatches;
 
-use crate::runtime::{count_files, ir_cache_dir, rscript_for_env};
+use crate::runtime::{count_files, ir_cache_dir, rscript_for_env, PrivateTempFile};
 
+const TOOL_CACHE_PATHS: &str = include_str!("../driver/cache-paths.R");
 const TOOL_CACHE_CLEANER: &str = include_str!("../driver/cache-clean.R");
 
 pub(crate) fn cmd_cache(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
@@ -67,18 +68,33 @@ fn clear_labeled_cache(label: &str, path: &Path) -> Result<(), Box<dyn Error>> {
 
 fn clean_tool_caches_with_r() -> Result<(), Box<dyn Error>> {
     let rscript = rscript_for_env()?;
-    let mut child = Command::new(&rscript)
-        .arg("-")
-        .stdin(Stdio::piped())
+    let plan = PrivateTempFile::create("ir-cache-clean-plan", "rds")?;
+
+    let mut resolver = Command::new(&rscript);
+    resolver.env("IR_CACHE_CLEAN_PLAN_FILE", plan.path());
+    run_cache_driver(resolver, TOOL_CACHE_PATHS)?;
+
+    // The resolver may load DLLs from the caches. Wait for its exit above, then
+    // delete from a process that cannot load startup files or cached packages.
+    let mut cleaner = Command::new(&rscript);
+    cleaner
+        .args(["--vanilla", "--default-packages=NULL"])
+        .env("IR_CACHE_CLEAN_PLAN_FILE", plan.path());
+    run_cache_driver(cleaner, TOOL_CACHE_CLEANER)
+}
+
+fn run_cache_driver(mut command: Command, script: &str) -> Result<(), Box<dyn Error>> {
+    command.arg("-").stdin(Stdio::piped());
+    let mut child = command
         .spawn()
-        .map_err(|e| cache_cleaner_spawn_error(&rscript, e))?;
+        .map_err(|e| cache_cleaner_spawn_error(command.get_program(), e))?;
 
     let mut stdin = child
         .stdin
         .take()
         .ok_or("failed to open Rscript stdin for cache cleaner")?;
     stdin
-        .write_all(TOOL_CACHE_CLEANER.as_bytes())
+        .write_all(script.as_bytes())
         .map_err(|e| format!("failed to write cache cleaner to Rscript stdin: {e}"))?;
     drop(stdin);
 
