@@ -73,6 +73,13 @@ pub(crate) fn ir_with_private_r_caches() -> Command {
     // Destructive cache tests must not remove CI's shared warm cache.
     let mut command = ir();
     configure_r_test_caches(&mut command, false);
+    // R startup files can otherwise replace these private paths. Fixtures may
+    // still select their own profiles explicitly after constructing the command.
+    command
+        .env("R_ENVIRON", "")
+        .env("R_ENVIRON_USER", "")
+        .env("R_PROFILE", "")
+        .env("R_PROFILE_USER", "");
     command
 }
 
