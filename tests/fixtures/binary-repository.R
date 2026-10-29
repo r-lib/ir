@@ -109,4 +109,14 @@ tools::write_PACKAGES(src, type = "source", latestOnly = FALSE)
 binary_type <- if (.Platform$pkgType == "source") "source" else .Platform$pkgType
 tools::write_PACKAGES(binary, type = binary_type, fields = "Built",
                       addFiles = TRUE, latestOnly = FALSE)
+# write_PACKAGES() leaves archive checksums empty for Windows ZIP binaries.
+# These fixtures model identified artifacts on every platform.
+index <- readRDS(file.path(binary, "PACKAGES.rds"))
+index[, "MD5sum"] <- tools::md5sum(file.path(binary, index[, "File"]))
+stopifnot(!anyNA(index[, "MD5sum"]))
+write.dcf(index, file.path(binary, "PACKAGES"))
+compressed <- gzfile(file.path(binary, "PACKAGES.gz"), "wt")
+write.dcf(index, compressed)
+close(compressed)
+saveRDS(index, file.path(binary, "PACKAGES.rds"))
 writeLines(sub(paste0(root, "/"), "", binary, fixed = TRUE), file.path(root, "binary-path"))
